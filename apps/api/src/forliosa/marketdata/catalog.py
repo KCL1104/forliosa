@@ -141,6 +141,22 @@ KNOWN_SPLITS: dict[str, tuple[tuple[date, D], ...]] = {
     # https://tw.stock.yahoo.com/news/00715l-12-2%E5%8F%8D%E5%88%86%E5%89%B2%E5%89%8D%E6%9C%80%E5%BE%8C%E4%BA%A4%E6%98%93-201000964.html
     # https://udn.com/news/story/123006/8969932
     "00715L.TW": ((date(2025, 12, 10), D(1) / 2),),
+    # 00631L 元大台灣50正2: 1 -> 22; last trade 2026-03-24 (443.15), halted 03-25..03-30, resumed 2026-03-31 (ref 20.14,
+    # opened 19.67). Added in the second round (2026-11-18).
+    # https://wantrich.chinatimes.com/news/20260302900246-420101 https://www.ctee.com.tw/news/20260302700571-430201
+    # https://money.udn.com/money/story/5618/9296771 https://money.udn.com/money/story/5618/9297513
+    # https://news.cnyes.com/news/id/6395543 https://news.cnyes.com/news/id/6326361
+    # https://finance.ettoday.net/news/3141229 https://news.tvbs.com.tw/money/3165850
+    # https://udn.com/news/story/7239/9413624
+    # https://www.businesstoday.com.tw/article/category/183013/post/202603240010/
+    "00631L.TW": ((date(2026, 3, 31), D(22)),),
+    # 00674R 期元大S&P黃金反1: reverse 5 -> 1 (0.2); halted 2026-04-15..04-21, new units from 2026-04-22. Added in the
+    # second round (2026-11-18; one earlier article expected 4 -> 1, every notice after the application says 5).
+    # https://money.udn.com/money/story/5612/9389606 https://money.udn.com/money/story/5618/9388451
+    # https://www.ctee.com.tw/news/20260319700653-430201 https://www.ctee.com.tw/news/20260318701829-430403
+    # https://news.cnyes.com/news/id/6389405 https://uanalyze.com.tw/articles/4173649238
+    # https://wantrich.chinatimes.com/news/20260318900811-420101
+    "00674R.TW": ((date(2026, 4, 22), D(1) / 5),),
     # 00685L 群益臺灣加權正2: 1 -> 24; last trade 2026-06-30 (306), halted 07-01..07-06, resumed 2026-07-07 (ref 12.75).
     # https://www.businesstoday.com.tw/article/category/183013/post/202606300006/
     # https://wantrich.chinatimes.com/news/20260701900193-420401 https://finance.ettoday.net/news/3196520
@@ -153,6 +169,104 @@ KNOWN_SPLITS: dict[str, tuple[tuple[date, D], ...]] = {
     # https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data
     # https://www.sitca.org.tw/MemberK0000/F/03/nav.csv
     "00662.TW": ((date(2026, 11, 17), D(5)),),
+    # -- stocks: par value changes (面額變更) --------------------------------------------------------------------------
+    # A lower par value exchanges each old share for (old par / new par) new shares, paid-in capital and cash unchanged:
+    # a split to every consumer. All added in the second round (2026-11-18).
+    # 6531 愛普: par NT$10 -> 5, 1 -> 2; last trade 2021-10-06, halted 10-07..10-15, new shares from 2021-10-18 (before
+    # the backfill's five years: kept for the demo prices and the record).
+    # https://www.apmemory.com/tw/news/變更面額?cate=all https://wantrich.chinatimes.com/news/20211008900319-420101
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=936c0111-5bf1-43e9-9048-6894d7669350
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=23a903ba-839e-4e12-a60f-a4dd9cffb24e
+    # https://money.udn.com/money/story/5607/5752601 https://news.cnyes.com/news/id/4736202
+    "6531.TW": ((date(2021, 10, 18), D(2)),),
+    # 6415 矽力*-KY: par NT$10 -> 2.5, 1 -> 4; last trade 2022-07-05 (2485), halted 07-06..07-12, new shares from
+    # 2022-07-13 (ref about 621; 95,022,705 -> 380,090,820 shares).
+    # https://www.cna.com.tw/news/afe/202207130029.aspx https://www.cna.com.tw/news/afe/202207060182.aspx
+    # https://news.cnyes.com/news/id/4898421
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=0d67b282-4b47-4408-b11f-29484c96d8d3
+    # https://www.ctee.com.tw/news/20220705700483-430298 https://www.ctee.com.tw/news/20220713700369-430298
+    # https://wantrich.chinatimes.com/news/20220713900382-420101 https://money.udn.com/money/story/5607/6437180
+    "6415.TW": ((date(2022, 7, 13), D(4)),),
+    # 6613 朋億*: par NT$10 -> 5, 1 -> 2; last trade 2022-08-17 (169), new shares from 2022-08-29 (ref half of 169).
+    # The TPEx table was seen in a search result only, never fetched (data policy).
+    # https://ec.ltn.com.tw/article/breakingnews/4037275
+    # https://www.tpex.org.tw/zh-tw/mainboard/listed/flexible-face-value.html
+    # https://wantrich.chinatimes.com/news/20230222900116-420101
+    # https://ww2.money-link.com.tw/TWStock/StockBasic.aspx?SymId=6613
+    "6613.TWO": ((date(2022, 8, 29), D(2)),),
+    # 5536 聖暉*: par NT$10 -> 5, 1 -> 2; last trade 2022-09-06, halted 09-07..09-16, new shares from 2022-09-19.
+    # https://www.ctee.com.tw/news/20220822700816-430298
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=1db50b6f-df26-4977-a9c5-63e8a6fd0b22
+    # https://www.moneydj.com/KMDJ/news/newsviewer.aspx?a=def8dc02-9c98-424a-84b2-77b6ead7383d
+    # https://news.cnyes.com/news/id/4951592 https://wantrich.chinatimes.com/news/20220805900891-420101
+    "5536.TWO": ((date(2022, 9, 19), D(2)),),
+    # 8932 智通*: par NT$10 -> 5, 1 -> 2; last trade 2024-08-28, halted 08-29..09-06, new shares from 2024-09-09. (A
+    # second change, NT$5 -> 2.5 with new shares from 2026-03-09, was reported too and is not checked yet: not listed.)
+    # https://news.cnyes.com/news/id/5698148 https://www.ctee.com.tw/news/20240815701483-430201
+    # https://tw.stock.yahoo.com/news/%E8%82%A1%E7%A5%A8%E9%9D%A2%E9%A1%8D%E8%AE%8A%E6%9B%B4-%E7%B6%A0%E7%95%8C%E7%A7%91%E6%8A%8010%E5%85%83%E8%AE%8A1%E5%85%83-%E6%99%BA%E9%80%9A10%E5%85%83%E8%AE%8A5%E5%85%83-%E6%96%B0%E8%82%A19-9%E6%AB%83%E6%AA%AF%E8%B2%B7%E8%B3%A3-003732857.html
+    # https://winvest.tw/News/Detail/31652
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=cd0946b2-477d-49c3-813d-3f461fa70c70
+    "8932.TWO": ((date(2024, 9, 9), D(2)),),
+    # 5314 世紀: par NT$10 -> 0.5, 1 -> 20; new shares from 2025-03-31 (ref 69.5, or 72.5 = a 3/19 close of 1,450 / 20:
+    # the sources differ, the ratio and the day do not).
+    # https://www.ctee.com.tw/news/20250403700201-430201 https://www.cmoney.tw/notes/note-detail.aspx?nid=930489
+    # https://tw.stock.yahoo.com/news/%E5%8F%B0%E5%8C%97%E8%82%A1%E5%B8%82-%E4%B8%96%E7%B4%80%E5%88%A9%E5%A4%9A%E8%B5%B0%E7%96%B2-%E6%8B%96%E7%B4%AF%E4%B8%8A%E6%9B%9C%E9%9B%86%E5%9C%98%E8%82%A1-034511572.html
+    # https://finance.ettoday.net/news/2911933
+    "5314.TWO": ((date(2025, 3, 31), D(20)),),
+    # 4763 材料*-KY: par NT$10 -> 1, 1 -> 10; last trade 2025-06-18, halted 06-19..06-27, new shares from 2025-06-30.
+    # https://news.cnyes.com/news/id/6012466
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=1ed3b1d1-7ee5-4a73-ac94-f761efc788a9
+    # https://wantrich.chinatimes.com/news/20250604900372-420101
+    # https://tw.stock.yahoo.com/news/%E6%9D%90%E6%96%99-ky%E7%B8%AE%E6%B8%9B%E8%82%A1%E7%A5%A8%E9%9D%A2%E9%A1%8D%E7%88%B21%E5%85%83%E7%8D%B2%E4%BA%A4%E6%98%93%E6%89%80%E6%A0%B8%E5%87%86-%E6%8F%9B%E8%82%A1%E5%BE%8C%E6%96%B0%E8%82%A16-30%E4%B8%8A%E5%B8%82-122459687.html
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=4e4e7d16-80bd-4ef5-a521-35c76320ea2b
+    # https://www.ctee.com.tw/news/20250522701109-430201 https://www.ptt.cc/bbs/Stock/M.1748960680.A.A08.html
+    "4763.TW": ((date(2025, 6, 30), D(10)),),
+    # 2327 國巨: par NT$10 -> 2.5, 1 -> 4; last trade 2025-08-13, halted 08-14..08-22, new shares from 2025-08-25 (ref
+    # 136.5 = 546 / 4).
+    # https://fnc.ebc.net.tw/fncnews/stock/194757 https://news.cnyes.com/news/id/6124639
+    # https://udn.com/news/story/7253/8904616 https://udn.com/news/story/7253/8962234
+    # https://wantrich.chinatimes.com/news/20250825900233-420101
+    # https://tw.stock.yahoo.com/news/%E5%9C%8B%E5%B7%A8%E8%82%A1%E7%A5%A8%E9%9D%A2%E9%A1%8D-%E6%8B%86%E5%9B%9B-8-13%E7%82%BA%E8%88%8A%E8%82%A1%E6%9C%80%E5%BE%8C%E4%BA%A4%E6%98%93%E6%97%A5-8-233627913.html
+    # https://www.sinotrade.com.tw/richclub/hotstock/%E5%9C%8B%E5%B7%A8-2327-%E8%82%A1%E7%A5%A8%E5%88%86%E5%89%B2%E4%B8%80%E6%8B%86%E5%9B%9B-%E7%9B%B8%E9%97%9C%E6%97%A5%E7%A8%8B-%E5%BE%8C%E7%BA%8C%E5%8F%AF%E8%83%BD%E5%BD%B1%E9%9F%BF%E4%B8%80%E6%96%87%E6%8E%8C%E6%8F%A1-%E8%82%A1%E5%B8%82%E8%A9%B1%E9%A1%8C-689ab5417c32b44d13cd847b
+    "2327.TW": ((date(2025, 8, 25), D(4)),),
+    # 8937 合騏: par NT$10 -> 2.5, 1 -> 4; last trade 2026-03-31, halted 04-01..04-10, new shares from 2026-04-13.
+    # https://money.udn.com/money/story/5607/9393220 https://udn.com/news/story/7254/9393220
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=701385e3-d1df-43e7-b800-527a0dd87983
+    # https://tw.stock.yahoo.com/news/%E5%90%88%E9%A8%8F-%E5%9B%A0%E8%82%A1%E7%A5%A8%E9%9D%A2%E9%A1%8D%E8%AE%8A%E6%9B%B4%E6%8F%9B%E7%99%BC%E4%B9%8B%E6%99%AE%E9%80%9A%E8%82%A14-13%E8%B5%B7%E6%81%A2%E5%BE%A9%E5%9C%A8%E8%AD%89%E5%88%B8%E5%95%86%E7%87%9F%E6%A5%AD%E8%99%95%E6%89%80%E8%B2%B7%E8%B3%A3-003000205.html
+    # https://tw.stock.yahoo.com/news/%E5%90%88%E9%A8%8F-%E5%85%AC%E5%91%8A%E6%9C%AC%E5%85%AC%E5%8F%B8%E8%82%A1%E7%A5%A8%E9%9D%A2%E9%A1%8D%E7%94%B1-%E6%96%B0%E5%8F%B0%E5%B9%A310%E5%85%83-%E8%AE%8A%E6%9B%B4%E7%82%BA-%E6%96%B0%E5%8F%B0%E5%B9%A32-230300853.html
+    # https://news.cnyes.com/news/id/6335428
+    "8937.TWO": ((date(2026, 4, 13), D(4)),),
+    # 3086 華義*: par NT$10 -> 1, 1 -> 10; last trade 2026-04-08, halted 04-09..04-17, new shares from 2026-04-20.
+    # https://wantrich.chinatimes.com/news/20260317900500-420101
+    # https://wantrich.chinatimes.com/news/20260313900443-420101
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=e1cccd39-47a0-4432-9836-1c69e8100ab7
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=bdf6b760-c4fd-4a85-a711-cfda8af0be56
+    # https://news.cnyes.com/news/id/6423032 https://news.cnyes.com/news/id/6405854
+    # https://tw.stock.yahoo.com/news/%E8%8F%AF%E7%BE%A9%E5%9B%A0%E8%82%A1%E7%A5%A8%E9%9D%A2%E9%A1%8D%E8%AE%8A%E6%9B%B4%E6%8F%9B%E7%99%BC%E4%B9%8B%E6%96%B0%E8%82%A14-20%E8%B5%B7%E9%96%8B%E5%A7%8B%E4%B8%8A%E6%AB%83%E8%B2%B7%E8%B3%A3-001600565.html
+    # https://wealth.firstbank.com.tw/investment-tips/trend-insight/news/news-detail?id=%7BA0B05F7C-0B00-4EF8-A218-1358C8DEA2E5%7D
+    "3086.TWO": ((date(2026, 4, 20), D(10)),),
+    # 5904 寶雅*: par NT$10 -> 1, 1 -> 10; last trade 2026-07-29, halted 07-30..08-07, new shares from 2026-08-10 (ref
+    # 72, opened limit-up at 79.2).
+    # https://udn.com/news/story/7252/9681387 https://www.ctee.com.tw/news/20260703700108-439901
+    # https://money.udn.com/money/story/11074/9655165 https://udn.com/news/story/7254/9595581
+    # https://wantrich.chinatimes.com/news/20260702900004-420101
+    # https://www.sinotrade.com.tw/richclub/hotstock/-6a7956ce40c87c0b5724cd00
+    # https://money.udn.com/money/story/11074/9596272
+    "5904.TWO": ((date(2026, 8, 10), D(10)),),
+    # 4747 強生*: par NT$10 -> 5, 1 -> 2; last trade 2026-08-19, halted 08-20..08-28, new shares from 2026-08-31.
+    # https://www.ctee.com.tw/news/20260804700607-430201 https://www.setn.com/news/1883764
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=527ddbda-0985-4164-9690-cbbbcdcde56a
+    # https://tw.stock.yahoo.com/news/%E5%BC%B7%E7%94%9F-%E5%9B%A0%E8%82%A1%E7%A5%A8%E9%9D%A2%E9%A1%8D%E8%AE%8A%E6%9B%B4%E6%8F%9B%E7%99%BC%E4%B9%8B%E6%96%B0%E8%82%A18-31%E8%B5%B7%E6%81%A2%E5%BE%A9%E4%B8%8A%E6%AB%83%E8%B2%B7%E8%B3%A3-003400109.html
+    # https://www.ctee.com.tw/news/20260723701400-430504
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=36cd2907-84a3-4e9b-a5b8-6e460d2727ef
+    "4747.TWO": ((date(2026, 8, 31), D(2)),),
+    # 6949 (創新板, TWSE): par NT$10 -> 0.5, 1 -> 20; last trade 2026-08-26 (1,490), halted 08-27..09-04, new shares
+    # from 2026-09-07 (ref 74.5; 65,580,050 -> 1,311,601,000 shares).
+    # https://www.ctee.com.tw/news/20260829700441-430504 https://www.ctee.com.tw/news/20260826700260-430201
+    # https://udn.com/news/story/7252/9714653 https://udn.com/news/story/7252/9738591
+    # https://money.udn.com/money/story/5710/9714669 https://finance.ettoday.net/news/3232771
+    # https://fubon-ebrokerdj.fbs.com.tw//z/zc/zcv/zcvz/zcvz_7CCA2F84-159E-478D-9897-B97CE3E0BCC7.djhtm
+    "6949.TW": ((date(2026, 9, 7), D(20)),),
     # -- stocks: capital reductions ----------------------------------------------------------------------------------
     # 2363 矽統: 35 % cash reduction, 650 new per 1,000 old, NT$3.5 back per old share; old shares last 2024-07-18,
     # new shares from 2024-07-29.
@@ -190,6 +304,29 @@ KNOWN_SPLITS: dict[str, tuple[tuple[date, D], ...]] = {
     # https://news.cnyes.com/news/id/6135764 https://wantrich.chinatimes.com/news/20251124900511-420101
     # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=ea09d29b-17ff-4ac5-a869-8fa22bc8ef9a
     "4174.TWO": ((date(2026, 2, 3), D("0.5")),),
+    # Second round (2026-11-18):
+    # 2603 長榮: 60 % cash reduction, 400 new per 1,000 old, NT$6 back per old share; old shares last 2022-09-06
+    # (80.8), halted 09-07..09-16, new shares from 2022-09-19 (ref 187 = (80.8 − 6) / 0.4).
+    # https://www.cna.com.tw/news/afe/202209190033.aspx https://udn.com/news/story/7252/6622487
+    # https://udn.com/news/story/7252/6593296
+    # https://finance.technews.tw/2022/08/23/evergreen-marine-60-capital-reduction-in-cash/
+    # https://ctee.com.tw/news/stocks/702884.html https://news.cnyes.com/news/id/4957443
+    # https://news.cnyes.com/news/id/4954183
+    "2603.TW": ((date(2022, 9, 19), D("0.4")),),
+    # 2409 友達: 20 % cash reduction, 800 new per 1,000 old, NT$2 back per old share; old shares last 2022-09-28,
+    # halted 09-29..10-07, new shares from 2022-10-11 (closed 16.45, +0.60); the NT$1 cash dividend is separate.
+    # https://news.cnyes.com/news/id/4932539 https://anuenews.cnyes.com/news/id/4975501
+    # https://ctee.com.tw/news/stocks/717176.html https://www.cmoney.tw/notes/note-detail.aspx?nid=499660
+    # https://wantrich.chinatimes.com/news/20221006900403-420101 https://www.gvm.com.tw/article/94249
+    "2409.TW": ((date(2022, 10, 11), D("0.8")),),
+    # 3481 群創: 9.5 % cash reduction, 905 new per 1,000 old, NT$0.95 back per old share; old shares last 2022-09-28
+    # (10.45), halted 09-29..10-07, new shares from 2022-10-11 (ref 10.50, closed 11.45). Not its other reductions
+    # (NT$1.2 back with new shares from 2024-08-26; one with NT$0.5 back in 2023): not checked yet, not listed.
+    # https://ec.ltn.com.tw/article/breakingnews/4082094 https://www.ctee.com.tw/news/20221011701022-439901
+    # https://www.ctee.com.tw/news/20221012700291-430203 https://money.udn.com/money/story/122229/6672823
+    # https://ec.ltn.com.tw/article/breakingnews/4072411 https://news.cnyes.com/news/id/4939797
+    # https://www.bnext.com.tw/article/69122/innlox-capital-reduction-may11
+    "3481.TW": ((date(2022, 10, 11), D("0.905")),),
 }
 
 # The capital reductions among KNOWN_SPLITS: (symbol, first day at the new price) -> cash returned per old share
@@ -202,6 +339,9 @@ KNOWN_REDUCTIONS: dict[tuple[str, date], D] = {
     ("2323.TW", date(2026, 10, 12)): D(1),
     ("9945.TW", date(2023, 9, 25)): D(1),
     ("4174.TWO", date(2026, 2, 3)): D(0),
+    ("2603.TW", date(2022, 9, 19)): D(6),
+    ("2409.TW", date(2022, 10, 11)): D(2),
+    ("3481.TW", date(2022, 10, 11)): D("0.95"),
 }
 
 _Q = (3, 6, 9, 12)

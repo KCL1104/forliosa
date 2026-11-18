@@ -52,10 +52,28 @@ VERIFIED = {
     "2323.TW": (date(2026, 10, 12), D("0.9")),
     "9945.TW": (date(2023, 9, 25), D("0.9")),
     "4174.TWO": (date(2026, 2, 3), D("0.5")),
+    # the second round (2026-11-18): an ETF split and reverse split, par value changes (面額變更), cash reductions
+    "00631L.TW": (date(2026, 3, 31), D(22)),
+    "00674R.TW": (date(2026, 4, 22), D(1) / 5),
+    "6531.TW": (date(2021, 10, 18), D(2)),
+    "6415.TW": (date(2022, 7, 13), D(4)),
+    "6613.TWO": (date(2022, 8, 29), D(2)),
+    "5536.TWO": (date(2022, 9, 19), D(2)),
+    "8932.TWO": (date(2024, 9, 9), D(2)),
+    "5314.TWO": (date(2025, 3, 31), D(20)),
+    "4763.TW": (date(2025, 6, 30), D(10)),
+    "2327.TW": (date(2025, 8, 25), D(4)),
+    "8937.TWO": (date(2026, 4, 13), D(4)),
+    "3086.TWO": (date(2026, 4, 20), D(10)),
+    "5904.TWO": (date(2026, 8, 10), D(10)),
+    "4747.TWO": (date(2026, 8, 31), D(2)),
+    "6949.TW": (date(2026, 9, 7), D(20)),
+    "2603.TW": (date(2022, 9, 19), D("0.4")),
+    "2409.TW": (date(2022, 10, 11), D("0.8")),
+    "3481.TW": (date(2022, 10, 11), D("0.905")),
 }
-# Candidates that could not be checked against two sources (2026-11-18): none of them may slip in
-REJECTED = ("00631L", "00674R", "6531", "6415", "6613", "6548", "5536", "3093", "6763", "8932", "8476",
-            "5314", "4763", "6919", "2327", "8937", "3086", "5904", "4747", "6949", "2603", "2409", "3481", "2352")
+# Candidates still not checked against two sources after two rounds (2026-11-18): none of them may slip in
+REJECTED = ("6548", "3093", "6763", "8476", "6919", "2352")
 
 
 class Listed(BaseProvider):
@@ -66,7 +84,10 @@ class Listed(BaseProvider):
     def instruments(self):
         return [_tw("0052", "富邦科技", "TWSE", "etf", "ETF"), _tw("00632R", "元大台灣50反1", "TWSE", "etf", "ETF"),
                 _tw("00662", "富邦NASDAQ", "TWSE", "etf", "ETF"), _tw("2363", "矽統", "TWSE", "stock", "半導體業"),
-                _tw("2323", "中環", "TWSE", "stock", "光電業")]
+                _tw("2323", "中環", "TWSE", "stock", "光電業"), _tw("00631L", "元大台灣50正2", "TWSE", "etf", "ETF"),
+                _tw("00674R", "期元大S&P黃金反1", "TWSE", "etf", "ETF"),
+                _tw("2327", "國巨", "TWSE", "stock", "電子零組件業"), _tw("2603", "長榮", "TWSE", "stock", "航運業"),
+                _tw("3481", "群創", "TWSE", "stock", "光電業")]
 
 
 def price(symbol: str, d: date, close: str | D, source: str = HISTORY_SOURCE, volume: int = 1_000_000) -> PriceDaily:
@@ -163,7 +184,8 @@ def test_the_catalogue_lists_the_verified_splits_in_0050s_convention():
     # the capital reductions among them, with the cash each returns per old share (none for 4174's, to offset losses)
     cash = {("2363.TW", date(2024, 7, 29)): D("3.5"), ("2371.TW", date(2025, 6, 23)): D("0.5"),
             ("2323.TW", date(2026, 10, 12)): D(1), ("9945.TW", date(2023, 9, 25)): D(1),
-            ("4174.TWO", date(2026, 2, 3)): D(0)}
+            ("4174.TWO", date(2026, 2, 3)): D(0), ("2603.TW", date(2022, 9, 19)): D(6),
+            ("2409.TW", date(2022, 10, 11)): D(2), ("3481.TW", date(2022, 10, 11)): D("0.95")}
     assert cash == KNOWN_REDUCTIONS
     assert all(KNOWN_SPLITS[s] == ((when, KNOWN_SPLITS[s][0][1]),) and KNOWN_SPLITS[s][0][1] < 1
                for s, when in KNOWN_REDUCTIONS)
@@ -180,13 +202,17 @@ def test_how_the_notes_say_each_ratio():
         "每 1,000 股換成 650 股", "每 1,000 股換成 950 股", "每 1,000 股換成 900 股"]
     assert split_how(D(2) / 3) == "1.5 股合成 1 股" and split_how(D("1.5")) == "1 股拆成 1.5 股"  # as before
     assert reduction_how(D("0.5")) == "每 1,000 股換成 500 股"  # 4174: a chart never says 「2 股合成 1 股」 of it
+    # the second round: 00631L, 00674R, a par value change (2327 國巨, NT$10 -> 2.5), the three 2022 reductions
+    assert [split_how(r) for r in (D(22), D(1) / 5, D(4), D("0.4"), D("0.8"), D("0.905"))] == [
+        "1 股拆成 22 股", "5 股合成 1 股", "1 股拆成 4 股", "每 1,000 股換成 400 股", "每 1,000 股換成 800 股",
+        "每 1,000 股換成 905 股"]
 
 
 def test_the_demo_prices_drop_on_a_known_split_like_0050s():
     """Personal mode's synthetic prices drop by the ratio on a known split's day, so a benchmark or chart that applies
     the split there stays continuous (a ×7 benchmark jump otherwise)."""
     demo = DemoProvider()
-    for symbol in ("0052.TW", "00632R.TW", "0050.TW"):
+    for symbol in ("0052.TW", "00632R.TW", "0050.TW", "00631L.TW", "00674R.TW", "2327.TW", "2603.TW"):
         (day, ratio), = KNOWN_SPLITS[symbol]
         candles = demo.history(symbol, day - timedelta(days=10), day + timedelta(days=10))
         i = next(i for i, c in enumerate(candles) if c.t == day)
@@ -265,6 +291,84 @@ def test_a_reduction_near_par_is_told_by_its_cash(client, engine, personal, fold
     assert close(client, "2323.TW", date(2026, 10, 12)) == (10.9, True)
 
 
+# -- the second round (2026-11-18) ------------------------------------------------------------------------------------
+def test_the_second_rounds_etf_split_and_reverse_split_are_multiplied_back(client, engine, personal):
+    """00631L 元大台灣50正2 (1 -> 22: last traded 2026-03-24 at 443.15, back on 03-31 near 20.14) and 00674R
+    期元大S&P黃金反1 (5 -> 1: last traded 04-14, back on 04-22), stored as Yahoo scales them. 00631L's halt repeats
+    the old price with nothing traded (a vendor dating the split by the halt's first day): the check reads the last
+    day that traded, so the days before are still multiplied back."""
+    add(engine, [
+        price("00631L.TW", date(2026, 3, 2), "19.5"), price("00631L.TW", date(2026, 3, 24), "20.143182"),
+        *halted("00631L.TW", date(2026, 3, 25), date(2026, 3, 30), "443.15"),
+        price("00631L.TW", date(2026, 3, 31), "19.67"),
+        price("00631L.TW", date(2026, 11, 12), "25.1", "twse-openapi"),
+        price("00674R.TW", date(2026, 4, 1), "28.3"), price("00674R.TW", date(2026, 4, 14), "28"),
+        *halted("00674R.TW", date(2026, 4, 15), date(2026, 4, 21), "28"),
+        price("00674R.TW", date(2026, 4, 22), "28.5"),
+        price("00674R.TW", date(2026, 11, 12), "26.2", "twse-openapi"),
+    ])
+    assert close(client, "00631L.TW", date(2026, 3, 24)) == (443.15, True)  # 20.143182 × 22, as traded that day
+    assert close(client, "00631L.TW", date(2026, 3, 2)) == (429.0, True)  # 19.5 × 22
+    assert close(client, "00631L.TW", date(2026, 3, 31)) == (19.67, True)  # the first day at the new price
+    assert close(client, "00674R.TW", date(2026, 4, 14)) == (5.6, True)  # 28 ÷ 5: 5 old units became 1
+    assert close(client, "00674R.TW", date(2026, 4, 1)) == (5.66, True)
+    assert close(client, "00674R.TW", date(2026, 4, 22)) == (28.5, True)
+
+
+@pytest.mark.parametrize("folded", [True, False])
+def test_a_par_value_change_is_a_split_of_old_par_over_new(client, engine, personal, folded):
+    """2327 國巨 cut its par from NT$10 to NT$2.5 (one old share for four new): last traded 2025-08-13 at 546, halted
+    08-14..08-22 (the halt's rows repeat 546, nothing traded), new shares from 08-25 at a reference of 136.5. Rows
+    Yahoo scaled by 4 are multiplied back; rows as traded are left as they are."""
+    k = 4 if folded else 1
+    add(engine, [price("2327.TW", date(2025, 8, 1), D(520) / k), price("2327.TW", date(2025, 8, 13), D(546) / k),
+                 *halted("2327.TW", date(2025, 8, 14), date(2025, 8, 22), "546"),
+                 price("2327.TW", date(2025, 8, 25), "143"),
+                 price("2327.TW", date(2026, 11, 12), "250", "twse-openapi")])
+    assert close(client, "2327.TW", date(2025, 8, 13)) == (546.0, True)
+    assert close(client, "2327.TW", date(2025, 8, 1)) == (520.0, True)
+    assert close(client, "2327.TW", date(2025, 8, 25)) == (143.0, True)
+
+
+@pytest.mark.parametrize("folded", [True, False])
+def test_a_large_cash_reduction_is_multiplied_back_only_where_folded(client, engine, personal, folded):
+    """2603 長榮 2022 (400 new per 1,000 old, NT$6 back): last traded 09-06 at 80.8, halted 09-07..09-16 (rows on the
+    old price, nothing traded), new shares from 09-19 at (80.8 − 6) / 0.4 = 187."""
+    before, earlier = (D("202"), D("187.5")) if folded else (D("80.8"), D("75"))  # Yahoo's: ÷ 0.4
+    add(engine, [price("2603.TW", date(2022, 8, 1), earlier), price("2603.TW", date(2022, 9, 6), before),
+                 *halted("2603.TW", date(2022, 9, 7), date(2022, 9, 16), "80.8"),
+                 price("2603.TW", date(2022, 9, 19), "187"),
+                 price("2603.TW", date(2026, 11, 12), "200", "twse-openapi")])
+    assert close(client, "2603.TW", date(2022, 9, 6)) == (80.8, True)
+    assert close(client, "2603.TW", date(2022, 8, 1)) == (75.0, True)
+    assert close(client, "2603.TW", date(2022, 9, 19)) == (187.0, True)
+
+
+@pytest.mark.parametrize(("folded", "first"), [(True, "10.50"), (False, "10.50"), (False, "11.45"), (True, "11.45")])
+def test_a_second_reduction_near_par_is_never_worse_than_without_it(client, engine, personal, monkeypatch, folded,
+                                                                   first):
+    """3481 群創 2022 (905 new per 1,000 old, NT$0.95 back) traded at 10.45, near par: the new shares' reference was
+    (10.45 − 0.95) / 0.905 = 10.50. On a level first day the check tells rows Yahoo scaled (10.45 / 0.905 ≈ 11.55)
+    from rows as traded, as for 2323. The real first day closed 9.05 % up (11.45): rows as traded are still told (it
+    takes a fall of some 5 % to fool the check), rows Yahoo scaled are not (a rise over some 5.6 % does) and are then
+    left as stored — off by 1/0.905, exactly as without the entry, never worse."""
+    before = D("11.55") if folded else D("10.45")
+    add(engine, [price("3481.TW", date(2022, 9, 1), before), price("3481.TW", date(2022, 9, 28), before),
+                 *halted("3481.TW", date(2022, 9, 29), date(2022, 10, 7), before),
+                 price("3481.TW", date(2022, 10, 11), first),
+                 price("3481.TW", date(2026, 11, 12), "15", "twse-openapi")])
+    got = close(client, "3481.TW", date(2022, 9, 28))
+    assert got[1] is True
+    if folded and first == "11.45":
+        assert got[0] == 11.55  # as stored: the known limit of the check
+    else:
+        assert got[0] == pytest.approx(10.45, abs=0.005)  # the price as traded (11.55 × 0.905 = 10.4528)
+    monkeypatch.setattr(md_service, "KNOWN_SPLITS", {s: v for s, v in KNOWN_SPLITS.items() if s != "3481.TW"})
+    without = close(client, "3481.TW", date(2022, 9, 28))
+    assert without == (float(before), True)
+    assert abs(got[0] - 10.45) <= abs(without[0] - 10.45)
+
+
 # -- charts -----------------------------------------------------------------------------------------------------------
 def draw(md: MarketData, engine, **args) -> dict:
     with Session(engine) as db:
@@ -315,6 +419,22 @@ def test_a_capital_reduction_is_never_called_a_split(engine, commercial):
     card = draw(commercial, engine, kind="compare", symbols=["2363", "2323"], range="5Y")
     assert "矽統 2024/07/29 減資，漲跌幅已調整" in card["notes"]
     assert not any("股票分割" in n for n in card["notes"])
+
+
+def test_a_par_value_change_is_a_split_and_a_cash_reduction_a_reduction_on_the_charts(engine, commercial):
+    """Where the line jumps (Yahoo's rows as traded): 2327 國巨's par value change is described as the split it is,
+    2603 長榮's cash reduction as 減資 with its ratio per thousand shares."""
+    add(engine, [*series("2327.TW", date(2024, 6, 3), date(2025, 8, 13), "500", "546"),
+                 *series("2327.TW", date(2025, 8, 25), date(2026, 11, 11), "143", "250"),
+                 *[price("2327.TW", d, "250", "twse-openapi") for d in ARCHIVE],
+                 *series("2603.TW", date(2022, 6, 1), date(2022, 9, 6), "75", "80.8"),
+                 *series("2603.TW", date(2022, 9, 19), date(2026, 11, 11), "187", "200"),
+                 *[price("2603.TW", d, "200", "twse-openapi") for d in ARCHIVE]])
+    card = draw(commercial, engine, kind="price", symbols=["2327"], range="5Y")
+    assert "2025/08/25 股票分割（1 股拆成 4 股），之前是當時的價格" in card["notes"]
+    card = draw(commercial, engine, kind="price", symbols=["2603"], range="5Y")
+    assert "2022/09/19 減資（每 1,000 股換成 400 股），之前是當時的價格" in card["notes"]
+    assert not any("股票分割（" in n for n in card["notes"])  # (the backfill's own note still says what Yahoo does)
 
 
 # -- the ledger -------------------------------------------------------------------------------------------------------
