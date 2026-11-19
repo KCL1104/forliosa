@@ -98,14 +98,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
     </Tooltip>
   )
 
-  // 「深度搜尋」：文字的切換鈕，不放圖示。關著時 1px 控制框（和「篩選」同一種小格），開著時選取語法 (b)（淡墨底＋墨色字）
+  // 「深度搜尋」：文字的切換鈕，不放圖示。關著時 1px 控制框（和「篩選」同一種小格），開著時是單獨開關的實心記號（sel-toggle）
   const deepToggle =
     deepCost === null ? null : (
       <button
         type="button"
         aria-pressed={deep}
         onClick={() => setDeep(!deep)}
-        className={cn("press sel-chip inline-flex shrink-0 items-center rounded-sm px-2.5 text-ink-2", !deep && "shadow-[inset_0_0_0_1px_var(--ctl)]", variant === "panel" ? "h-9 text-sm pointer-coarse:h-11" : "h-11 text-base")}
+        className={cn("press sel-toggle inline-flex shrink-0 items-center rounded-sm px-2.5 text-ink-2", !deep && "shadow-[inset_0_0_0_1px_var(--ctl)]", variant === "panel" ? "h-9 text-sm pointer-coarse:h-11" : "h-11 text-base")}
       >
         深度搜尋
       </button>
@@ -138,7 +138,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
             type="submit"
             aria-label="送出"
             aria-disabled={empty}
-            className={cn("press grid size-11 shrink-0 place-items-center rounded-sm", empty ? "bg-hov text-ink-2 dark:bg-transparent dark:shadow-[inset_0_0_0_1px_var(--ctl)]" : "bg-act text-act-fg")}
+            className={cn("press grid size-11 shrink-0 place-items-center rounded-sm", empty ? "bg-hov text-ink-2" : "bg-act text-act-fg")}
           >
             <ArrowUpIcon aria-hidden className="size-5" />
           </button>
@@ -199,7 +199,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
               type="submit"
               aria-label="送出"
               disabled={empty}
-              className="press grid size-9 place-items-center rounded-sm bg-act text-act-fg hover:bg-act-hover disabled:bg-hov disabled:text-ink-2 dark:disabled:bg-transparent dark:disabled:shadow-[inset_0_0_0_1px_var(--ctl)] pointer-coarse:size-11"
+              className="press grid size-9 place-items-center rounded-sm bg-act text-act-fg hover:bg-act-hover disabled:bg-hov disabled:text-ink-2 pointer-coarse:size-11"
             >
               <ArrowUpIcon aria-hidden className="size-[18px]" />
             </button>

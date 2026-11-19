@@ -43,7 +43,7 @@ export function ReturnChart({
         <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id="mineFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--chart-mine)" stopOpacity={0.08} />
+              <stop offset="0%" stopColor="var(--chart-mine)" stopOpacity={0.1} />
               <stop offset="100%" stopColor="var(--chart-mine)" stopOpacity={0} />
             </linearGradient>
           </defs>

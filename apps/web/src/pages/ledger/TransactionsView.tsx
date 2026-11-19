@@ -120,10 +120,10 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
           <button
             type="button"
             onClick={() => void navigate({ to: "/", search: { view: "transactions" }, replace: true })}
-            // 篩選中＝選取語法 (b)；再按一次（或按 ×）取消
+            // 篩選中＝單獨開關的實心記號（sel-toggle）；再按一次（或按 ×）取消
             aria-pressed="true"
             title="取消篩選"
-            className="press sel-chip inline-flex h-8 items-center gap-1.5 rounded-sm px-2.5 text-sm text-ink-2 pointer-coarse:h-11"
+            className="press sel-toggle inline-flex h-8 items-center gap-1.5 rounded-sm px-2.5 text-sm text-ink-2 pointer-coarse:h-11"
           >
             只看 {codeOf(symbol)}
             <XIcon aria-hidden className="size-3.5" />

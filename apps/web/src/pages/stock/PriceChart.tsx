@@ -83,7 +83,8 @@ const minuteTime = (date: string, hm: string, us: boolean) => {
  * 走勢圖：工具列（類型・比較・指標・重要時刻）＋區間。
  * 圖表規格（2026-11-20）：線圖是墨色主線＋底下淡出的墨色面積（比較時只有線）；事件記號預設只有一種——
  * 有自己的買賣就是 B／S／D，沒有才預設打開「重要時刻」◆；均線預設只在 K 線畫（線圖要自己打開），畫了就有圖例；
- * 成交量是中性的鉛筆灰（不是價格，不用紅綠），在圖的下緣約 18%。
+ * 成交量是中性的鉛筆灰（不是價格，不用紅綠），放在主圖下面自己的一格（圖表庫的第二個 pane，約 18%）：
+ * 價格的縱軸不會標到成交量旁邊，淡墨面積也停在主圖的下緣（2026-11-20 獨立審查）。
  * 買進 B／賣出 S／股利 D 標記來自交易歷史（`position/history`，出清後也有）；持有時另有均價虛線。隱私模式全部隱藏。
  * 1 日線需要授權的盤中行情：商用模式沒有點，顯示說明（後端的 notes）。存檔不足時圖下照實寫出 notes。
  * 手機上工具列放在區間下面：讀數與圖緊接在價格與部位下面，第一屏就看得到圖（工具列是次要的）。
@@ -146,9 +147,11 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
         fontFamily: getComputedStyle(document.body).fontFamily,
         fontSize: 12,
         attributionLogo: false,
+        // 成交量那一格和主圖之間：一條圖表格線，不能拖拉
+        panes: { separatorColor: cssVarColor("--chart-grid"), separatorHoverColor: "transparent", enableResize: false },
       },
       grid: { vertLines: { visible: false }, horzLines: { color: cssVarColor("--chart-grid") } },
-      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.1, bottom: volume && !isIntraday ? 0.24 : 0.08 }, mode: comparing ? PriceScaleMode.Percentage : PriceScaleMode.Normal },
+      rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.1, bottom: 0.08 }, mode: comparing ? PriceScaleMode.Percentage : PriceScaleMode.Normal },
       timeScale: { borderVisible: false, rightOffset: 2, fixLeftEdge: true, fixRightEdge: true, timeVisible: isIntraday, secondsVisible: false },
       crosshair: { mode: CrosshairMode.Magnet, vertLine: { color: ink2, labelBackgroundColor: labelBg }, horzLine: { color: ink2, labelBackgroundColor: labelBg } },
       // 縱軸與十字線上的價格：和報價同一套小數位（Tick Decimal Rule），十字線落在任意價位時四捨五入到報價的位數
@@ -202,8 +205,12 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
       cmp.setData(compareHistory.data!.candles.filter((c) => c.t >= from).map((c) => ({ time: dayTime(c.t), value: c.c })))
     }
     if (volume) {
-      const vol = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false })
-      chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
+      // 第二個 pane：疊加的價格軸（"vol"）沒有刻度，這一格只有柱子
+      const vol = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false }, 1)
+      chart.priceScale("vol", 1).applyOptions({ scaleMargins: { top: 0.15, bottom: 0 } })
+      const panes = chart.panes()
+      panes[0]?.setStretchFactor(0.82)
+      panes[1]?.setStretchFactor(0.18)
       // 成交量不是價格：中性的鉛筆灰（以前跟著漲跌色 30%，深色模式混成一片）
       const volColor = cssVarColor("--chart-bench", theme === "dark" ? 0.45 : 0.32)
       vol.setData(candles.map((c) => ({ time: dayTime(c.t), value: c.v, color: volColor })))

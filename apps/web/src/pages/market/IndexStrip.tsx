@@ -43,7 +43,7 @@ function IndexCell({ index: i, first, four, position }: { index: MarketIndex; fi
       )}
     >
       <div className="min-w-0 @2xl:flex @2xl:items-baseline @2xl:gap-2">
-        <p className="truncate text-lg leading-6 font-medium @2xl:text-base @2xl:font-normal">{i.name}</p>
+        <p className="print-label truncate text-lg leading-6 @2xl:text-base">{i.name}</p>
         <p className="num text-sm leading-5 text-ink-2">{formatDateShort(i.date, false)}</p>
       </div>
       {values.length >= 2 ? (

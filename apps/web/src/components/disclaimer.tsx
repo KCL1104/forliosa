@@ -24,7 +24,8 @@ export function Disclaimer({
   className?: string
 }) {
   return (
-    <p data-disclaimer={kind} className={cn("max-w-prose text-sm text-pretty text-ink-2", className)}>
+    // 只在標點與空白處斷行（keep-all），一句話不會在「投資決／定」中間拆開；比一行還長的片段才用 anywhere 拆
+    <p data-disclaimer={kind} className={cn("max-w-prose text-sm text-pretty text-ink-2 [overflow-wrap:anywhere] [word-break:keep-all]", className)}>
       {text || DISCLAIMER[kind]}
       {link && (
         <>

@@ -138,6 +138,30 @@
     font-weight: 600;
   }
 }
+/*
+ * (b′) 單獨的開／關鈕（隱私模式、深度搜尋、觀察中、篩選中）：開著＝實心記號（fill-*，和開關的「開」同一組）。
+ * 一排選項裡的「選了哪一個」用 (b) 的框；只有一顆、只有開與關的鈕，開著要一眼看出來（2026-11-20 獨立審查：
+ * 框起來的「開」和旁邊的外框按鈕分不出來）。關著的樣子由元件決定（外框或淡墨字）。
+ */
+@utility sel-toggle {
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+  @media (hover: hover) and (pointer: fine) {
+    &:not([aria-pressed="true"]):hover {
+      background-color: var(--hov);
+      color: var(--ink);
+    }
+  }
+  &[aria-pressed="true"] {
+    background-color: var(--fill-bg);
+    color: var(--fill-fg);
+    box-shadow: inset 0 0 0 1px var(--fill-ring);
+    border-color: var(--fill-ring);
+    font-weight: 500;
+  }
+}
 /* (c) 清單裡選取的那一列：淡墨底＋開頭 2px 墨色線 */
 @utility sel-row {
   &:is([aria-selected="true"], [aria-current]:not([aria-current="false"])) {
@@ -146,7 +170,7 @@
   }
 }
 /* 選取語法是系統的一部分：不管原始碼裡有沒有出現都產生 */
-@source inline("sel-tab sel-tab-top sel-chip sel-row");
+@source inline("sel-tab sel-tab-top sel-chip sel-toggle sel-row");
 
 /*
  * Forliosa 設計 token —— 世界觀：學校聯絡簿。說明見 /DESIGN.md。

@@ -74,6 +74,8 @@ export function LedgerPage() {
   const ask = useAskAi()
   // 查看別人的資產（唯讀）：沒有待簽名的草稿（那是自己的 AI）
   const readOnly = useReadOnly()
+  // 空的帳本（持倉這一段、一檔都沒有）：空狀態本身就有「記第一筆／匯入」，工具列的匯入、記一筆、自訂先不放（動作不重複）
+  const emptyHoldings = view === "holdings" && counts.holdings === 0
   const canImport = useCanImport()
   const openImport = useUi((s) => s.openImport)
   const isDesktop = useIsDesktop()
@@ -141,7 +143,7 @@ export function LedgerPage() {
         )}
         {/* 手動記一筆：直接開輸入框（用一句話記的入口在 AI 面板）。手機放在分段旁邊的「＋」。
             匯入（2026-11-17）：開了匯入的帳號在記一筆左邊多一顆「匯入」，先選匯入庫存或對帳單（原本藏在記一筆、AI「＋」裡，朋友找不到） */}
-        {!readOnly && (
+        {!readOnly && !emptyHoldings && (
           <>
             {canImport && (
               <Button variant="outline" className="ml-auto max-lg:hidden" onClick={() => openImport()}>
@@ -164,7 +166,7 @@ export function LedgerPage() {
             </div>
           </>
         )}
-        {view === "holdings" && <CustomizeButton className={cn("max-lg:hidden", readOnly && "ml-auto")} />}
+        {view === "holdings" && !emptyHoldings && <CustomizeButton className={cn("max-lg:hidden", readOnly && "ml-auto")} />}
       </div>
       {pending > 0 && !readOnly && (
         <button

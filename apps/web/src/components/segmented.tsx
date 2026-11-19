@@ -3,7 +3,8 @@ import { cn } from "@/lib/utils"
 
 /**
  * 區間選擇（1日…全部、季／年…）：role=radiogroup，方向鍵切換。
- * 選取＝選取語法 (b)（`sel-chip`：淺色墨色實底；深色格線藍底＋內框）。
+ * 和分段同一種淡墨底的軌道（2026-11-20：沒有軌道時，框起來的那一格看起來像一排字裡唯一能按的按鈕）；
+ * 選取＝選取語法 (b)（`sel-chip`：白紙格＋墨色內框；深色暖灰底＋內框）。
  * 放不下時橫向捲動（ScrollRow）：被遮住的一邊淡出，選取中的選項捲進畫面。
  */
 export function RangeChips<T extends string>({
@@ -29,7 +30,7 @@ export function RangeChips<T extends string>({
     requestAnimationFrame(() => group?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus())
   }
   return (
-    <ScrollRow role="radiogroup" aria-label={label} className={cn("-mx-1 items-center gap-0.5 px-1 py-0.5", className)}>
+    <ScrollRow role="radiogroup" aria-label={label} className={cn("w-fit max-w-full items-center gap-0.5 rounded-md bg-hov p-0.5", className)}>
       {options.map((o, i) => {
         const active = o.value === value
         return (

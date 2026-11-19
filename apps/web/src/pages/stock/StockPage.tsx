@@ -248,7 +248,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
       {inst.is_demo && <DemoTag className="max-sm:hidden" />}
       {/* 320 寬放不下時按鈕掉到下一行：靠左，不懸在右邊 */}
       {!readOnly && <span className="ml-auto flex items-center gap-2 max-[359px]:ml-0">
-        {/* 開關：開著時是選取語法 (b)（和隱私模式的眼睛同一種），不靠星號圖示表示狀態 */}
+        {/* 開關：開著時是單獨開關的實心記號（sel-toggle，和隱私模式同一種），不靠星號圖示表示狀態 */}
         {!held && (
           <Button
             variant="outline"
@@ -256,7 +256,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
             aria-pressed={watching}
             disabled={toggle.isPending}
             onClick={() => toggle.mutate({ symbol: inst.symbol, on: !watching })}
-            className="sel-chip pointer-coarse:h-11"
+            className="sel-toggle pointer-coarse:h-11"
           >
             {watching ? "觀察中" : "加入觀察"}
           </Button>

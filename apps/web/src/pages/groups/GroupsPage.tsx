@@ -180,9 +180,10 @@ function ShareCard() {
         下緣一行網址。這是唯一會離開 app 的東西（截圖貼到 LINE）：遮住字標也認得出來——靠印好的表格，不靠顏色。
       */}
       <figure className="max-w-lg border border-print bg-raised">
-        <div className="form-head flex items-stretch justify-between pr-5 pl-5 text-base">
-          <span className="self-center py-3 font-sans text-xl font-bold tracking-[-0.01em] text-ink">Forliosa</span>
-          <span className="date-cell num flex items-baseline gap-0 self-stretch border-e-0 border-l border-rule py-3 pr-0 pl-4 font-sans text-base">
+        {/* 表頭和下面的格子同一組欄：日期格的直線就是最後一格的分隔線（不會差幾 px） */}
+        <div className={cn("form-head grid text-base", noMonth ? "grid-cols-2" : "grid-cols-3")}>
+          <span className={cn("self-center py-3 pl-3 font-sans text-xl font-bold tracking-[-0.01em] text-ink sm:pl-4", !noMonth && "col-span-2")}>Forliosa</span>
+          <span className="date-cell num flex items-baseline gap-0 border-e-0 border-l border-rule px-3 py-3 font-sans text-base sm:px-4">
             {formatDateShort(today, false)}
             <span className="weekday [font-feature-settings:'halt'_1]">{formatDateShort(today).slice(formatDateShort(today, false).length)}</span>
           </span>
@@ -195,7 +196,7 @@ function ShareCard() {
             </div>
           ))}
         </dl>
-        <figcaption className="border-t border-rule px-5 py-2 text-right text-xs text-ink-2">forliosa.trade</figcaption>
+        <figcaption className="border-t border-rule px-3 py-2 text-right text-xs text-ink-2 sm:px-4">forliosa.trade</figcaption>
       </figure>
       {/* 後端的說明自己就有冒號（「MSFT：還沒有收盤價，…」），前面用一句話接，不再疊一個冒號 */}
       {noMonth && <p className="mt-2 max-w-lg text-base text-ink">{monthMissing(mtd.data?.notes ?? [])}</p>}

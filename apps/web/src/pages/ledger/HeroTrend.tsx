@@ -217,11 +217,13 @@ function TrendBand({
     // 每個收盤日等寬，週末與假日不留空（和個股走勢圖一樣）
     const x = (i: number) => left + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW)
     const line = slice.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)} ${y(p.market_value).toFixed(1)}`).join("")
+    // 和個股走勢圖同一個規格：線底下一層淡出的墨色面積（收到圖的下緣）
+    const area = n > 1 ? `${line}L${x(n - 1).toFixed(1)} ${(TOP + plotH).toFixed(1)}L${x(0).toFixed(1)} ${(TOP + plotH).toFixed(1)}Z` : null
     const showInvested = investedVisible(slice, min, max)
     const invested = showInvested
       ? slice.map((p, i) => (i === 0 ? `M${x(0).toFixed(1)} ${y(p.net_invested).toFixed(1)}` : `H${x(i).toFixed(1)}V${y(p.net_invested).toFixed(1)}`)).join("")
       : null
-    return { ticks, labels, left, plotW, plotH, y, x, line, invested }
+    return { ticks, labels, left, plotW, plotH, y, x, line, area, invested }
   }, [slice, n, width, height, privacy])
   const { ticks, labels, left, plotW, plotH, y, x } = model
 
@@ -376,6 +378,13 @@ function TrendBand({
 
           {a && <line x1={x(active!)} x2={x(active!)} y1={TOP} y2={TOP + plotH} stroke="var(--ctl)" strokeWidth={1} />}
 
+          <defs>
+            <linearGradient id="hero-trend-area" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--chart-mine)" stopOpacity={0.1} />
+              <stop offset="100%" stopColor="var(--chart-mine)" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          {model.area && <path d={model.area} fill="url(#hero-trend-area)" data-series="area" />}
           {model.invested && <path d={model.invested} fill="none" stroke="var(--chart-bench)" strokeWidth={1.5} data-series="invested" />}
           <path d={model.line} fill="none" stroke="var(--chart-mine)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" data-series="total" />
           {/* 2～6 個收盤：每個收盤日一個 7px 圓點，2 點不會看起來像一條趨勢線 */}
