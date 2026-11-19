@@ -10,7 +10,8 @@ const HEAD = 5
 
 /**
  * 類股漲跌：證交所各類股指數當天的漲跌幅，由高到低。
- * 每列是名稱、一條從零軸往右（漲）或往左（跌）的橫條、漲跌幅。橫條用 40% 的漲跌色（比成交量柱的 30% 深一點：這裡的條很細），
+ * 每列是名稱、一條從零軸往右（漲）或往左（跌）的橫條、漲跌幅。橫條 6px 高、65% 的漲跌色，最短 3px（2026-11-20：
+ * 以前 8px 的 40% 色，±0.3% 以內只剩零軸那一點，看不出方向），
  * 方向靠位置與 ▲▼，不只靠顏色；數字是主角，橫條只幫忙看大小。寬的時候排成兩到三欄（一欄讀完接下一欄），
  * 窄的時候先列頭尾各 5 個，按「全部」展開。
  */
@@ -36,12 +37,12 @@ export function SectorList({ sectors }: { sectors: NonNullable<MarketOverview["s
               )}
               <li className={cn("grid h-10 break-inside-avoid grid-cols-[8em_minmax(2.5rem,1fr)_4.25rem] items-center gap-x-3 border-b border-rule", middle && !open && "@max-2xl:hidden")}>
                 <span className="truncate text-base">{s.name}</span>
-                <span aria-hidden className="relative h-2">
+                <span aria-hidden className="relative h-1.5">
                   <span className="absolute -inset-y-1 left-1/2 w-px bg-ctl" />
                   {!flat && (
                     <span
-                      className={cn("absolute inset-y-0 rounded-[1px]", up ? "left-1/2 bg-rise/40" : "right-1/2 bg-fall/40")}
-                      style={{ width: `${Math.max(1.5, (Math.abs(s.change_pct) / max) * 50)}%` }}
+                      className={cn("absolute inset-y-0 rounded-[1px]", up ? "left-1/2 bg-rise/65" : "right-1/2 bg-fall/65")}
+                      style={{ width: `max(3px, ${(Math.abs(s.change_pct) / max) * 50}%)` }}
                     />
                   )}
                 </span>

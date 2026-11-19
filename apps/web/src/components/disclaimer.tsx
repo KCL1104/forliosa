@@ -24,13 +24,13 @@ export function Disclaimer({
   className?: string
 }) {
   return (
-    <p data-disclaimer={kind} className={cn("max-w-prose text-sm text-ink-2", className)}>
+    <p data-disclaimer={kind} className={cn("max-w-prose text-sm text-pretty text-ink-2", className)}>
       {text || DISCLAIMER[kind]}
       {link && (
         <>
           {" "}
           {/* 夾在句子裡（和登入頁「登入即表示你同意服務條款」同一種）：不撐 44px 的高度，行距才不會被撐開 */}
-          <PlainLink to={DISCLAIMER_PATH} className="text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink">
+          <PlainLink to={DISCLAIMER_PATH} className="whitespace-nowrap text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink">
             {DISCLAIMER_TITLE}
           </PlainLink>
         </>

@@ -138,7 +138,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
             type="submit"
             aria-label="送出"
             aria-disabled={empty}
-            className={cn("press grid size-11 shrink-0 place-items-center rounded-sm", empty ? "bg-rule text-ink-2 dark:bg-transparent dark:shadow-[inset_0_0_0_1px_var(--ctl)]" : "bg-act text-act-fg")}
+            className={cn("press grid size-11 shrink-0 place-items-center rounded-sm", empty ? "bg-hov text-ink-2 dark:bg-transparent dark:shadow-[inset_0_0_0_1px_var(--ctl)]" : "bg-act text-act-fg")}
           >
             <ArrowUpIcon aria-hidden className="size-5" />
           </button>
@@ -199,7 +199,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
               type="submit"
               aria-label="送出"
               disabled={empty}
-              className="press grid size-9 place-items-center rounded-sm bg-act text-act-fg hover:bg-act-hover disabled:bg-rule disabled:text-ink-2 dark:disabled:bg-transparent dark:disabled:shadow-[inset_0_0_0_1px_var(--ctl)] pointer-coarse:size-11"
+              className="press grid size-9 place-items-center rounded-sm bg-act text-act-fg hover:bg-act-hover disabled:bg-hov disabled:text-ink-2 dark:disabled:bg-transparent dark:disabled:shadow-[inset_0_0_0_1px_var(--ctl)] pointer-coarse:size-11"
             >
               <ArrowUpIcon aria-hidden className="size-[18px]" />
             </button>

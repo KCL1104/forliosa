@@ -52,7 +52,8 @@ export function RangeChips<T extends string>({
 }
 
 /**
- * 分段（帳本：持倉・紀錄・績效・配置）：1px 鉛筆灰外框，選取＝選取語法 (b)（`sel-chip`）。
+ * 分段（帳本：持倉・紀錄・績效・配置）：淡墨底的一條軌道（沒有外框），選取＝選取語法 (b)（`sel-chip`：白紙格＋墨色內框）。
+ * 層次靠紙色差（軌道比紙深一階、選取的格子是白紙），和系統其他地方一樣不靠陰影。
  * role=tablist；方向鍵切換。觸控與手機版面每一段 44px 高；字不換行（320px 也是一行兩個字）。
  * `shortcut`：這一段的鍵盤快速鍵（由頁面自己處理按鍵；這裡只用 `aria-keyshortcuts` 告訴輔助科技）。
  */
@@ -81,7 +82,7 @@ export function Segmented<T extends string>({
     requestAnimationFrame(() => group?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus())
   }
   return (
-    <div role="tablist" aria-label={label} className={cn("flex gap-1 rounded-md border border-ctl p-1 max-lg:p-[3px]", className)}>
+    <div role="tablist" aria-label={label} className={cn("flex gap-1 rounded-md bg-hov p-1 max-lg:p-[3px]", className)}>
       {options.map((o, i) => {
         const active = o.value === value
         return (

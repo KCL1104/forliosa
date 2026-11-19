@@ -116,7 +116,10 @@
     border-top-color: var(--ink);
   }
 }
-/* (b) 分段、區間、篩選、日期格、切換群組：選取＝on-bg 底＋on-fg 字＋1px 內框 on-ring */
+/*
+ * (b) 分段、區間、篩選、日期格、切換群組：選取＝用墨水框起來的格子——on-bg 底＋on-fg 字＋1px 墨色內框 on-ring、600。
+ * 淺色以前是墨色實底，一個畫面 5–8 塊，和簽名格、主要按鈕一樣重（2026-11-20 改）；現在淺色、深色同一套語法。
+ */
 @utility sel-chip {
   transition:
     background-color 120ms ease,
@@ -132,7 +135,7 @@
     background-color: var(--on-bg);
     color: var(--on-fg);
     box-shadow: inset 0 0 0 1px var(--on-ring);
-    font-weight: 500;
+    font-weight: 600;
   }
 }
 /* (c) 清單裡選取的那一列：淡墨底＋開頭 2px 墨色線 */
@@ -172,12 +175,16 @@
   --act-hover: #0f1730;
 
   /*
-   * 選取（分段、區間、篩選、日期格、開關）：同一套語法。
-   * 淺色是墨色實底＋紙色字；深色是格線色調的藍底＋墨色字＋1px 內框（不是白色實塊）。
+   * 選取 (b)（分段、區間、篩選、日期格）：用墨水框起來的格子——白紙底＋墨色字＋1px 墨色內框（對紙 13:1）。
+   * 2026-11-20 以前淺色是墨色實底；墨色實心只留給主要按鈕與簽名格。深色是暖灰底＋內框，同一套語法。
    */
-  --on-bg: var(--ink);
-  --on-fg: var(--paper);
+  --on-bg: var(--raised);
+  --on-fg: var(--ink);
   --on-ring: var(--ink);
+  /* 實心的記號：開關的「開」、走勢圖縱軸上的價位標籤（小，要一眼看到；不是選取） */
+  --fill-bg: var(--ink);
+  --fill-fg: var(--paper);
+  --fill-ring: var(--ink);
 
   /*
    * AI：鉛筆（石墨灰）。AI 寫的字、起的草稿是鉛筆寫的，使用者簽名才是墨水（產品負責人 2026-11-13：不用紫色——
@@ -270,6 +277,9 @@
   --on-bg: #2a2723;
   --on-fg: var(--ink);
   --on-ring: #96938e;
+  --fill-bg: #2a2723;
+  --fill-fg: var(--ink);
+  --fill-ring: #96938e;
 
   --ai: #b8bdc1;
   --ai-wash: #191b1d;
@@ -323,6 +333,9 @@
   --color-on-bg: var(--on-bg);
   --color-on-fg: var(--on-fg);
   --color-on-ring: var(--on-ring);
+  --color-fill-bg: var(--fill-bg);
+  --color-fill-fg: var(--fill-fg);
+  --color-fill-ring: var(--fill-ring);
   --color-ai: var(--ai);
   --color-ai-wash: var(--ai-wash);
   --color-ai-rule: var(--ai-rule);

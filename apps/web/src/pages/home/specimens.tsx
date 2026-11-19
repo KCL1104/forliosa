@@ -171,8 +171,8 @@ export function StockSpecimen() {
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-y-0 left-0 h-full w-[calc(100%-3rem)] overflow-visible">
           <path d={LINE} fill="none" stroke="var(--chart-mine)" strokeWidth={1.75} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         </svg>
-        {/* 最後一天的價位：和走勢圖縱軸上的標籤同一組顏色（on-bg／on-fg；深色是格線藍底，不是白色實塊） */}
-        <span className="num absolute right-0 flex h-5 w-12 -translate-y-1/2 items-center bg-on-bg pl-2 text-xs text-on-fg" style={{ top: `${yOf(LAST)}%` }}>
+        {/* 最後一天的價位：和走勢圖縱軸上的標籤同一組顏色（fill-bg／fill-fg；深色是暖灰底，不是白色實塊） */}
+        <span className="num absolute right-0 flex h-5 w-12 -translate-y-1/2 items-center bg-fill-bg pl-2 text-xs text-fill-fg" style={{ top: `${yOf(LAST)}%` }}>
           {formatPrice(LAST, "TWSE", "stock")}
         </span>
       </div>

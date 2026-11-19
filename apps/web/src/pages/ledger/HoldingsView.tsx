@@ -554,7 +554,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
                     className="@max-[46rem]:hidden"
                     values={w.sparkline.map((p) => p.price)}
                     baseline={w.sparkline_interval === "1d" ? null : (w.quote?.reference_price ?? w.quote?.prev_close ?? null)}
-                    tone={d}
+                    tone="ink"
                     label={`${w.name}今日走勢：${d === "up" ? "上漲" : d === "down" ? "下跌" : "平盤"}`}
                   />
                 </div>
@@ -690,7 +690,6 @@ function PhoneLineToggle() {
 
 function WatchRowMobile({ w }: { w: WatchItem }) {
   const market = marketOf(w.symbol)
-  const d = direction(w.quote?.change_pct ?? null)
   // 自選本身就帶盤中點；沒有時改抓 intraday
   const fallback = useIntraday(w.symbol, w.sparkline.length < 2)
   const values = w.sparkline.length >= 2 ? w.sparkline.map((p) => p.price) : (fallback.data?.points ?? []).map((p) => p.price)
@@ -698,7 +697,7 @@ function WatchRowMobile({ w }: { w: WatchItem }) {
     <li>
       <Link to="/stock/$symbol" params={{ symbol: w.symbol }} className="ruled-row grid h-[72px] grid-cols-[1fr_76px_96px] content-center gap-x-3 gap-y-0.5">
         <span className="truncate text-lg leading-6 font-medium">{w.name}</span>
-        <Sparkline className="col-start-2 row-span-2 row-start-1 self-center" width={76} height={32} values={values} baseline={w.sparkline_interval === "1d" ? null : (w.quote?.reference_price ?? w.quote?.prev_close ?? null)} tone={d} label={`${w.name}今日走勢`} />
+        <Sparkline className="col-start-2 row-span-2 row-start-1 self-center" width={76} height={32} values={values} baseline={w.sparkline_interval === "1d" ? null : (w.quote?.reference_price ?? w.quote?.prev_close ?? null)} tone="ink" label={`${w.name}今日走勢`} />
         <span className="num col-start-3 row-start-1 text-right text-lg leading-6">
           {market === "US" && w.quote && "US$"}
           {formatQuote(w.quote?.price, market)}

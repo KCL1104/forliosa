@@ -44,7 +44,7 @@ export function AuthGate({ children, signedOut }: { children: React.ReactNode; s
 export function AuthFrame({ children, center }: { children: React.ReactNode; center?: boolean }) {
   return (
     <main className={cn("mx-auto flex min-h-dvh w-full flex-col justify-center gap-6 px-5 py-10", center ? "max-w-sm items-center text-center" : "max-w-md")}>
-      <Wordmark />
+      <Wordmark className={cn(center && "mb-4 text-2xl")} />
       {children}
     </main>
   )

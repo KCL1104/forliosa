@@ -1,4 +1,5 @@
 import {
+  AreaSeries,
   CandlestickSeries,
   ColorType,
   createChart,
@@ -32,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { useResolvedTheme } from "@/hooks/use-theme"
 import { useSourceNote } from "@/hooks/use-source-note"
@@ -79,6 +81,9 @@ const minuteTime = (date: string, hm: string, us: boolean) => {
 
 /**
  * 走勢圖：工具列（類型・比較・指標・重要時刻）＋區間。
+ * 圖表規格（2026-11-20）：線圖是墨色主線＋底下淡出的墨色面積（比較時只有線）；事件記號預設只有一種——
+ * 有自己的買賣就是 B／S／D，沒有才預設打開「重要時刻」◆；均線預設只在 K 線畫（線圖要自己打開），畫了就有圖例；
+ * 成交量是中性的鉛筆灰（不是價格，不用紅綠），在圖的下緣約 18%。
  * 買進 B／賣出 S／股利 D 標記來自交易歷史（`position/history`，出清後也有）；持有時另有均價虛線。隱私模式全部隱藏。
  * 1 日線需要授權的盤中行情：商用模式沒有點，顯示說明（後端的 notes）。存檔不足時圖下照實寫出 notes。
  * 手機上工具列放在區間下面：讀數與圖緊接在價格與部位下面，第一屏就看得到圖（工具列是次要的）。
@@ -87,15 +92,19 @@ const minuteTime = (date: string, hm: string, us: boolean) => {
  * 還沒有收盤價（剛加入、還沒抓過的美股）時這個元件不出現（StockPage 不放），只在價格那一格說一次。
  */
 const NO_MARKS: never[] = []
+const DEFAULT_MAS = [5, 20, 60]
+const NO_MAS: number[] = []
 
 export function PriceChart({ inst, quote, position, markers }: { inst: InstrumentDetail; quote?: Quote; position: Position | null; markers?: PositionMarker[] }) {
   const [rangeChoice, setRange] = useState<ChartRange | null>(null)
   const range: ChartRange = rangeChoice ?? (position ? "6M" : "1M")
   const [kind, setKind] = useState<"line" | "candle">("line")
   const [compare, setCompare] = useState<string>("none")
-  const [mas, setMas] = useState<number[]>([5, 20, 60])
+  // 均線與重要時刻：使用者沒選過時照預設（均線只在 K 線、重要時刻只在沒有自己的買賣記號時）
+  const [masChoice, setMas] = useState<number[] | null>(null)
+  const mas = useMemo(() => masChoice ?? (kind === "candle" ? DEFAULT_MAS : NO_MAS), [masChoice, kind])
   const [volume, setVolume] = useState(true)
-  const [moments, setMoments] = useState(true)
+  const [momentsChoice, setMoments] = useState<boolean | null>(null)
   const privacy = usePrefs((s) => s.privacyMode)
   const theme = useResolvedTheme()
   const desktop = useIsDesktop()
@@ -114,6 +123,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
   const marks = markers ?? position?.markers ?? NO_MARKS
   const showMine = (!!position || marks.length > 0) && !privacy
   const showAvg = !!position && !privacy
+  const moments = momentsChoice ?? !showMine
   const points = intraday.data?.points ?? []
   useSourceNote([CHART_LIBRARY, ...sourceNotes(history.data?.sources)])
 
@@ -125,9 +135,9 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
     const fall = cssVarColor("--fall")
     const ink = cssVarColor("--ink")
     const ink2 = cssVarColor("--ink-2")
-    // 軸上的標籤（最後價、均價、參考價、十字線）：選取語法的底色——淺色是墨色實底，深色是格線藍底，不是白色實塊
-    const labelBg = cssVarColor("--on-bg")
-    const labelFg = cssVarColor("--on-fg")
+    // 軸上的標籤（最後價、均價、參考價、十字線）：實心的記號（fill-*）——淺色是墨色實底，深色是暖灰底，不是白色實塊
+    const labelBg = cssVarColor("--fill-bg")
+    const labelFg = cssVarColor("--fill-fg")
     const chart = createChart(el, {
       autoSize: true,
       layout: {
@@ -174,7 +184,10 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
     const main =
       kind === "candle" && !comparing
         ? chart.addSeries(CandlestickSeries, { upColor: rise, downColor: fall, wickUpColor: rise, wickDownColor: fall, borderVisible: false, priceLineVisible: false, autoscaleInfoProvider })
-        : chart.addSeries(LineSeries, { color: ink, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, autoscaleInfoProvider })
+        : comparing
+          ? chart.addSeries(LineSeries, { color: ink, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, autoscaleInfoProvider })
+          : // 線圖：墨色主線＋底下淡出的墨色面積（上緣 10%、到下緣 0%），一眼看出這是「我在看的那一條」
+            chart.addSeries(AreaSeries, { lineColor: ink, lineWidth: 2, topColor: cssVarColor("--ink", 0.1), bottomColor: cssVarColor("--ink", 0), priceLineVisible: false, lastValueVisible: false, crosshairMarkerBorderColor: cssVarColor("--paper"), autoscaleInfoProvider })
     if (kind === "candle" && !comparing) main.setData(candles.map((c) => ({ time: dayTime(c.t), open: c.o, high: c.h, low: c.l, close: c.c })))
     else main.setData(candles.map((c) => ({ time: dayTime(c.t), value: c.c })))
     // 線圖的最後價：用價格線畫軸上的標籤（不畫線），底色跟著選取語法（線本身的顏色在深色是淡色，會變成白色實塊）
@@ -191,7 +204,9 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
     if (volume) {
       const vol = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false })
       chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
-      vol.setData(candles.map((c, i) => ({ time: dayTime(c.t), value: c.v, color: (i > 0 ? c.c >= candles[i - 1]!.c : c.c >= c.o) ? cssVarColor("--rise", 0.3) : cssVarColor("--fall", 0.3) })))
+      // 成交量不是價格：中性的鉛筆灰（以前跟著漲跌色 30%，深色模式混成一片）
+      const volColor = cssVarColor("--chart-bench", theme === "dark" ? 0.45 : 0.32)
+      vol.setData(candles.map((c) => ({ time: dayTime(c.t), value: c.v, color: volColor })))
     }
     if (!comparing) {
       for (const ma of MAS) {
@@ -245,7 +260,8 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
   // 沒有任何價格（這段期間沒有成交）：不放工具列與讀數，只留空狀態
   const toolbar = !blank && (
       <div className={cn("flex flex-wrap items-center gap-1.5 sm:gap-2", !desktop && "mt-3")}>
-        <div role="radiogroup" aria-label="圖表類型" className="flex gap-0.5 rounded-sm border border-ctl p-0.5">
+        {/* 類型：和帳本的分段同一種軌道（淡墨底、沒有外框），選取＝選取語法 (b) */}
+        <div role="radiogroup" aria-label="圖表類型" className="flex gap-0.5 rounded-sm bg-hov p-0.5">
           {(["line", "candle"] as const).map((k) => (
             <button
               key={k}
@@ -254,7 +270,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
               aria-checked={kind === k}
               disabled={isIntraday && k === "candle"}
               onClick={() => setKind(k)}
-              // 觸控：外框裡的按鈕 40px 高，可按範圍用 ::before 上下各多 2px（蓋到外框的內距），合計 44px；一個字的「線」至少 44px 寬
+              // 觸控：軌道裡的按鈕 40px 高，可按範圍用 ::before 上下各多 2px（蓋到軌道的內距），合計 44px；一個字的「線」至少 44px 寬
               className="sel-chip relative h-7 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:min-w-11 pointer-coarse:px-3.5 pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-0.5 pointer-coarse:before:content-['']"
             >
               {k === "line" ? "線" : "K 線"}
@@ -286,7 +302,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-44">
             {MAS.map((m) => (
-              <DropdownMenuCheckboxItem key={m.n} checked={mas.includes(m.n)} onCheckedChange={(on) => setMas(on ? [...mas, m.n] : mas.filter((x) => x !== m.n))}>
+              <DropdownMenuCheckboxItem key={m.n} checked={mas.includes(m.n)} onCheckedChange={(on) => setMas(on ? [...mas, m.n].sort((a, b) => a - b) : mas.filter((x) => x !== m.n))}>
                 <span aria-hidden className="h-0.5 w-3.5 rounded-full" style={{ background: `var(${m.color})` }} />
                 {m.label}
               </DropdownMenuCheckboxItem>
@@ -296,21 +312,11 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {/* 開關和「線／K 線」同一種外框：按下＝選取語法 (b)，◆ 是圖上標記的圖例 */}
-        <div className="ml-auto flex rounded-sm border border-ctl p-0.5">
-          <button
-            type="button"
-            aria-pressed={moments}
-            disabled={isIntraday}
-            onClick={() => setMoments(!moments)}
-            className="press sel-chip relative inline-flex h-7 items-center gap-1.5 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-0.5 pointer-coarse:before:content-['']"
-          >
-            <span aria-hidden className={cn(moments ? "text-chart-ochre" : "text-ctl")}>
-              ◆
-            </span>
-            重要時刻
-          </button>
-        </div>
+        {/* 一般的開關（不是墨色方塊、沒有裝飾圖示）：◆ 的意思寫在圖下的圖例 */}
+        <label className={cn("ml-auto inline-flex min-h-8 cursor-pointer items-center gap-2 px-1 text-sm text-ink-2 pointer-coarse:min-h-11", isIntraday && "cursor-not-allowed opacity-40")}>
+          重要時刻
+          <Switch size="sm" checked={moments && !isIntraday} disabled={isIntraday} onCheckedChange={(v) => setMoments(v)} />
+        </label>
       </div>
   )
 
@@ -372,7 +378,16 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
           {showMine && !isIntraday && !empty && (showAvg || marks.some((m) => candles.length > 0 && m.date >= candles[0]!.t)) && <span>B 買進・S 賣出・D 股利{showAvg && "・┈ 均價"}</span>}
           {moments && !isIntraday && momentList.length > 0 && <span>◆ 單日漲跌 ≥ 3%</span>}
           {comparing && <span>- - {COMPARES.find((c) => c.value === compare)?.label}</span>}
-          {!comparing && kind === "candle" && mas.length > 0 && <span>{mas.map((n) => `MA${n}`).join("・")}</span>}
+          {!comparing && !isIntraday && mas.length > 0 && (
+            <span className="inline-flex flex-wrap items-center gap-x-2.5">
+              {MAS.filter((m) => mas.includes(m.n)).map((m) => (
+                <span key={m.n} className="inline-flex items-center gap-1">
+                  <span aria-hidden className="h-0.5 w-3 rounded-full" style={{ background: `var(${m.color})` }} />
+                  {m.label}
+                </span>
+              ))}
+            </span>
+          )}
         </p>
       </div>
       )}

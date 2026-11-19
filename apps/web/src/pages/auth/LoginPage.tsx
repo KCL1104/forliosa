@@ -26,6 +26,7 @@ import { usePageTitle } from "@/app/page-title"
  * 登入：只有登入（產品負責人 2026-11-13：不要示範畫面，也不要說明的句子）——字標、「登入」、登入按鈕（Google、Discord），全部置中。
  * 唯一留下的一行字是「登入即表示你同意 服務條款 與 隱私權政策」：條款是靠這一行成立的，不能拿掉。
  * 第一次登入就建立帳號；同一個已驗證的 Email 是同一個帳號（不寫在畫面上）。開發環境另有開發登入。
+ * 樣子是一張印好的表格（2026-11-20）：「登入」是印好的字（明體），底下一條和表頭一樣的印刷雙線；不加內容、不加卡片。
  */
 export function LoginPage() {
   const search = useSearch({ from: "/login" }) as LoginSearch
@@ -51,7 +52,7 @@ export function LoginPage() {
 
   return (
     <AuthFrame center>
-      <h1 className="text-2xl font-bold tracking-[-0.01em]">登入</h1>
+      <h1 className="form-head w-full pb-3 text-2xl font-bold tracking-[0.04em] text-ink lg:text-3xl">登入</h1>
       {error && (
         <p role="alert" className="w-full border-y border-rule py-2.5 text-base">
           {error}

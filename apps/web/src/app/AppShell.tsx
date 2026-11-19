@@ -92,10 +92,14 @@ function PrivacyButton({ size = "desktop" }: { size?: "desktop" | "mobile" }) {
       aria-label={privacy ? "隱私模式開啟中：顯示金額" : "隱私模式：遮蔽金額"}
       title={privacy ? "顯示金額" : "遮蔽金額（截圖用）"}
       onClick={toggle}
-      // 開著＝選取語法 (b)：on-bg 底＋on-fg 字＋內框（淺色是墨色方塊、深色是格線藍底）
-      className={cn("press sel-chip grid place-items-center rounded-sm text-ink-2", size === "desktop" ? "size-10" : "size-11 active:bg-hov")}
+      // 開著＝選取語法 (b)：框起來的格子（on-bg 底＋墨色字＋1px 墨色內框）；桌面開著時多寫「金額已遮蔽」，截圖前看得出來是開的
+      className={cn(
+        "press sel-chip inline-flex items-center justify-center gap-1.5 rounded-sm text-ink-2",
+        size === "desktop" ? (privacy ? "h-10 px-3 text-sm" : "size-10") : "size-11 active:bg-hov",
+      )}
     >
       {privacy ? <EyeOffIcon aria-hidden className={size === "desktop" ? "size-[18px]" : "size-[22px]"} /> : <EyeIcon aria-hidden className={size === "desktop" ? "size-[18px]" : "size-[22px]"} />}
+      {privacy && size === "desktop" && <span aria-hidden>金額已遮蔽</span>}
     </button>
   )
 }

@@ -127,7 +127,7 @@ export function DateField({
             day_button:
               "num mx-auto grid size-9 place-items-center rounded-sm text-md outline-none hover:bg-hov focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:hover:bg-transparent pointer-coarse:size-10",
             selected:
-              "[&>button]:bg-on-bg [&>button]:font-medium [&>button]:text-on-fg [&>button]:shadow-[inset_0_0_0_1px_var(--on-ring)] [&>button]:hover:bg-on-bg",
+              "[&>button]:bg-on-bg [&>button]:font-semibold [&>button]:text-on-fg [&>button]:shadow-[inset_0_0_0_1px_var(--on-ring)] [&>button]:hover:bg-on-bg",
             today: "[&>button]:font-semibold [&>button]:underline [&>button]:decoration-1 [&>button]:underline-offset-4",
             outside: "[&>button]:text-ink-2",
             disabled: "[&>button]:text-ink-2/45",

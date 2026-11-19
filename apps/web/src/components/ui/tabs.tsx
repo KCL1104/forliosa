@@ -23,7 +23,7 @@ function Tabs({
 /**
  * 分頁列（聯絡簿）：
  * - line（預設）：文字分頁，選取語法 (a)——墨色、700、2px 墨色底線；底下一條格線
- * - default 以外的 `segmented`：1px 鉛筆灰外框的分段，選取語法 (b)
+ * - default 以外的 `segmented`：淡墨底軌道的分段（沒有外框），選取語法 (b)
  */
 const tabsListVariants = cva(
   "group/tabs-list inline-flex w-fit items-center text-ink-2 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col",
@@ -32,7 +32,7 @@ const tabsListVariants = cva(
       variant: {
         default: "gap-1 border-b border-rule",
         line: "gap-1 border-b border-rule",
-        segmented: "gap-1 rounded-md border border-ctl p-1",
+        segmented: "gap-1 rounded-md bg-hov p-1",
       },
     },
     defaultVariants: {
