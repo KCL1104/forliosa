@@ -35,7 +35,7 @@ export function ReportHeader({ report: r, headingLevel = 2 }: { report: MarketRe
           {r.status_line}
         </p>
       )}
-      <H className="num mt-5 text-xl font-bold" data-report-heading="">
+      <H className="num mt-5 font-print text-xl font-bold" data-report-heading="">
         {r.kind_label} {r.edition_label}
       </H>
       <p className={cn("mt-1 max-w-[46rem]", aiTitle ? cn("ai-voice", kaiSize.line) : "text-xl leading-normal text-ink")} data-report-title="">

@@ -14,7 +14,7 @@ export function ReportCalendar({ calendar }: { calendar: Spec }) {
   return (
     <section aria-labelledby={titleId} data-section-key="calendar" className="flex flex-col">
       <header className="flex min-h-11 items-end gap-3 border-b border-print pb-2">
-        <h3 id={titleId} className="min-w-0 flex-1 text-lg font-semibold">
+        <h3 id={titleId} className="min-w-0 flex-1 font-print text-lg font-semibold">
           {calendar.title}
         </h3>
         {/* 手機上長標題（「盤後與下個交易日行事曆（11/17–11/18）」）不能把「資料」擠成直排 */}

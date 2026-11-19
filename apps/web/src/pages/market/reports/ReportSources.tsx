@@ -17,7 +17,7 @@ export function ReportSources({ report }: { report: MarketReport }) {
   return (
     <section aria-labelledby={titleId} className="flex flex-col gap-4">
       <header className="flex min-h-11 items-end border-b border-print pb-2">
-        <h3 id={titleId} className="text-lg font-semibold">
+        <h3 id={titleId} className="font-print text-lg font-semibold">
           來源
         </h3>
       </header>

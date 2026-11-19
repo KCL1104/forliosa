@@ -300,13 +300,13 @@ function Hero({ summary }: { summary?: PortfolioSummary }) {
       {!blank && (
       <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 lg:mt-3 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2 lg:@min-[52rem]:mt-0 lg:@min-[52rem]:mb-1.5 lg:@min-[52rem]:flex-col lg:@min-[52rem]:gap-y-1">
         <div className={item}>
-          <dt className="num print-label text-sm">{close.day}</dt>
+          <dt className="num print-label text-sm whitespace-nowrap">{close.day}</dt>
           <dd className="text-xl font-medium lg:text-2xl lg:@min-[52rem]:text-3xl">
             <Delta amount={summary.day_change} pct={summary.day_change_pct} />
           </dd>
         </div>
         <div className={item}>
-          <dt className="print-label text-sm">總損益（含股利）</dt>
+          <dt className="print-label text-sm whitespace-nowrap">總損益（含股利）</dt>
           <dd className="text-lg font-medium">
             <Delta amount={summary.total_pnl} pct={summary.total_return_pct} />
           </dd>

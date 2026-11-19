@@ -36,7 +36,7 @@ export function ReportNumbers({ items }: { items: ReportNumberItem[] }) {
             )}
           >
             <div className="min-w-0 shrink-0 @2xl:shrink">
-              <p className="text-base leading-6 @2xl:text-sm @2xl:leading-5 @2xl:text-ink-2">
+              <p className="print-label text-base leading-6 @2xl:text-sm @2xl:leading-5">
                 {n.label}
                 {n.estimate && <span className="ml-1.5 text-sm text-ink-2">估算</span>}
               </p>

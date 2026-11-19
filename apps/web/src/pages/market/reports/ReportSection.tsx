@@ -39,7 +39,7 @@ function sectionUnits(blocks: readonly ReportBlock[]): Unit[] {
 const TAB_GROUP_LABEL: Record<string, string> = { movers: "排行", otc_movers: "上櫃排行", margin: "融資增減" }
 
 /**
- * 報告的一段：段標題（17px 600）＋右邊 13px 淡墨的來歷（「資料」或「AI 依資料與報導整理」）。
+ * 報告的一段：段標題（明體 18px 600，印好的字；2026-11-20）＋右邊 13px 淡墨的來歷（「資料」或「AI 依資料與報導整理」）。
  * 有伺服器的圖或表的段，來歷寫「資料」；這種段裡的 AI 文字，在開始的地方另外標一行 13px 淡墨「AI 依資料與報導整理」
  * （舊的版本伺服器還寫成 AI，前端照區塊自己判斷）。只有 AI 文字的段，來歷才寫「AI 依資料與報導整理」。
  * 手機上 `collapsed_mobile` 的段預設收著，標題本身是按鈕（`aria-expanded`）；桌面一律展開、沒有收合鈕。
@@ -64,14 +64,14 @@ export function ReportSection({ section, open, collapsible, onToggle }: { sectio
               aria-expanded={open}
               aria-controls={bodyId}
               onClick={onToggle}
-              className="-my-2 flex min-h-11 w-full items-center gap-2 rounded-xs py-2 text-left text-lg font-semibold"
+              className="-my-2 flex min-h-11 w-full items-center gap-2 rounded-xs py-2 text-left font-print text-lg font-semibold"
             >
               {section.title}
               <ChevronDownIcon aria-hidden className={cn("size-4 shrink-0 text-ink-2 transition-transform", open && "rotate-180")} />
             </button>
           </h3>
         ) : (
-          <h3 id={titleId} className="min-w-0 flex-1 text-lg font-semibold">
+          <h3 id={titleId} className="min-w-0 flex-1 font-print text-lg font-semibold">
             {section.title}
           </h3>
         )}
