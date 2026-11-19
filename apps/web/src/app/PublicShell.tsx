@@ -39,8 +39,7 @@ export function PublicShell({ home, children }: { home?: boolean; children?: Rea
                 討論
               </Link>
             </nav>
-            {/* `focus-visible:outline-solid`：`buttonVariants` 的 `outline-none` 會把鍵盤焦點框的線型也關掉（Tailwind v4），這裡補回來 */}
-            <Link to="/login" search={next === "/" ? {} : { next }} className={cn(buttonVariants({ variant: home ? "default" : "outline" }), "focus-visible:outline-solid")}>
+            <Link to="/login" search={next === "/" ? {} : { next }} className={buttonVariants({ variant: home ? "default" : "outline" })}>
               登入
             </Link>
           </div>

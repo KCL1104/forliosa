@@ -157,4 +157,9 @@ describe("選取語法與簽名格按鈕", () => {
     expect(b).toHaveClass("rounded-none", "bg-act", "text-act-fg", "font-bold", "after:inset-0.75", "after:opacity-40", "h-10", "px-5")
     expect(b).not.toHaveClass("rounded-sm")
   })
+  it("每一種按鈕的鍵盤焦點框都畫得出來（outline-none 會把線型關掉，要補 outline-solid）", () => {
+    const variants = ["default", "outline", "secondary", "ghost", "ai", "link", "sign"] as const
+    render(<>{variants.map((v) => <Button key={v} variant={v}>{v}</Button>)}</>)
+    for (const v of variants) expect(screen.getByRole("button", { name: v })).toHaveClass("outline-none", "focus-visible:outline-2", "focus-visible:outline-solid")
+  })
 })

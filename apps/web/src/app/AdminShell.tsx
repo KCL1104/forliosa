@@ -64,7 +64,7 @@ function AdminShell() {
                 {tabs}
               </nav>
             )}
-            <Link to="/" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "ml-auto focus-visible:outline-solid")}>
+            <Link to="/" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "ml-auto")}>
               回到帳本
             </Link>
           </div>

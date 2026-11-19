@@ -269,7 +269,7 @@ function EditFields({
       ...(date ? { trade_date: date } : {}),
     })
   }
-  const field = "num h-10 w-full rounded-sm border border-ctl bg-raised px-2.5 text-base text-ink outline-none pointer-coarse:text-[1rem] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ai"
+  const field = "num h-10 w-full rounded-sm border border-ctl bg-raised px-2.5 text-base text-ink outline-none pointer-coarse:text-[1rem] focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-1 focus-visible:outline-ai"
   return (
     <div className="grid grid-cols-2 gap-3 border-b border-rule px-4 py-3">
       {isDividend ? (

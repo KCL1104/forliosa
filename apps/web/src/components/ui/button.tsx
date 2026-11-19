@@ -12,9 +12,11 @@ import { cn } from "@/lib/utils"
  * 共用的 `border-transparent` 會蓋掉 outline 的鉛筆灰框（「回到帳本」「登入」這些連結樣式的按鈕就沒有框）。
  * - sign：簽名格的語法（表單上唯一「定案」的動作：建立群組、儲存、加入群組、記一筆的送出）——
  *   直角、墨色底、內縮 3px 的 1px 細框（40%）、14px 粗體；高度和一般按鈕相同（40px，觸控 44px）
+ * 鍵盤焦點框要寫 `focus-visible:outline-solid`：Tailwind v4 的 `outline-none` 把線型設成 none，`outline-2` 只改寬度，
+ * 少了它焦點框就畫不出來。
  */
 const buttonVariants = cva(
-  "rounded-sm border bg-clip-padding text-md font-medium press [&_svg:not([class*='size-'])]:size-4 group/button inline-flex shrink-0 items-center justify-center whitespace-nowrap outline-none select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-ink [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "rounded-sm border bg-clip-padding text-md font-medium press [&_svg:not([class*='size-'])]:size-4 group/button inline-flex shrink-0 items-center justify-center whitespace-nowrap outline-none select-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-ink disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-ink [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {

@@ -39,7 +39,7 @@ function Choice({ title, tag, line, then, onClick }: { title: string; tag: strin
       <button
         type="button"
         onClick={onClick}
-        className="press group flex w-full items-center gap-3 py-3.5 pr-1 text-left outline-none hover:bg-hov focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink active:bg-hov sm:-mx-3 sm:w-[calc(100%+1.5rem)] sm:px-3"
+        className="press group flex w-full items-center gap-3 py-3.5 pr-1 text-left outline-none hover:bg-hov focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ink active:bg-hov sm:-mx-3 sm:w-[calc(100%+1.5rem)] sm:px-3"
       >
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
