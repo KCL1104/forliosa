@@ -12,7 +12,7 @@ export function UserAvatar({ name, url, size = "md", className }: { name: string
     return <img src={url} alt="" aria-hidden referrerPolicy="no-referrer" loading="lazy" onError={() => setBroken(true)} className={cn("shrink-0 rounded-full object-cover", box, className)} />
   }
   return (
-    <span aria-hidden className={cn("grid shrink-0 place-items-center rounded-full bg-sel font-medium text-ink", box, className)}>
+    <span aria-hidden className={cn("grid shrink-0 place-items-center rounded-full bg-hov font-medium text-ink inset-ring inset-ring-rule", box, className)}>
       {Array.from(name.trim())[0] ?? "?"}
     </span>
   )

@@ -2,6 +2,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { CalendarSyncIcon, LogOutIcon, ScrollTextIcon, SettingsIcon, WalletIcon } from "lucide-react"
 import { api } from "@/api"
 import { useMe } from "@/api/queries"
+import { UserAvatar } from "@/components/avatar"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,9 +48,8 @@ export function AvatarMenu() {
           />
         }
       >
-        <span aria-hidden className="grid size-9 place-items-center rounded-full bg-sel text-base font-medium text-ink transition-transform duration-150 ease-out group-active/avatar:scale-[0.97]">
-          {name.slice(0, 1)}
-        </span>
+        {/* 有 Google／Discord 的頭像就用它（以前頂部列只有名字的第一個字）；沒有時是紙色的圓＋名字的第一個字 */}
+        <UserAvatar name={name} url={me.data?.avatar_url} className="transition-transform duration-150 ease-out group-active/avatar:scale-[0.97]" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">
         <DropdownMenuGroup>
