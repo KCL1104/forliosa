@@ -41,8 +41,11 @@ def calendar(engine, market):
 def freeze(monkeypatch, d: date) -> None:
     import forliosa.api.routes.portfolio as portfolio_routes
     import forliosa.services.portfolio as portfolio_svc
+    import forliosa.timeutil as timeutil
 
-    for mod in (rec, portfolio_routes, portfolio_svc):
+    # timeutil too: the trade-date check in api/schemas.py imports today_taipei at call time, so without it a
+    # "future" date in these tests stopped being future once the real calendar reached it (failed on 2026-11-19)
+    for mod in (rec, portfolio_routes, portfolio_svc, timeutil):
         monkeypatch.setattr(mod, "today_taipei", lambda: d)
 
 
