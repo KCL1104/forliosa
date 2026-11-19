@@ -102,6 +102,8 @@ const Y_TICKS = [1050, 1000, 950]
 /** 價位在圖上的高度（0 是最上面，100 是最下面） */
 const yOf = (v: number) => ((Y_MAX - v) / (Y_MAX - Y_MIN)) * 100
 const LINE = CLOSES.map((v, i) => `${i === 0 ? "M" : "L"}${((i / (CLOSES.length - 1)) * 100).toFixed(2)} ${yOf(v).toFixed(2)}`).join("")
+// 和個股頁的走勢圖同一個規格：墨色線＋底下淡出的墨色面積（線的路徑往下收到底邊）
+const AREA = `${LINE}L100 100L0 100Z`
 const LAST = CLOSES.at(-1)!
 const PREV = CLOSES.at(-2)!
 
@@ -170,7 +172,14 @@ export function StockSpecimen() {
           </span>
         ))}
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-y-0 left-0 h-full w-[calc(100%-3rem)] overflow-visible">
-          <path d={LINE} fill="none" stroke="var(--chart-mine)" strokeWidth={1.75} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          <defs>
+            <linearGradient id="specimen-area" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--chart-mine)" stopOpacity={0.1} />
+              <stop offset="100%" stopColor="var(--chart-mine)" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <path d={AREA} fill="url(#specimen-area)" />
+          <path d={LINE} fill="none" stroke="var(--chart-mine)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         </svg>
         {/* 最後一天的價位：和走勢圖縱軸上的標籤同一組顏色（fill-bg／fill-fg；深色是暖灰底，不是白色實塊） */}
         <span className="num absolute right-0 flex h-5 w-12 -translate-y-1/2 items-center bg-fill-bg pl-2 text-xs text-fill-fg" style={{ top: `${yOf(LAST)}%` }}>
