@@ -276,6 +276,8 @@ function Hero({ summary }: { summary?: PortfolioSummary }) {
   // 主欄 52rem 以上（`@container`，和持倉表同一條線）：今日與總損益疊成兩行放在總資產右邊；
   // 比較窄的桌面（1024–1350px 開著 AI 面板）並排會把「今日」擠成直排，所以照舊排在總資產下面一行
   const item = "contents lg:flex lg:items-baseline lg:gap-2.5"
+  // 還沒記過任何東西（沒有市值、沒有成本、也沒有已實現的損益）：今日與總損益都是 NT$0 0.00%，只是一排雜訊，不放
+  const blank = summary.market_value === 0 && summary.cost_basis === 0 && summary.total_pnl === 0
   return (
     <div className="@container min-w-0 max-lg:mt-1.5">
       <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-ink-2">
@@ -295,6 +297,7 @@ function Hero({ summary }: { summary?: PortfolioSummary }) {
       </p>
       <div className="lg:@min-[52rem]:flex lg:@min-[52rem]:items-end lg:@min-[52rem]:gap-x-14">
       <BigTotal value={summary.market_value} />
+      {!blank && (
       <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 lg:mt-3 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2 lg:@min-[52rem]:mt-0 lg:@min-[52rem]:mb-1.5 lg:@min-[52rem]:flex-col lg:@min-[52rem]:gap-y-1">
         <div className={item}>
           <dt className="num print-label text-sm">{close.day}</dt>
@@ -309,6 +312,7 @@ function Hero({ summary }: { summary?: PortfolioSummary }) {
           </dd>
         </div>
       </dl>
+      )}
       </div>
     </div>
   )

@@ -118,8 +118,36 @@ function EmptyLedger() {
   const openImport = useUi((s) => s.openImport)
   if (readOnly) return <EmptyState title="目前沒有持股" />
   // 空狀態兩條路：自己填，或跟 AI 說一句；開了匯入的帳號多一個文字連結（先選匯入庫存或對帳單；已經有持股的話匯入庫存最快）
+  // 樣子是一張還沒寫的帳頁（2026-11-20）：印好的持倉表頭（和有持股時同一排欄位）→ 這段空狀態 → 兩條空白的格線往下淡出。
+  // 只有空的表格線，沒有假資料；表頭與空白線只是畫面（aria-hidden），螢幕報讀器只讀空狀態
+  return (
+    <div>
+      <div aria-hidden className="form-head grid h-10 grid-cols-[minmax(0,1fr)_repeat(5,auto)] items-end gap-x-10 pb-2 text-right max-md:hidden">
+        <span className="text-left">名稱</span>
+        <span>收盤價・均價</span>
+        <span>今日漲跌</span>
+        <span>今日損益</span>
+        <span>損益</span>
+        <span>市值・佔比</span>
+      </div>
+      <div aria-hidden className="form-head flex h-11 items-end justify-between pb-2 md:hidden">
+        <span>持有 0 檔</span>
+        <span>收盤價・今日漲跌</span>
+      </div>
+      <EmptyLedgerState canImport={canImport} onImport={() => openImport()} ask={ask} />
+      <div aria-hidden className="[mask-image:linear-gradient(to_bottom,#000_10%,transparent)]">
+        <div className="h-[72px] border-b border-rule lg:h-[60px]" />
+        <div className="h-[72px] border-b border-rule lg:h-[60px]" />
+      </div>
+    </div>
+  )
+}
+
+function EmptyLedgerState({ canImport, onImport, ask }: { canImport: boolean; onImport: () => void; ask: ReturnType<typeof useAskAi> }) {
   return (
     <EmptyState
+      flush
+      className="pt-5"
       title="帳本還是空的"
       description="自己填第一筆，或跟 AI 說一句。"
       action={
@@ -129,7 +157,7 @@ function EmptyLedger() {
             試試「買 0050 2 張 52.4」
           </Button>
           {canImport && (
-            <button type="button" onClick={() => openImport()} className={textAction}>
+            <button type="button" onClick={onImport} className={textAction}>
               匯入庫存或對帳單
             </button>
           )}
