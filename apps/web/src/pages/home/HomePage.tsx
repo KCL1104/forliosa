@@ -33,7 +33,7 @@ export function HomePage() {
           <figure key={s.title} className="group/specimen flex min-w-0 flex-col max-lg:max-w-lg">
             {/* 欄與欄之間的留白放在欄裡面（第一欄右邊、最後一欄左邊各 2rem，中間那一欄左右各 1rem）：三欄的內容一樣寬，標題下的印刷線連成一條 */}
             <figcaption className="flex min-h-11 items-end gap-3 border-b border-print pb-2 lg:px-4 lg:group-first/specimen:pr-8 lg:group-first/specimen:pl-0 lg:group-last/specimen:pr-0 lg:group-last/specimen:pl-8">
-              <h2 className="text-xl font-bold">{s.title}</h2>
+              <h2 className="font-print text-xl font-semibold">{s.title}</h2>
               <DemoTag className="mb-1 ml-auto" />
               <span className="sr-only">{s.label}</span>
             </figcaption>

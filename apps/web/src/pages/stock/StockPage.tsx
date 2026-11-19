@@ -111,7 +111,7 @@ function StockPageInner() {
       <div className="page-frame px-5 py-16 md:px-8 xl:px-14">
         {notFound ? (
           <div className="flex max-w-md flex-col items-start gap-3">
-            <h1 className="text-2xl font-bold">找不到「{symbol}」</h1>
+            <h1 className="font-print text-2xl font-bold">找不到「{symbol}」</h1>
             <p className="text-ink-2">代號可能打錯了。台股用 2330、0050 這樣的代號，美股用 AAPL、NVDA。</p>
             <Link to="/" className={buttonVariants({ variant: "outline" })}>
               回到帳本

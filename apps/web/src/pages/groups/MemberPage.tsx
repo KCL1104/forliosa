@@ -51,7 +51,7 @@ function Member() {
       </nav>
       {missing ? (
         <div className="flex flex-col items-start gap-3 py-6">
-          <h1 className="text-2xl font-bold">找不到這位成員</h1>
+          <h1 className="font-print text-2xl font-bold">找不到這位成員</h1>
           <p className="text-ink-2">他可能已經離開這個群組。</p>
           <Link to="/groups/$groupId" params={{ groupId }} className={buttonVariants({ variant: "outline" })}>
             回到群組

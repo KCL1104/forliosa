@@ -86,7 +86,7 @@ function GroupView() {
 function GroupMissing() {
   return (
     <div className="flex flex-col items-start gap-3 py-6">
-      <h1 className="text-2xl font-bold">找不到這個群組</h1>
+      <h1 className="font-print text-2xl font-bold">找不到這個群組</h1>
       <p className="max-w-prose text-ink-2">群組可能已經刪除，或你已經不在這個群組裡。</p>
       <Link to="/groups" className={buttonVariants({ variant: "outline" })}>
         回到群組
@@ -104,7 +104,7 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
   return (
     <>
       <header className="mt-1">
-        <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{group.name}</h1>
+        <h1 className="font-print text-2xl font-bold lg:text-3xl">{group.name}</h1>
         <p className="num mt-1.5 text-base text-ink-2">
           {group.members.length} 位成員・你是{ROLE_LABEL[group.my_role]}
           {!group.ranking_enabled && "・不排名次"}

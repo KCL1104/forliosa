@@ -76,16 +76,16 @@ function block(t: Token, ctx: Ctx, id?: string): React.ReactNode {
       return null
     case "heading": {
       const h = t as Tokens.Heading
-      if (h.depth === 1) return <h1 className="text-2xl font-bold tracking-[-0.01em] [text-wrap:pretty] lg:text-3xl">{inline(h.tokens, ctx)}</h1>
+      if (h.depth === 1) return <h1 className="font-print text-2xl font-bold [text-wrap:pretty] lg:text-3xl">{inline(h.tokens, ctx)}</h1>
       // scroll-mt：從目錄或「見第 N 節」跳過來時，標題不會被固定的標題列蓋住
       if (h.depth === 2)
         return (
-          <h2 id={id} className="mt-10 scroll-mt-20 border-b border-print pb-2 text-xl font-bold [text-wrap:pretty]">
+          <h2 id={id} className="mt-10 scroll-mt-20 border-b border-print pb-2 font-print text-xl font-semibold [text-wrap:pretty]">
             {inline(h.tokens, ctx)}
           </h2>
         )
-      // 小節標題比內文（16px）大一階：17px 粗體
-      return <h3 className={cn("mt-6 text-lg font-bold [text-wrap:pretty]", LINE)}>{inline(h.tokens, ctx)}</h3>
+      // 小節標題比內文（16px）大一階：18px 明體（印好的字，和章節標題同一種字）
+      return <h3 className={cn("mt-6 font-print text-lg font-semibold [text-wrap:pretty]", LINE)}>{inline(h.tokens, ctx)}</h3>
     }
     case "paragraph":
       return <p className={cn("mt-3", LINE)}>{inline((t as Tokens.Paragraph).tokens, ctx)}</p>

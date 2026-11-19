@@ -48,7 +48,7 @@ export function InvitePage() {
         <>
           <header className="flex flex-col gap-1.5">
             <p className="text-base text-ink-2">{preview.data.inviter_display_name} 邀請你加入</p>
-            <h1 className="text-3xl font-bold tracking-[-0.01em]">{preview.data.group_name}</h1>
+            <h1 className="font-print text-3xl font-bold">{preview.data.group_name}</h1>
           </header>
           {preview.data.status === "member" ? (
             <div className="flex flex-col items-start gap-3">
@@ -82,7 +82,7 @@ export function InvitePage() {
 function Gone({ title, body, signedIn }: { title: string; body: string; signedIn: boolean }) {
   return (
     <div className="flex flex-col items-start gap-3">
-      <h1 className="text-2xl font-bold">{title}</h1>
+      <h1 className="font-print text-2xl font-bold">{title}</h1>
       <p className="text-ink-2">{body}</p>
       {signedIn && (
         <Link to="/" className={buttonVariants({ variant: "outline" })}>

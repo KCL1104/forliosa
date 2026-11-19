@@ -60,7 +60,7 @@ function NewTopic() {
         <nav aria-label="位置" className="flex min-h-11 items-center text-sm">
           {origin && <BackLink origin={origin} />}
         </nav>
-        <h1 className="mt-1 text-2xl font-bold tracking-[-0.01em] lg:text-3xl">開新主題</h1>
+        <h1 className="mt-1 font-print text-2xl font-bold lg:text-3xl">開新主題</h1>
         {/* 群組清單回來之前不知道有哪些地方可以發：先放骨架，不讓選項跳動 */}
         {/* 讀不到群組時說出來、可以重試（原本一直是骨架；2026-11-14 review） */}
         {groups.isError || me.isError ? (

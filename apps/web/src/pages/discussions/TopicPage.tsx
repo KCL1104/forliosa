@@ -110,7 +110,7 @@ function TopicMissing() {
   const { signedIn } = useViewer()
   return (
     <div className="flex flex-col items-start gap-3 py-6">
-      <h1 className="text-2xl font-bold">找不到這個主題</h1>
+      <h1 className="font-print text-2xl font-bold">找不到這個主題</h1>
       <p className="max-w-prose text-base text-ink">
         {signedIn ? "主題已經刪除，或是你不在它所屬的群組裡。" : "主題已經刪除，或是要登入才看得到的群組主題。"}
       </p>
