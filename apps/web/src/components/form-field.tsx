@@ -23,11 +23,11 @@ export function FormField({
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
       <div className="flex items-baseline justify-between gap-2">
         {htmlFor ? (
-          <label htmlFor={htmlFor} className="text-sm font-medium">
+          <label htmlFor={htmlFor} className="print-label text-sm">
             {label}
           </label>
         ) : (
-          <span className="text-sm font-medium">{label}</span>
+          <span className="print-label text-sm">{label}</span>
         )}
         {hint && <span className="num text-sm text-ink-2">{hint}</span>}
       </div>

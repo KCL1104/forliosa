@@ -125,7 +125,7 @@ function CreateGroupDialog({ onClose }: { onClose: () => void }) {
           }}
           className="flex flex-col gap-1.5"
         >
-          <label htmlFor="group-name" className="text-sm font-medium">
+          <label htmlFor="group-name" className="print-label text-sm">
             群組名稱
           </label>
           <Input id="group-name" className="pointer-coarse:h-11" value={name} maxLength={40} autoFocus placeholder="例如：家族投資" aria-invalid={touched && bad} onChange={(e) => setName(e.target.value)} />

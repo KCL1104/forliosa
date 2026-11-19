@@ -78,7 +78,7 @@ export function ReportDialog({ target, what = "內容", onClose }: { target: Dis
           </fieldset>
           <div className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between gap-2">
-              <label htmlFor={`${id}-note`} className="text-sm font-medium">
+              <label htmlFor={`${id}-note`} className="print-label text-sm">
                 補充說明（選填）
               </label>
               {charCount(note) > REPORT_NOTE_MAX - 50 && <span className="num text-sm text-ink-2">{`${charCount(note)}/${REPORT_NOTE_MAX}`}</span>}

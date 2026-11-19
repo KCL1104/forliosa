@@ -316,7 +316,7 @@ function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void
             update.mutate({ name: trimmed }, { onSuccess: () => toast.success("已更新群組名稱"), onError: (err) => toast.error("名稱沒有更新", { description: errText(err) }) })
           }}
         >
-          <label htmlFor="group-rename" className="text-sm font-medium">
+          <label htmlFor="group-rename" className="print-label text-sm">
             群組名稱
           </label>
           <Input id="group-rename" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} aria-invalid={bad} className="pointer-coarse:h-11 sm:col-start-1 sm:row-start-2" />

@@ -416,7 +416,7 @@ function Field({ id, label, error, hint, className, children }: { id?: string; l
   return (
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
       {id ? (
-        <label htmlFor={id} className="text-sm font-medium">
+        <label htmlFor={id} className="print-label text-sm">
           {label}
         </label>
       ) : (

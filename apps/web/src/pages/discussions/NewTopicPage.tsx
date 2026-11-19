@@ -340,7 +340,7 @@ function Field({ label, htmlFor, hint, error, errorId, children }: { label: stri
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <div className="flex items-baseline justify-between gap-2">
-        <label htmlFor={htmlFor} className="text-sm font-medium">
+        <label htmlFor={htmlFor} className="print-label text-sm">
           {label}
         </label>
         {hint && <span className="num text-sm text-ink-2">{hint}</span>}

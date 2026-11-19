@@ -205,7 +205,7 @@ function DiscordForm({ groupId, replacing, current }: { groupId: string; replaci
       }}
     >
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="discord-webhook" className="text-sm font-medium">
+        <label htmlFor="discord-webhook" className="print-label text-sm">
           Webhook 網址
         </label>
         <Input

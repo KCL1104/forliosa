@@ -27,7 +27,7 @@ const buttonVariants = cva(
         destructive: "border-transparent bg-act text-act-fg hover:bg-act-hover",
         ai: "border-dashed border-ai-rule bg-ai-wash text-ai hover:border-ai focus-visible:outline-ai",
         link: "h-auto border-transparent px-0 text-ink underline underline-offset-3 hover:text-ink-2",
-        sign: "relative rounded-none border-0 bg-act font-bold text-act-fg hover:bg-act-hover after:pointer-events-none after:absolute after:inset-0.75 after:border after:border-current after:opacity-40 disabled:bg-rule disabled:text-ink-2 disabled:opacity-100 disabled:after:opacity-0",
+        sign: "relative rounded-none border-0 bg-act font-bold text-act-fg hover:bg-act-hover after:pointer-events-none after:absolute after:inset-0.75 after:border after:border-current after:opacity-40 disabled:bg-hov disabled:text-ink-2 disabled:inset-ring disabled:inset-ring-rule disabled:opacity-100 disabled:after:opacity-0",
       },
       size: {
         default: "h-10 gap-2 px-3 pointer-coarse:h-11",

@@ -102,7 +102,7 @@ export function GroupPasses() {
             加值的群組人數上限比較高，每個交易日有 AI 日報。付款人在自己擁有的群組裡選要用在哪個群組；最後一天過完回到免費，不會移出成員。對方要先登入過一次。
           </p>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-email`} className="text-sm font-medium">
+            <label htmlFor={`${id}-email`} className="print-label text-sm">
               付款人的 Email
             </label>
             <Input
@@ -123,7 +123,7 @@ export function GroupPasses() {
             {fieldError("email")}
           </div>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-until`} className="text-sm font-medium">
+            <label htmlFor={`${id}-until`} className="print-label text-sm">
               最後一天
             </label>
             <Input
@@ -146,7 +146,7 @@ export function GroupPasses() {
             )}
           </div>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-group`} className="text-sm font-medium">
+            <label htmlFor={`${id}-group`} className="print-label text-sm">
               群組編號（選填）
             </label>
             <Input
@@ -171,7 +171,7 @@ export function GroupPasses() {
             )}
           </div>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-note`} className="text-sm font-medium">
+            <label htmlFor={`${id}-note`} className="print-label text-sm">
               備註（選填，只有站方看得到）
             </label>
             <Input id={`${id}-note`} value={note} maxLength={NOTE_MAX} autoComplete="off" placeholder="例如：11/16 轉帳 NT$300" onChange={(e) => setNote(e.target.value)} />
@@ -277,7 +277,7 @@ function ExtendDialog({ pass, onClose }: { pass: AdminGroupPass; onClose: () => 
           }}
         >
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-until`} className="text-sm font-medium">
+            <label htmlFor={`${id}-until`} className="print-label text-sm">
               最後一天
             </label>
             <Input
@@ -301,7 +301,7 @@ function ExtendDialog({ pass, onClose }: { pass: AdminGroupPass; onClose: () => 
             )}
           </div>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-note`} className="text-sm font-medium">
+            <label htmlFor={`${id}-note`} className="print-label text-sm">
               備註（選填）
             </label>
             <Input id={`${id}-note`} value={note} maxLength={NOTE_MAX} autoComplete="off" onChange={(e) => setNote(e.target.value)} />

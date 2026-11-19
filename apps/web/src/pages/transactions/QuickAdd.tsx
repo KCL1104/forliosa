@@ -655,7 +655,7 @@ function Cell({
       {first && (
         // 不折行：同一行的格子靠標籤一樣高對齊。360px 寬的手機上「手續費（美元）」比那一欄寬，
         // 多出來的字伸到右邊移除鈕的上面（那裡空著），不會把輸入框擠到下面一行
-        <label htmlFor={id} className="text-sm font-medium whitespace-nowrap">
+        <label htmlFor={id} className="print-label text-sm whitespace-nowrap">
           {label}
         </label>
       )}

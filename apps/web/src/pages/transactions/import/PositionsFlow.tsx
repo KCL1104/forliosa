@@ -266,7 +266,7 @@ export function PositionsFlow({
             </>
           ) : (
             <div className="flex flex-col gap-1.5">
-              <label htmlFor={textId} className="text-sm font-medium">
+              <label htmlFor={textId} className="print-label text-sm">
                 庫存的文字
               </label>
               <Textarea

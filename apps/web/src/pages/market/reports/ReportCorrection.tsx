@@ -73,7 +73,7 @@ function CorrectionDialog({ report, onClose }: { report: MarketReport; onClose: 
           }}
         >
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-note`} className="text-sm font-medium">
+            <label htmlFor={`${id}-note`} className="print-label text-sm">
               更正說明
             </label>
             <Textarea

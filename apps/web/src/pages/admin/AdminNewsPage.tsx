@@ -62,7 +62,7 @@ function News() {
           }}
         >
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-domain`} className="text-sm font-medium">
+            <label htmlFor={`${id}-domain`} className="print-label text-sm">
               網域
             </label>
             <Input
@@ -89,7 +89,7 @@ function News() {
             )}
           </div>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-reason`} className="text-sm font-medium">
+            <label htmlFor={`${id}-reason`} className="print-label text-sm">
               原因（選填）
             </label>
             <Input id={`${id}-reason`} value={reason} maxLength={REASON_MAX} autoComplete="off" onChange={(e) => setReason(e.target.value)} />

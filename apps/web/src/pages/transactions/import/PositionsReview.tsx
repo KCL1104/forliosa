@@ -346,7 +346,7 @@ export function PositionsReview({
           </Button>
           <button
             type="button"
-            className="sign-box w-auto min-w-[76px] px-3 disabled:bg-rule disabled:text-ink-2 disabled:after:opacity-0"
+            className="sign-box w-auto min-w-[76px] px-3 disabled:bg-hov disabled:text-ink-2 disabled:inset-ring disabled:inset-ring-rule disabled:after:opacity-0"
             aria-label={`簽名：匯入 ${included.length} 檔`}
             disabled={included.length === 0 || busy !== null}
             onClick={() => void sign()}
@@ -532,7 +532,7 @@ function MobileRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, o
 function MobileField({ label, id, error, children }: { label: string; id: string; error?: string; children: React.ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <label htmlFor={id} className="text-sm font-medium">
+      <label htmlFor={id} className="print-label text-sm">
         {label}
       </label>
       {children}

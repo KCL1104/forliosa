@@ -196,7 +196,7 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
         </Row>
       )}
       <div className="flex flex-col gap-1.5">
-        <label htmlFor="reduce-qty" className="text-sm font-medium">
+        <label htmlFor="reduce-qty" className="print-label text-sm">
           賣出的{qtyLabel}
         </label>
         <div className="flex gap-2">

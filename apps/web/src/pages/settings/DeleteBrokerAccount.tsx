@@ -65,7 +65,7 @@ export function DeleteBrokerAccountDialog({ account, onClose }: { account: Accou
             {what}
           </p>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={id} className="text-sm font-medium">
+            <label htmlFor={id} className="print-label text-sm">
               請輸入帳戶名稱「{name}」
             </label>
             <Input

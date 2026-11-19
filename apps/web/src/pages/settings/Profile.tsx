@@ -60,7 +60,7 @@ function ProfileForm({ name: initial, email, avatar }: { name: string; email: st
     >
       <UserAvatar name={trimmed || initial} url={avatar} size="lg" />
       <div className="grid min-w-0 flex-1 gap-x-3 gap-y-1.5 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <label htmlFor="display-name" className="text-sm font-medium">
+        <label htmlFor="display-name" className="print-label text-sm">
           顯示名稱
         </label>
         <Input id="display-name" value={name} maxLength={30} autoComplete="nickname" aria-invalid={bad} aria-describedby="display-name-help" onChange={(e) => setName(e.target.value)} className="pointer-coarse:h-11 sm:col-start-1 sm:row-start-2" />
@@ -99,7 +99,7 @@ function PublicNameForm({ user }: { user: User }) {
       }}
     >
       <div className="grid min-w-0 gap-x-3 gap-y-1.5 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <label htmlFor="public-name" className="text-sm font-medium">
+        <label htmlFor="public-name" className="print-label text-sm">
           公開暱稱
         </label>
         <Input

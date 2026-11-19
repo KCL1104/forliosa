@@ -121,7 +121,7 @@ function Members() {
         >
           <p className="max-w-prose text-md text-ink">會員每天可以問 AI 30 題，還有每日收盤簡報；其他功能大家都有。最後一天過完自動回到免費。對方要先登入過一次。</p>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-email`} className="text-sm font-medium">
+            <label htmlFor={`${id}-email`} className="print-label text-sm">
               Email
             </label>
             <Input
@@ -147,7 +147,7 @@ function Members() {
             )}
           </div>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-until`} className="text-sm font-medium">
+            <label htmlFor={`${id}-until`} className="print-label text-sm">
               最後一天
             </label>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -179,7 +179,7 @@ function Members() {
             )}
           </div>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor={`${id}-note`} className="text-sm font-medium">
+            <label htmlFor={`${id}-note`} className="print-label text-sm">
               備註（選填，只有站方看得到）
             </label>
             <Input id={`${id}-note`} value={note} maxLength={NOTE_MAX} autoComplete="off" placeholder="例如：11/16 轉帳 NT$490" onChange={(e) => setNote(e.target.value)} />

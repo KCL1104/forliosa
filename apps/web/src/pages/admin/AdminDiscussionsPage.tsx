@@ -268,7 +268,7 @@ function ConfirmDialog({ confirm, onClose }: { confirm: Confirm; onClose: () => 
               <RangeChips label="停權期間" value={days} onChange={setDays} options={DAY_OPTIONS} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label htmlFor={`${id}-reason`} className="text-sm font-medium">
+              <label htmlFor={`${id}-reason`} className="print-label text-sm">
                 原因（選填）
               </label>
               <Input id={`${id}-reason`} value={reason} maxLength={REPORT_NOTE_MAX} autoComplete="off" aria-describedby={`${id}-reason-help`} onChange={(e) => setReason(e.target.value)} />

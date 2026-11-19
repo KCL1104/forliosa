@@ -46,11 +46,12 @@ export function LedgerSpecimen() {
       </p>
       <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1">
         <dt className="print-label text-sm">今日</dt>
-        <dd className="text-lg font-medium">
+        {/* 三欄並排時（≥ 1024px）一欄約 320px：18px 的「+NT$1,005,572 ▲35.4%」會把百分比擠到下一行，用 16px */}
+        <dd className="text-lg font-medium lg:text-base">
           <Delta {...DAY} />
         </dd>
         <dt className="print-label text-sm">總損益（含股利）</dt>
-        <dd className="text-lg font-medium">
+        <dd className="text-lg font-medium lg:text-base">
           <Delta {...PNL} />
         </dd>
       </dl>

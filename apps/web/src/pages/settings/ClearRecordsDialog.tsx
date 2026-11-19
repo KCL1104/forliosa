@@ -297,7 +297,7 @@ function ClearRecordsDialog({ open, returnTo, onClose }: { open: boolean; return
 
               {!gone && (
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor={id} className="text-sm font-medium">
+                  <label htmlFor={id} className="print-label text-sm">
                     請輸入「{CLEAR_RECORDS_CONFIRMATION}」
                   </label>
                   <Input

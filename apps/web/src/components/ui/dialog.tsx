@@ -114,7 +114,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
     <DialogPrimitive.Title
       data-slot="dialog-title"
       // 右邊留給「關閉」；底下是印刷線
-      className={cn("border-b border-print pr-14 pb-3 text-lg leading-snug font-bold text-ink", className)}
+      className={cn("border-b border-print pr-14 pb-3 font-print text-lg leading-snug font-bold text-ink", className)}
       {...props}
     />
   )

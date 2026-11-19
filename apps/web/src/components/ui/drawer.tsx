@@ -104,7 +104,7 @@ function DrawerTitle({
     <DrawerPrimitive.Title
       data-slot="drawer-title"
       // 和對話框同一種標題：底下一條印刷線，說明在線的下面
-      className={cn("border-b border-print pb-3 text-lg leading-snug font-bold text-ink", className)}
+      className={cn("border-b border-print pb-3 font-print text-lg leading-snug font-bold text-ink", className)}
       {...props}
     />
   )

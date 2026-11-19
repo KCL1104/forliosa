@@ -491,7 +491,7 @@ function PasswordField({ value, onChange, wrong, inputRef }: { value: string; on
   const hintId = useId()
   return (
     <div className="flex flex-col gap-1.5 sm:max-w-xs">
-      <label htmlFor={id} className="text-sm font-medium">
+      <label htmlFor={id} className="print-label text-sm">
         PDF 密碼
       </label>
       <Input
