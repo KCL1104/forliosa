@@ -29,7 +29,8 @@ import { useTrendRange } from "./use-trend-range"
 
 /**
  * 總資產走勢（產品負責人 2026-11-17 選方案 B）：主數字正下方、和主欄一樣寬，手機與桌面同一個元件。
- * 由上到下：讀數（固定兩行）→ 圖（桌面 160px、手機 120px）→ 區間（靠左）→ 歷史短（2～6 個收盤）時的一行說明。
+ * 由上到下：讀數（固定兩行）→ 圖（桌面 120px、手機 96px）→ 區間（靠左）→ 歷史短（2～6 個收盤）時的一行說明。
+ * 桌面的區間按鈕在讀數那一列的右邊（2026-11-19 選 B，首屏給持倉；DOM 順序照舊，只是格線換位置）。
  * - 資料：一次 `usePerformance("ALL")`（不帶基準），區間在前端切（`lib/trend-range.ts`），換區間不再問伺服器。
  *   存檔（2026/11/12 起）以後是官方收盤價；以前的日子用 Yahoo 回補換算成當時成交價（產品負責人 2026-11-18），
  *   區間用到那些日子時區間按鈕下面寫一行「11/11 以前用 Yahoo 參考價計算，不是官方資料」（後端的 `reference_until`）。
@@ -150,7 +151,7 @@ export function HeroTrend({ view }: { view: LedgerView }) {
       referenceUntil={perf.data.reference_until ?? null}
       range={range}
       onRange={setRange}
-      height={desktop ? 160 : 120}
+      height={desktop ? 120 : 96}
       desktop={desktop}
       few={state === "short"}
       shortNote={shortNote}
@@ -275,9 +276,9 @@ function TrendBand({
     : `${svgTitle}，總資產從 ${formatMoney(first.market_value)} 到 ${formatMoney(last.market_value)}，報酬${retSpeech(total)}`
 
   return (
-    <section aria-label="總資產走勢" className="mt-6 lg:mt-8">
+    <section aria-label="總資產走勢" className="mt-5 lg:mt-6 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-x-6">
       {/* 讀數：固定兩行（高度不變，畫面不跳）；不做跟著游標跑的浮動框，手指不會擋住數字 */}
-      <div className="h-11">
+      <div className="h-11 lg:col-start-1 lg:row-start-1">
         {a ? (
           <>
             {/* 320px、上市與上櫃收盤日不同（「上市 11/17・上櫃 11/14 收盤」）時放不下：截斷的是日期，金額一定完整 */}
@@ -318,7 +319,7 @@ function TrendBand({
 
       <div
         ref={wrapRef}
-        className="relative mt-2 touch-pan-y rounded-xs outline-offset-2 select-none [-webkit-touch-callout:none] focus-visible:outline-2 focus-visible:outline-ring"
+        className="relative mt-2 touch-pan-y rounded-xs lg:col-span-2 lg:row-start-2 outline-offset-2 select-none [-webkit-touch-callout:none] focus-visible:outline-2 focus-visible:outline-ring"
         tabIndex={0}
         role="group"
         aria-label="總資產走勢：用左右方向鍵逐點看數字"
@@ -389,9 +390,9 @@ function TrendBand({
       </div>
 
       {/* 七顆一律放（比資料長的也可以選）；歷史短時說明在按鈕下面——按鈕的位置和歷史夠長以後一樣 */}
-      <RangeChips className="mt-2" label="走勢區間" value={range} options={TREND_RANGES} onChange={onRange} />
-      {shortNote && <p className="mt-1.5 text-sm text-ink-2">{shortNote}</p>}
-      {referenceLine && <p className="mt-1.5 text-sm text-ink-2">{referenceLine}</p>}
+      <RangeChips className="mt-2 lg:col-start-2 lg:row-start-1 lg:mt-0 lg:self-start" label="走勢區間" value={range} options={TREND_RANGES} onChange={onRange} />
+      {shortNote && <p className="mt-1.5 text-sm text-ink-2 lg:col-span-2">{shortNote}</p>}
+      {referenceLine && <p className="mt-1.5 text-sm text-ink-2 lg:col-span-2">{referenceLine}</p>}
     </section>
   )
 }

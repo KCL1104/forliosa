@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { unpricedHoldings } from "@/lib/ledger-display"
 import { ClosedRounds } from "./ClosedRounds"
-import { ConcentrationLine } from "./ConcentrationLine"
 import { RecurringMark } from "./RecurringMark"
 import { useActivePlans } from "./use-active-plans"
 import { COLUMN_HINT, useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
@@ -84,8 +83,6 @@ export function HoldingsView() {
 
   return (
     <>
-      {/* 表頭上面一行事實（最大一檔、前 5 大、最大產業），連到「配置」分段（2026-11-18） */}
-      <ConcentrationLine />
       <HoldingsTable rows={rows} sort={sort} onSort={setSort} pinned={pinned} />
       <HoldingsList rows={rows} pinned={pinned} />
       <UnpricedNote rows={rows} />

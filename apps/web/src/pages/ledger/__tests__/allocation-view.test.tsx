@@ -263,37 +263,13 @@ describe("配置分段", () => {
   })
 })
 
-describe("持倉表頭的一行事實", () => {
-  it("最大一檔、前 5 大（和配置同一份數字），連到配置分段", async () => {
-    const router = renderApp("/")
-    const link = await screen.findByRole("link", { name: "看配置" }, T)
-    const line = link.closest("p")!
-    expect(line).toHaveTextContent("最大一檔 台積電 39.6%")
-    expect(line).toHaveTextContent("前 5 大 78.4%")
-    expect(line).not.toHaveTextContent(/超過/)
-    await userEvent.click(link)
-    await waitFor(() => expect((router.state.location.search as { view?: string }).view).toBe("allocation"))
-    expect(await list()).toBeInTheDocument()
-  })
-
-  it("最大一檔是 ETF、超過的是個股：「超過上限」不接在 ETF 後面，另外寫幾檔超過", async () => {
-    desktop = true
-    const real = await api.getPortfolioSummary()
-    vi.spyOn(api, "getPortfolioSummary").mockResolvedValue({
-      ...real,
-      concentration: {
-        ...real.concentration!,
-        top_holding: { symbol: "0050.TW", name: "元大台灣50", weight: 0.45, is_etf: true },
-        limits: { holding: 0.3, industry: null },
-        over_limits: [{ kind: "holding", key: "2330.TW", label: "台積電", weight: 0.32, limit: 0.3 }],
-      },
-    })
+describe("帳本到配置", () => {
+  it("集中度只在配置分段：持倉上面不再有一行「最大一檔」（產品負責人 2026-11-19 選 B，首屏給持倉）", async () => {
     renderApp("/")
-    const line = (await screen.findByRole("link", { name: "看配置" }, T)).closest("p")!
-    const first = within(line).getByText("最大一檔").parentElement!
-    expect(first).toHaveTextContent("最大一檔 元大台灣50 45.0%")
-    expect(first).not.toHaveTextContent(/超過/)
-    expect(line).toHaveTextContent("1 檔超過上限")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    expect(await screen.findByRole("table", { name: "持倉" }, T)).toBeInTheDocument()
+    expect(screen.queryByText("最大一檔")).toBeNull()
+    expect(screen.queryByRole("link", { name: "看配置" })).toBeNull()
   })
 
   it("數字鍵 4 切到配置", async () => {

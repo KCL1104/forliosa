@@ -130,6 +130,23 @@ describe("帳本主數字與分段", () => {
     expect(week.querySelector("svg")).toBeNull()
   })
 
+  it("手機首屏給持倉：走勢與本週事項接在持倉後面；績效分段的走勢在分段列與內容之間（2026-11-19 選 C2）", async () => {
+    const router = renderApp("/")
+    const tabs = await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    const trend = await screen.findByRole("region", { name: "總資產走勢" }, T)
+    const list = await screen.findByRole("list", { name: "持倉" }, T)
+    const week = await screen.findByRole("link", { name: /^本週 \d+ 件事，查看全部$/ }, T)
+    const after = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(after(tabs, list)).toBe(true)
+    expect(after(list, trend)).toBe(true)
+    expect(after(trend, week)).toBe(true)
+    fireEvent.keyDown(document.body, { key: "3" })
+    await waitFor(() => expect((router.state.location.search as { view?: string }).view).toBe("performance"))
+    const perfTrend = await screen.findByRole("region", { name: "總資產走勢" }, T)
+    expect(after(tabs, perfTrend)).toBe(true)
+    expect(after(perfTrend, screen.getByRole("tabpanel", { name: /績效/ }))).toBe(true)
+  })
+
   it("數字鍵 1–4 切換分段（持倉・紀錄・績效・配置）；焦點在輸入框裡、或按著修飾鍵時不動作", async () => {
     const router = renderApp("/")
     const tabs = await screen.findByRole("tablist", { name: "帳本內容" }, T)

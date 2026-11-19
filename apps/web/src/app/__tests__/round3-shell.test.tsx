@@ -224,6 +224,26 @@ describe("桌面 AI 面板：安靜的頁面預設是窄欄", () => {
     await screen.findByRole("complementary", { name: "問 AI" }, T)
   })
 
+  it("帳本的本週事項在面板標題下面（首屏給持倉）；看對話紀錄或收合面板時回到主欄、接在持倉後面", async () => {
+    const user = userEvent.setup()
+    renderApp("/")
+    const weekName = /^本週 \d+ 件事，查看全部$/
+    const aside = await screen.findByRole("complementary", { name: "問 AI" }, T)
+    expect(await within(aside).findByRole("link", { name: weekName }, T)).toBeInTheDocument()
+    const main = () => screen.getByRole("main")
+    expect(within(main()).queryByRole("link", { name: weekName })).toBeNull()
+    // 看對話紀錄：面板沒有本頁欄位，回到主欄
+    await user.click(within(aside).getByRole("button", { name: "對話紀錄" }))
+    expect(await within(main()).findByRole("link", { name: weekName }, T)).toBeInTheDocument()
+    expect(within(aside).queryByRole("link", { name: weekName })).toBeNull()
+    // 收合面板：接在持倉後面
+    await user.click(screen.getByRole("button", { name: "收合 AI 面板" }))
+    await screen.findByRole("button", { name: /^展開 AI 面板/ }, T)
+    const week = await within(main()).findByRole("link", { name: weekName }, T)
+    const table = await screen.findByRole("table", { name: "持倉" }, T)
+    expect(table.compareDocumentPosition(week) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it("安靜頁面的開合不存檔：只有帳本那一邊的開合寫進 localStorage", () => {
     act(() => useAi.getState().setPanelOpen(true, true))
     const saved = JSON.parse(localStorage.getItem("forliosa:ai") ?? "{}") as { state?: Record<string, unknown> }

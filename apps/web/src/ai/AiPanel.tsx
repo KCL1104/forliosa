@@ -12,6 +12,7 @@ import { HistoryList } from "./HistoryList"
 import { BriefingDot } from "./Briefing"
 import { PanelHome } from "./Home"
 import { composerPlaceholder } from "./panel-helpers"
+import { usePanelSlot } from "./panel-slot"
 import { useAiRunner } from "./runner"
 import { useBriefingUnread } from "./use-briefing-unread"
 import { useAi, useCurrentThread, usePendingCount } from "./store"
@@ -79,6 +80,7 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
   const suggestions = useAiSuggestions(ctx)
   const route = useRouteKind()
   const [view, setView] = useState<"chat" | "history">("chat")
+  const setSlot = usePanelSlot((s) => s.set)
   // 今天有沒有定期定額要扣款（記下定期定額的建議）：只讀扣款，不讓每一頁都重算一次帳本與股利
   useUpcomingRecurring(7)
 
@@ -169,6 +171,9 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
           <PanelRightCloseIcon aria-hidden className="size-[18px]" />
         </IconButton>
       </header>
+
+      {/* 本頁欄位（`panel-slot.ts`）：頁面放自己的一列（帳本的本週事項）；看對話紀錄時不放 */}
+      {view !== "history" && <div ref={setSlot} className="shrink-0 empty:hidden" />}
 
       {/* 兩塊都有 key：換順序時 React 搬節點，不重新掛載（輸入框裡打到一半的字還在） */}
       {atTop ? [composer, body] : [body, composer]}
