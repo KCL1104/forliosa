@@ -26,7 +26,7 @@ export function HomePage() {
   usePageTitle()
   return (
     <div className="page-frame px-5 pt-8 pb-10 md:px-8 lg:pt-14 xl:px-14 xl:pb-14">
-      <h1 className="text-3xl font-bold tracking-[-0.01em] lg:text-4xl">{ABOUT_SHORT}</h1>
+      <h1 className="font-print text-3xl font-bold lg:text-4xl">{ABOUT_SHORT}</h1>
 
       <div className="mt-8 grid gap-y-12 lg:grid-cols-3">
         {SPECIMENS.map((s) => (

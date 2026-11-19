@@ -39,17 +39,17 @@ const HOLDINGS: { name: string; code: string; qty: string; price: string; pct: n
 export function LedgerSpecimen() {
   return (
     <>
-      <p className="text-base font-medium text-ink">總資產</p>
+      <p className="print-label text-base">總資產</p>
       <p className="hero-figure mt-1 flex items-baseline text-4xl font-medium tracking-[-0.015em] text-ink">
         <span className="mr-1.5 text-lg font-normal tracking-normal text-ink-2">NT$</span>
         {formatMoney(TOTAL, { bare: true })}
       </p>
       <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1">
-        <dt className="text-sm text-ink-2">今日</dt>
+        <dt className="print-label text-sm">今日</dt>
         <dd className="text-lg font-medium">
           <Delta {...DAY} />
         </dd>
-        <dt className="text-sm text-ink-2">總損益（含股利）</dt>
+        <dt className="print-label text-sm">總損益（含股利）</dt>
         <dd className="text-lg font-medium">
           <Delta {...PNL} />
         </dd>
@@ -113,7 +113,7 @@ export function StockSpecimen() {
         <span>2330</span>
         <span>上市・半導體業</span>
       </p>
-      <p className="mt-1 text-2xl font-bold tracking-[-0.01em] text-ink">台積電</p>
+      <p className="mt-1 font-print text-2xl font-bold text-ink">台積電</p>
       <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <p className="hero-figure text-4xl font-medium tracking-[-0.015em] text-ink">{formatPrice(LAST, "TWSE", "stock")}</p>
         <p className="num text-xl font-medium text-rise">
@@ -183,7 +183,7 @@ export function StockSpecimen() {
 function Item({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline gap-2">
-      <dt className="text-sm text-ink-2">{label}</dt>
+      <dt className="print-label text-sm">{label}</dt>
       <dd className="font-medium text-ink">{value}</dd>
     </div>
   )

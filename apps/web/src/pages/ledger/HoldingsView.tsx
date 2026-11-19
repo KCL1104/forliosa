@@ -515,7 +515,7 @@ function CostLine({ h }: { h: Holding }) {
 function CostItem({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline gap-2 whitespace-nowrap">
-      <dt className="text-sm text-ink-2">{label}</dt>
+      <dt className="print-label text-sm">{label}</dt>
       <dd className="font-medium">{value}</dd>
     </div>
   )

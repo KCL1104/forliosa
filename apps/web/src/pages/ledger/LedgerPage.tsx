@@ -260,7 +260,7 @@ function Hero({ summary }: { summary?: PortfolioSummary }) {
   return (
     <div className="min-w-0 max-lg:mt-1.5">
       <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-ink-2">
-        <b className="text-base font-medium text-ink">總資產</b>
+        <b className="print-label text-base">總資產</b>
         <span className="num whitespace-nowrap">{close.label}</span>
         {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
         {/* 在等的收盤價預計幾點進來（只在需要時）：桌面接在日期後面（「11/12 收盤・今天的預計下午 2:00–2:30 更新」），
@@ -277,13 +277,13 @@ function Hero({ summary }: { summary?: PortfolioSummary }) {
       <BigTotal value={summary.market_value} />
       <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 lg:mt-3.5 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2">
         <div className={item}>
-          <dt className="num text-sm text-ink-2">{close.day}</dt>
+          <dt className="num print-label text-sm">{close.day}</dt>
           <dd className="text-lg font-medium">
             <Delta amount={summary.day_change} pct={summary.day_change_pct} />
           </dd>
         </div>
         <div className={item}>
-          <dt className="text-sm text-ink-2">總損益（含股利）</dt>
+          <dt className="print-label text-sm">總損益（含股利）</dt>
           <dd className="text-lg font-medium">
             <Delta amount={summary.total_pnl} pct={summary.total_return_pct} />
           </dd>

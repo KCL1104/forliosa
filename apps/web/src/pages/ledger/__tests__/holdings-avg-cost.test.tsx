@@ -196,7 +196,7 @@ describe("展開一檔：均價・持有・成本一行", { timeout: 20_000 }, (
     expect(tsmc.cost_basis).toBe(500 * 815 + 162 + 1000 * 631 + 251)
     // 在每一筆買賣的前面；名稱是淡墨 13px，數字等寬
     expect(line.compareDocumentPosition(records) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(line).getByText("均價", { selector: "dt" })).toHaveClass("text-sm", "text-ink-2")
+    expect(within(line).getByText("均價", { selector: "dt" })).toHaveClass("print-label", "text-sm")
     expect(line).toHaveClass("num")
     // 以股顯示的偏好照樣用
     act(() => usePrefs.setState({ quantityUnit: "share" }))

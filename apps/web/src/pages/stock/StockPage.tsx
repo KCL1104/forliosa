@@ -206,6 +206,16 @@ function HeaderSkeleton() {
   )
 }
 
+/** 手機的代號與市場別（桌面寫在上面的位置列） */
+function CodeLine({ inst }: { inst: InstrumentDetail }) {
+  return (
+    <p className="mt-0.5 flex gap-x-3 text-sm text-ink-2 sm:hidden">
+      <span className="num">{inst.code}</span>
+      <span>{marketLine(inst)}</span>
+    </p>
+  )
+}
+
 function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   const overview = useOverview(inst.symbol)
   const watch = useWatchlist()
@@ -222,8 +232,9 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
         <ArrowLeftIcon aria-hidden className="size-4" />
         帳本
       </Link>
-      <span className="num">{inst.code}</span>
-      <span>{marketLine(inst)}</span>
+      {/* 手機：代號與市場別寫在股票名稱下面（`CodeLine`），這一列只放返回與按鈕，任何一檔都不會把按鈕擠到下一行 */}
+      <span className="num max-sm:hidden">{inst.code}</span>
+      <span className="max-sm:hidden">{marketLine(inst)}</span>
       {status?.attention && (
         <span className="demo-tag border-ink font-medium" title={status.note ?? undefined}>
           注意股
@@ -279,7 +290,8 @@ function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentD
     // 沒有報價：整頁只在價格這一格說一次——不放一個大大的「—」，走勢圖、估值、殖利率這些由價格算出來的區塊不再各自重複
     return (
       <header className="mt-1">
-        <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{inst.name}</h1>
+        <h1 className="font-print text-2xl font-bold lg:text-3xl">{inst.name}</h1>
+        <CodeLine inst={inst} />
         {us ? <UsNoClose key={inst.symbol} inst={inst} held={held} /> : <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">沒有報價</p>}
       </header>
     )
@@ -293,7 +305,8 @@ function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentD
   const digits = quote ? quoteDecimals(quote.price, inst.market, inst.type) : 0
   return (
     <header className="mt-1">
-      <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{inst.name}</h1>
+      <h1 className="font-print text-2xl font-bold lg:text-3xl">{inst.name}</h1>
+      <CodeLine inst={inst} />
       <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <p className="hero-figure text-4xl font-medium tracking-[-0.015em] lg:text-[3rem] lg:leading-tight">
           {inst.market === "US" && <span className="mr-1 text-xl font-normal text-ink-2">US$</span>}
@@ -633,7 +646,7 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
 function Item({ label, value, className }: { label: string; value: React.ReactNode; className?: string }) {
   return (
     <div className={cn("flex min-w-0 items-baseline gap-2", className)}>
-      <dt className="shrink-0 text-sm whitespace-nowrap text-ink-2">{label}</dt>
+      <dt className="print-label shrink-0 text-sm whitespace-nowrap">{label}</dt>
       <dd className="min-w-0 font-medium">{value}</dd>
     </div>
   )

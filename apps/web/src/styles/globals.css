@@ -1,6 +1,20 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@fontsource-variable/noto-sans-tc/wght.css";
+@import "@fontsource-variable/noto-serif-tc/wght.css";
+
+/*
+ * 數字：IBM Plex Sans 的數字、金額符號與分隔號（OFL-1.1）。中文與英文字母照舊是 Noto Sans TC：
+ * unicode-range 只換這幾個字元，所以 --font-sans、--font-print 開頭放這一套，全站的數字就是同一種字。
+ */
+@font-face {
+  font-family: "Forliosa Figures";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 700;
+  src: url("../../node_modules/@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0024-0025, U+002B-002E, U+0030-0039, U+2212;
+}
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -133,20 +147,24 @@
 
 /*
  * Forliosa 設計 token —— 世界觀：學校聯絡簿。說明見 /DESIGN.md。
- * 淺色是紙白、深色是藍黑夜間筆記本；1px 藍灰格線就是結構（表格不包卡片）；
- * 藍黑原子筆墨是文字與動作；石墨灰只屬於 AI（鉛筆）；紅綠只表示價格漲跌。
+ * 淺色是微暖的紙、深色是石墨；1px 藍灰格線就是結構（表格不包卡片）；
+ * 印好的字（標題、表頭、欄位名稱）是明體、印刷藍；藍黑原子筆墨是使用者寫的字與動作；
+ * 石墨灰只屬於 AI（鉛筆）；紅綠只表示價格漲跌。
  */
 :root {
-  /* 紙與墨 */
-  --paper: #fbfbf8;
+  /* 紙與墨（紙 2026-11-19 從 #fbfbf8 改成微暖的 #f8f6f0：看起來不再是一張白畫面） */
+  --paper: #f8f6f0;
   --raised: #ffffff;
-  /* 格線有兩種：--rule 是列與列之間的格線（淡）；--print 是印在簿子上的線（表頭雙線、區塊標題底線、手機底部列的上緣），比格線深一階 */
+  /* 格線有兩種：--rule 是列與列之間的格線（淡）；--print 是印在簿子上的線（表頭雙線、區塊標題底線、手機底部列的上緣），比格線深一階（對紙 2.8:1） */
   --rule: #d6dee8;
-  --print: #93a6c6;
+  --print: #7f95ba;
+  /* 印刷藍：印好的字（區塊標題以外的欄位名稱與表頭），對紙 5.5:1、對 hover 5.0:1 */
+  --print-ink: #4a6491;
   --ink: #1f2a44;
   --ink-2: #5b6478;
   --ctl: #838ca0;
-  --hov: #f2f4f8;
+  /* hover 和紙同一個暖色調、深一階（原本的冷灰 #f2f4f8 放在暖紙上看不見） */
+  --hov: #efebe2;
   --sel: rgb(31 42 68 / 0.08);
   --lift: rgb(15 23 48 / 0.1);
   --act: #1f2a44;
@@ -236,6 +254,8 @@
   --raised: #191714;
   --rule: #46433f;
   --print: #65625c;
+  /* 深色不用藍色：印好的字是淡墨的暖灰（7.5:1），和墨色靠明體分開 */
+  --print-ink: #a6a39e;
   --ink: #e6e5e2;
   --ink-2: #a6a39e;
   --ctl: #696661;
@@ -291,6 +311,7 @@
   --color-raised: var(--raised);
   --color-rule: var(--rule);
   --color-print: var(--print);
+  --color-print-ink: var(--print-ink);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ctl: var(--ctl);
@@ -342,19 +363,24 @@
   --radius-xl: 12px;
   --radius-2xl: 16px;
 
-  --font-sans: "Noto Sans TC Variable", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  /* 書寫（使用者的墨水）：黑體；印好的字：明體。兩套的數字都是 Forliosa Figures（IBM Plex Sans） */
+  --font-sans: "Forliosa Figures", "Noto Sans TC Variable", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-print: "Forliosa Figures", "Noto Serif TC Variable", "Noto Serif TC", "PingFang TC", "PMingLiU", serif;
 
-  /* 固定字級（Operate）：12・13・14・15・17・20・24・32・40・64 */
+  /*
+   * 固定字級（Operate，2026-11-19 收成九級）：12・14・16・18・20・24・32・40・64。
+   * 以前的 13／14／15／17 只差 1px、分不出來：13 併進 14（sm 與 md 同值），15 改 16，17 改 18。
+   */
   --text-xs: 0.75rem;
   --text-xs--line-height: 1.1rem;
-  --text-sm: 0.8125rem;
-  --text-sm--line-height: 1.25rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.35rem;
   --text-md: 0.875rem;
   --text-md--line-height: 1.35rem;
-  --text-base: 0.9375rem;
+  --text-base: 1rem;
   --text-base--line-height: 1.5rem;
-  --text-lg: 1.0625rem;
-  --text-lg--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.6rem;
   --text-xl: 1.25rem;
   --text-xl--line-height: 1.75rem;
   --text-2xl: 1.5rem;
@@ -578,22 +604,35 @@
   }
 
   /*
-   * 表頭（印好的表格）：13px 淡墨標籤，下面一條印刷雙線（1px、2px 空隙、1px，--print）。
+   * 印好的字（聯絡簿上印的欄位名稱：「總資產」「今日」「持有」「均價」）：明體 500、印刷藍。
+   * 使用者寫的字（數值、名稱）是墨色黑體；兩種字靠字體與墨色分開，不靠大小。
+   */
+  .print-label {
+    font-family: var(--font-print);
+    font-weight: 500;
+    color: var(--print-ink);
+    letter-spacing: 0.02em;
+  }
+
+  /*
+   * 表頭（印好的表格）：14px 明體、印刷藍，下面一條印刷雙線（1px、2px 空隙、1px，--print）。
    * 用在 <thead>、表頭的 <tr>，或 div／li 做的格線清單表頭。雙線用 ::after 畫（上下各 1px 的框線，中間透明），
    * 不佔版面、不靠底色：表頭列自己不要再加 border-b。（不用背景漸層：對比檢查工具會把漸層當成文字的底色。）
    */
   .form-head {
+    font-family: var(--font-print);
     font-size: var(--text-sm);
     line-height: var(--text-sm--line-height);
-    font-weight: 400;
-    color: var(--ink-2);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--print-ink);
     white-space: nowrap;
   }
   .form-head:not(thead, tr),
   thead.form-head > tr > *,
   tr.form-head > * {
     position: relative;
-    font-weight: 400;
+    font-weight: 500;
   }
   .form-head:not(thead, tr)::after,
   thead.form-head > tr > *::after,

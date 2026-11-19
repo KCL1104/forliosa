@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils"
 
 /**
  * 區塊（聯絡簿）：沒有卡片外框，只有標題下一條印刷線（--print；列與列之間的格線是 --rule）。格線就是結構。
- * 標題上方留白比下方多。區塊標題全站同一級：20px 700（帳本、個股、群組、成員、設定、資料來源都用這個元件）；
+ * 標題上方留白比下方多。區塊標題全站同一級：20px 明體 600（印好的字；帳本、個股、群組、成員、設定、資料來源都用這個元件）；
  * 只有個股總覽第三層的參考區塊（`QuietSection`）是 17px。
  */
 export function Section({
@@ -30,7 +30,7 @@ export function Section({
       {(title || action) && (
         <header className="flex min-h-11 flex-wrap items-end gap-x-3 gap-y-1 border-b border-print pb-2">
           {title && (
-            <h2 id={titleId} className="flex min-w-0 items-baseline gap-2 text-xl font-bold">
+            <h2 id={titleId} className="flex min-w-0 items-baseline gap-2 font-print text-xl font-semibold">
               {title}
             </h2>
           )}
@@ -61,7 +61,7 @@ export function PageHeader({
     <div className={cn("mb-6 flex flex-wrap items-end gap-x-6 gap-y-3", className)}>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{title}</h1>
+          <h1 className="font-print text-2xl font-bold lg:text-3xl">{title}</h1>
           {meta}
         </div>
         {description && <p className="mt-1.5 max-w-prose text-base text-ink-2">{description}</p>}
@@ -75,7 +75,7 @@ export function PageHeader({
 export function Stat({ label, value, sub, className }: { label: React.ReactNode; value: React.ReactNode; sub?: React.ReactNode; className?: string }) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-0.5", className)}>
-      <dt className="text-sm text-ink-2">{label}</dt>
+      <dt className="print-label text-sm">{label}</dt>
       <dd className="num text-xl font-medium">{value}</dd>
       {sub && <dd className="text-sm text-ink-2">{sub}</dd>}
     </div>

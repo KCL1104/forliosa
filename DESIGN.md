@@ -2,14 +2,15 @@
 name: Forliosa
 description: 以台股為主的持倉帳本——像聯絡簿一樣一行一行排好的帳，旁邊坐著先寫草稿、等你簽名的 AI。
 colors:
-  paper: "#fbfbf8"
+  paper: "#f8f6f0"
   raised: "#ffffff"
   rule: "#d6dee8"
-  print: "#93a6c6"
+  print: "#7f95ba"
+  print-ink: "#4a6491"
   ink: "#1f2a44"
   ink-2: "#5b6478"
   ctl: "#838ca0"
-  hov: "#f2f4f8"
+  hov: "#efebe2"
   act-hover: "#0f1730"
   ai: "#4a5262"
   ai-wash: "#f1f2f4"
@@ -29,6 +30,7 @@ colors:
   night-raised: "#191714"
   night-rule: "#46433f"
   night-print: "#65625c"
+  night-print-ink: "#a6a39e"
   night-ink: "#e6e5e2"
   night-ink-2: "#a6a39e"
   night-ctl: "#696661"
@@ -72,29 +74,29 @@ typography:
     lineHeight: 1.2
     letterSpacing: "-0.015em"
   page-title:
-    fontFamily: "Noto Sans TC Variable, sans-serif"
+    fontFamily: "Forliosa Figures, Noto Serif TC Variable, serif"
     fontSize: "2rem"
     fontWeight: 700
     lineHeight: 1.25
     letterSpacing: "-0.01em"
   mobile-title:
-    fontFamily: "Noto Sans TC Variable, sans-serif"
+    fontFamily: "Forliosa Figures, Noto Serif TC Variable, serif"
     fontSize: "1.375rem"
     fontWeight: 700
     lineHeight: 1.3
   section-title:
-    fontFamily: "Noto Sans TC Variable, sans-serif"
+    fontFamily: "Forliosa Figures, Noto Serif TC Variable, serif"
     fontSize: "1.25rem"
-    fontWeight: 700
+    fontWeight: 600
     lineHeight: 1.4
   row-name:
-    fontFamily: "Noto Sans TC Variable, sans-serif"
-    fontSize: "1.0625rem"
+    fontFamily: "Forliosa Figures, Noto Sans TC Variable, sans-serif"
+    fontSize: "1.125rem"
     fontWeight: 500
     lineHeight: 1.35
   body:
-    fontFamily: "Noto Sans TC Variable, sans-serif"
-    fontSize: "0.9375rem"
+    fontFamily: "Forliosa Figures, Noto Sans TC Variable, sans-serif"
+    fontSize: "1rem"
     fontWeight: 400
     lineHeight: 1.5
   body-mobile:
@@ -108,10 +110,16 @@ typography:
     fontWeight: 400
     lineHeight: 1.5
   meta:
-    fontFamily: "Noto Sans TC Variable, sans-serif"
-    fontSize: "0.8125rem"
+    fontFamily: "Forliosa Figures, Noto Sans TC Variable, sans-serif"
+    fontSize: "0.875rem"
     fontWeight: 400
     lineHeight: 1.5
+  print-label:
+    fontFamily: "Forliosa Figures, Noto Serif TC Variable, serif"
+    fontSize: "0.875rem"
+    fontWeight: 500
+    lineHeight: 1.5
+    letterSpacing: "0.02em"
   micro:
     fontFamily: "Noto Sans TC Variable, sans-serif"
     fontSize: "0.75rem"
@@ -242,10 +250,11 @@ components:
 
 帳本就是首頁（登入後；沒登入的首頁是簡短的介紹頁，見 Components〈Navigation〉）。介面借用台灣學生每天帶回家的聯絡簿：淺色是紙白、深色是石墨（帶一點暖的灰黑，2026-11-14 起；之前是藍黑夜間筆記本）；1px 格線就是結構，表格不包卡片；文字與動作用藍黑原子筆的墨色寫。AI 是另一支筆：鉛筆。AI 寫的字、起的草稿是鉛筆寫的（石墨灰），使用者簽名才是墨水——草稿可以擦掉，簽了名才算數。模型寫出來的話是墨色黑體，和介面同一種字，讀起來最清楚（原本用楷體，2026-11-15 因為看不清楚拿掉）。AI 做的每件事都先寫成草稿（石墨灰虛線），使用者在方形「簽名｜確認入帳」格按下才生效；簽名後格子裡留下使用者的字。（2026-11-13 以前 AI 用的是紫色；產品負責人決定改成鉛筆灰：紫色是最典型的「AI 產品」顏色，拿掉之後介面上的顏色只剩價格的紅與綠。）
 
-這是 Operate 介面：導覽、表格、分段、選單都是使用者早就會用的標準元件。世界只提供四樣東西：**字型**（一套 Noto Sans TC，AI 寫的字也是）、**色盤**（紙、格線、藍黑墨、石墨灰、價格紅綠）、**密度**（Google Finance 的留白主數字＋一行一格的帳）、**一個招牌動作**（簽名格）。
+這是 Operate 介面：導覽、表格、分段、選單都是使用者早就會用的標準元件。世界只提供四樣東西：**字型**（兩種筆跡：印好的字是明體 Noto Serif TC、使用者與 AI 寫的字是黑體 Noto Sans TC；全站的數字是 IBM Plex Sans，2026-11-19）、**色盤**（紙、格線、藍黑墨、石墨灰、價格紅綠）、**密度**（Google Finance 的留白主數字＋一行一格的帳）、**一個招牌動作**（簽名格）。
 
 **Key Characteristics:**
-- 紙白（深色：石墨）的底，1px 格線（淺色藍灰、深色暖灰）分隔每一行，沒有卡片包表格。
+- 微暖的紙（深色：石墨）的底，1px 格線（淺色藍灰、深色暖灰）分隔每一行，沒有卡片包表格。
+- 兩種筆跡：印好的字（頁面與區塊標題、表頭、「總資產」「今日」「持有」這些欄位名稱）是明體、印刷藍；使用者寫的字（名稱、數值、句子）是墨色黑體。
 - 藍黑墨是唯一的操作色：主要按鈕、選取、焦點框。選取全站只有三種語法（見 Components〈Selected states〉）。
 - 石墨灰（鉛筆）只屬於 AI：AI 做的事（草稿卡、「待簽名」）與「問 AI」入口。模型寫的話本身是墨色黑體，讀起來最清楚（2026-11-15）。
 - 世界在結構裡：印好的表頭（印刷雙線）、聯絡簿的日期格、簽名格語法的定案按鈕、手機的底部列（簿子的下緣：印刷雙線＋文字分頁＋一格石墨灰的「問 AI」）。印在簿子上的線（`print`）和列與列之間的格線（`rule`）是兩種顏色。
@@ -268,12 +277,13 @@ components:
 - **價格紅綠**（`price-red`／`price-green`，深色 `night-price-*`）：只用在價格、漲跌幅與由價格直接造成的損益（今日損益、未實現）。依 `<html data-convention>` 對應到漲／跌：預設 `tw` 紅漲綠跌，可切換 `us` 綠漲紅跌。
 
 ### Neutral
-- **紙白 Paper**（`paper`）／**石墨**（`night-paper` #12100e）：頁面底色。深色是帶一點暖的灰黑（OKLCH 色相 75、彩度 0.006），像鉛筆芯與炭筆；不是藍黑，也不是純黑。
+- **紙 Paper**（`paper` #f8f6f0，2026-11-19 從看起來是白色的 #fbfbf8 改成微暖）／**石墨**（`night-paper` #12100e）：頁面底色。深色是帶一點暖的灰黑（OKLCH 色相 75、彩度 0.006），像鉛筆芯與炭筆；不是藍黑，也不是純黑。
 - **白紙 Raised**（`raised`、`night-raised` #191714）：輸入框、選單、popover。
 - **格線 Rule**（`rule` #d6dee8、`night-rule` #46433f）：列與列之間的線、日期格的直線、頂部列的底線、AI 面板左側的雙線。安靜：對紙 1.31:1（淺）／1.93:1（深；`raised` 上 1.82:1、hover 列上 1.75:1）。深色的格線保持 1.9:1 以上，一列一列的格線在夜裡也看得出來。
-- **印刷線 Print**（`print` #93a6c6、`night-print` #65625c）：印在簿子上的線——表頭的雙線（`.form-head`）、區塊標題的底線（`Section`、觀察、已出清）、手機底部列上緣的雙線。比格線深一階：對紙 2.38:1（淺）／3.12:1（深），所以一眼分得出「印好的表格」和「一列一列的格線」。不拿來當控制項的框（那是鉛筆灰）。
+- **印刷線 Print**（`print` #7f95ba、`night-print` #65625c）：印在簿子上的線——表頭的雙線（`.form-head`）、區塊標題的底線（`Section`、觀察、已出清）、手機底部列上緣的雙線。比格線深一階：對紙 2.81:1（淺；2026-11-19 從 #93a6c6 的 2.38:1 加深，印好的表格要看得出來）／3.12:1（深），所以一眼分得出「印好的表格」和「一列一列的格線」。不拿來當控制項的框（那是鉛筆灰）。
 - **鉛筆灰 Ctl**（`ctl`、`night-ctl`）：控制項的 1px 外框（分段、輸出按鈕、輸入框），對比 3.25:1（淺）／3.3:1（深）。
-- **淡墨底 Hov**（`hov`、`night-hov` #1d1b19）：hover 列、選取的清單列、次要圓形按鈕底。
+- **印刷藍 Print-ink**（`print-ink` #4a6491、`night-print-ink` #a6a39e）：印好的字的顏色——表頭（`.form-head`）與欄位名稱（`.print-label`）。對紙 5.52:1、對 hover 5.01:1。深色不用藍色，是淡墨的暖灰，和墨色靠明體分開。區塊與頁面標題是印好的字型、但用墨色（標題要最先被看到）。
+- **淡墨底 Hov**（`hov` #efebe2，和紙同一個暖色調深一階；原本的冷灰 #f2f4f8 放在暖紙上對比只有 1.02:1、`night-hov` #1d1b19）：hover 列、選取的清單列、次要圓形按鈕底。
 
 ### Data visualization
 - 「我的」＝墨色實線；「基準／比較」＝鉛筆灰（`chart-bench`）虛線；總資產走勢的投入本金＝鉛筆灰階梯實線（不是比較基準）；均線 MA5／20／60 ＝赭（`chart-ochre`）／藍筆（`chart-blue`）／鉛筆灰。
@@ -295,27 +305,34 @@ components:
 
 ## Typography
 
-**字型**：Noto Sans TC Variable（介面、數字、AI 寫的字，以 `@fontsource-variable/noto-sans-tc` 自架，依 unicode-range 只載入用到的字）。全站只有這一套字型；原本給 AI 用的全字庫正楷體（TW-Kai）2026-11-15 拿掉了（字型檔、`tw-kai.css` 與產生切片的腳本都刪了，要找回來看 git 歷史）。
+**字型**（2026-11-19 產品負責人選定：深度精修、從字型與印刷層開始，數字選 IBM Plex Sans）：三套，各有一個只有它做得到的工作。
+- **黑體 Noto Sans TC Variable**：使用者與 AI 寫的字（名稱、內文、按鈕、AI 的回答）。`--font-sans`。
+- **明體 Noto Serif TC Variable**：印好的字（頁面標題、區塊標題、表頭、欄位名稱）。`--font-print`（utility `font-print`、元件 class `.print-label`）。
+- **數字 Forliosa Figures**：IBM Plex Sans 的數字、金額符號、正負號與分隔號（`U+0024-0025, U+002B-002E, U+0030-0039, U+2212`），用 `@font-face` 的 unicode-range 只換這幾個字元，放在 `--font-sans` 與 `--font-print` 的最前面：全站的數字是同一種字，中文與英文字母照舊。
+三套都以 Fontsource 自架（OFL-1.1），中文字型依 unicode-range 只載入用到的字。原本給 AI 用的全字庫正楷體（TW-Kai）2026-11-15 拿掉了（字型檔、`tw-kai.css` 與產生切片的腳本都刪了，要找回來看 git 歷史）。
 
-**Character**：一個無襯線家族撐起整個帳本，AI 寫的字也是同一個家族。層級靠字級、字重與格線，不靠顏色；使用者要讀的字是墨色，淡墨只給標籤與 meta。
+**Character**：聯絡簿上有兩種字——印好的（明體、印刷藍）和寫上去的（黑體、墨色）。數字是使用者的帳，用一套筆畫俐落、等寬的 Plex。層級靠字級、字重、字體與格線；使用者要讀的字是墨色，淡墨只給 meta。
+
+**字級（2026-11-19 收成九級）**：12・14・16・18・20・24・32・40・64。以前的 13／14／15／17 只差 1px、分不出來：13 併進 14（`text-sm` 與 `text-md` 同值）、15 改 16（`text-base`）、17 改 18（`text-lg`）。class 名稱沒變；**這份文件其他段落寫的 13px 現在是 14px、15px 是 16px、17px 是 18px**。
 
 ### Hierarchy
 - **Total**（500，64px／手機 40px，比例數字）：總資產。前面的「NT$」用 24px 淡墨。
 - **Quote**（500，48px／手機 40px）：個股現價（NumberFlow）。
-- **Page title**（700，32px／手機 24px）：個股名稱、設定、群組。
+- **Page title**（明體 700，32px／手機 24px）：個股名稱、設定、群組。手機的個股頁：代號與市場別寫在名稱下面（`CodeLine`），上面的位置列只放「← 帳本」與按鈕。
 - **Intro headline**（700，40px／手機 32px）：沒登入的首頁的標題（「股票帳本」）。全站只有這一個；登入後的頁面不用。
-- **Section title**（700，20px）：區塊標題，底下一條印刷線（`components/section.tsx` 的 `Section`）。**一個層級一個字級**：帳本、個股、群組、成員、設定、資料來源的區塊標題都是它（設定與資料來源以前是 17px）；只有個股總覽第三層的參考區塊（`QuietSection`）刻意小一級（17px）。
-- **Row name**（500，17px）：持倉表與清單的名稱；數字欄同為 17px。
-- **Body**（400，15px 桌面／16px 手機，行高 1.5）。
-- **Dense**（14px）：明細、圖例、按鈕。**Meta**（13px，淡墨）：表頭、代號・股數、日期、免責（2026-11-17 起全站 13px，見〈免責〉）；使用者必須讀的字不小於 13px。**Micro**（12px）：示範資料、日期格裡的星期。
+- **Section title**（明體 600，20px）：區塊標題，底下一條印刷線（`components/section.tsx` 的 `Section`）。**一個層級一個字級**：帳本、個股、群組、成員、設定、資料來源的區塊標題都是它（設定與資料來源以前是 17px）；只有個股總覽第三層的參考區塊（`QuietSection`）刻意小一級（17px）。
+- **Row name**（500，18px）：持倉表與清單的名稱；數字欄同為 18px。
+- **Body**（400，16px，行高 1.5）。
+- **Dense**（14px）：明細、圖例、按鈕。**Meta**（14px，淡墨）：代號・股數、日期、免責；使用者必須讀的字不小於 14px。**Print label**（明體 500，14px，印刷藍，字距 0.02em）：表頭與欄位名稱（「總資產」用 16px）。**Micro**（12px）：示範資料、日期格裡的星期。
 - ▲▼ 和它旁邊的數字同一個字級（`1em`），不另外縮小。
 - **AI voice**（Noto Sans TC 400，墨色，16px／手機 17px，行高 1.8）：模型寫的回答。`KaiText`（`apps/web/src/ai/kai-text.tsx`，切法在 `answer-text.ts` 的 `kaiRuns`；名稱是楷體時代留下的）把**數字和它的單位**（1,085 元、500 股、43.9%、2.1 倍、NT$75,000、▲4.83%）連成一段 `nowrap`（`.kai-num`），不會在行尾拆成「1,085／元」。**全站只有這一種排法**：對話裡的回答、群組週報的摘要（`DigestsTab`）、AI 寫的公司簡介（`AboutCompany`）、收盤重點（`SummaryBlock`）、模型寫的「為什麼」（`StockPage`）都是 `.ai-voice`＋`KaiText`，大小只有 `apps/web/src/ai/kai-size.ts` 的那一組——一段話 16px（手機 17px）、行高 1.8；只有一行的句子（「為什麼」、收盤重點的標題）用 **AI line**（20px、行高 1.5）。不另外寫自己的字級。AI 面板沒有問候語，分頁第一行這類規則句子用墨色 Noto Sans。**對話裡的回答是 Markdown**（產品負責人 2026-11-15；`apps/web/src/ai/ai-markdown.tsx` 的 `AiMarkdown`，和服務條款同一種做法：marked 的詞法分析＋React 節點，不用 `dangerouslySetInnerHTML`、原始 HTML 當成字、連結只接受 http(s)）：段落之間 12px；`- ` 清單用淡墨的圓點、`1.` 清單用淡墨的編號，項目之間 4px；任何層級的標題都畫成同一種小標題（和內文同大、600），面板裡沒有大標題；表格是格線表（表頭淡墨小一級、第一欄 500、數字等寬），太寬時在回答裡橫向捲動；**粗體** 是 600 墨色；單一換行就是換行（聊天的習慣）。舊的回答與 mock 的「・」條列顯示時換成清單。顯示前用程式整理固定的小毛病（`answer-text.ts` 的 `tidyAnswer`：民國年與「2026年11月12日」寫成 11/12、括號裡交代出處的說明、照貼的出處清單、說到「工具」的片語、清單之間的空行）；「無來源」的點線與標記接在那段字後面（段落跨越粗體等格式時找不到就不標）。市場頁的收盤重點、收盤簡報、群組週報、公司簡介、「為什麼」仍是一段一段的純文字（它們的提示詞要模型寫純文字）。
 
 ### Named Rules
-**The Tabular Ledger Rule.** `body` 全站 `tabular-nums`；只有獨立的大數字（總資產、現價）用比例數字。負號一律 U+2212「−」。
+**The Printed-and-Written Rule（印好的與寫上去的）.** 印好的字是明體：頁面標題、區塊標題（墨色）、表頭與欄位名稱（印刷藍）。使用者寫的字是黑體墨色：名稱、數值、句子、按鈕。不拿明體寫內容，也不拿印刷藍寫使用者的資料；AI 的草稿另有自己的鉛筆灰（The Two Pens Rule）。
+**The Tabular Ledger Rule.** `body` 全站 `tabular-nums`（數字是 Forliosa Figures，Plex 的 `tnum`）；只有獨立的大數字（總資產、現價）用比例數字。負號一律 U+2212「−」。
 **The Tick Decimal Rule.** 報價的小數位依台股升降單位：≥ 500 元 0 位（1,085）、0.1／0.5 檔 1 位且整數不帶小數（236.5、398）、0.01／0.05 檔 2 位（22.40；ETF 50 元以上是 0.05 檔，所以 52.40）、美股 2 位。漲跌點數跟著現價的位數。**價格只有一個格式**：`formatPrice(p, market, type)`（`apps/web/src/lib/format.ts`，內部用 `quoteDecimals`）——現價、參考價、漲跌停、成交價、均價、圖表讀數、相關股票都用它；知道股票還是 ETF 的地方一定傳 `type`（相關股票是 214，不是 214.00；台股 ETF 的代號都是 00 開頭）。不在升降單位上的價位（均價）不藏精度，補到 2 位為止（692.61、612.5）。換算出來的價位（河流圖的倍數價、縱軸、十字線、指數點位）用 `formatPriceLevel`，四捨五入到報價的位數（836.8 → 837）。每股金額另有 `formatPerShare`：EPS、每股淨值固定 2 位（52.30 元、US$8.98），每股股利照公告的位數（5 元、0.415 元）；總覽、估值、財務、股利寫法一樣。
 **The 16px Input Rule.** 觸控裝置上輸入框一律 16px 以上（手機「搜尋或提問」17px），避免 iOS 放大頁面。做法是在元件上加 `pointer-coarse:text-[1rem]`（`Input`、`Textarea`、股票搜尋、草稿卡的欄位）——不能只寫在 `@layer base`：Tailwind 的 `text-sm` 之類的 utility 會蓋過 base（2026-11-14 第六次評分量到全部表單都是 15px）。
-**The Read-It Rule（要讀的句子是 15px 墨色）.** 產品負責人 2026-11-13：說明文字先刪，留下來的放大。使用者非讀不可的句子——空狀態的原因、開關與動作的後果、對話框的說明、設定列的說明——一律 15px 墨色（`text-base text-ink`）。**淡墨小字（13px、12px）只給標註**：日期與時間、單位、筆數、欄位的格式提示（「2 到 20 個字」這種放在欄位下面的）、資料說明（`notes`）、免責與法律用語、表頭。沒有 14px 淡墨的說明段落。
+**The Read-It Rule（要讀的句子是 16px 墨色）.** 產品負責人 2026-11-13：說明文字先刪，留下來的放大。使用者非讀不可的句子——空狀態的原因、開關與動作的後果、對話框的說明、設定列的說明——一律 16px 墨色（`text-base text-ink`）。**淡墨小字（14px、12px）只給標註**：日期與時間、單位、筆數、欄位的格式提示（「2 到 20 個字」這種放在欄位下面的）、資料說明（`notes`）、免責與法律用語、表頭。沒有 14px 淡墨的說明段落。
 
 ### 說明文字怎麼寫（Copy）
 介面上的字多數是標籤和數字；會出問題的是說明。逐句檢查的結果與 80 條改寫在 `apps/web/.impeccable/critique/`（第五次）。規則：
@@ -467,7 +484,7 @@ components:
 `components/scroll-row.tsx`：手機上放不下的分頁列、區間與篩選。沒有箭頭；只有「後面還有」的那一邊用 mask 淡出 28px，隨捲動與尺寸變化（ResizeObserver）更新；選取中的子元件在載入與選取改變時捲進畫面，鍵盤移動焦點時焦點所在的子元件也會（只有鍵盤的焦點，`:focus-visible`：用滑鼠或手指按淡出區裡的那一顆時，按下就捲的話放開時手指下面已經是別顆、那一下沒按到——2026-11-17 帳本區間按鈕在 320px 七顆放不下時發現；按到的那一顆在選取改變時才捲進來）。這個 div 就是捲動容器，可以直接給 `role="tablist"`／`role="radiogroup"`。
 
 ### 印好的表頭與日期格
-- **`.form-head`**：表格與格線清單的表頭像印好的表格——13px 淡墨標籤，下面一條印刷雙線（1px、2px 空隙、1px，`print` 色；用 `::after` 的上下框線畫，不佔版面、不靠底色。不用背景漸層：對比檢查工具會把漸層當成文字的底色，誤報「4.4:1」）。表格的每個表頭格各畫一段，連成一條。用在 `<thead>`、表頭的 `<tr>`，或 div／li 做的表頭列；表頭列自己不要再加 `border-b`。目前用在：持倉表（桌面 `<thead>`、手機「持有 N 檔／現價・今日漲跌」）、交易列表、股利的「接下來」與「已入帳」（已入帳每一年一張表：年份與合計 → 表頭 → 列，年份列不另畫底線）、已出清（桌面 `<thead>`；手機展開的年份下面「名稱・持有／已實現」）、群組排行（桌面與手機）。排序中的欄位用墨色字＋箭頭（lucide ArrowDown／ArrowUp，和字同高），不用 ▲▼（那是價格漲跌的符號）。
+- **`.form-head`**：表格與格線清單的表頭像印好的表格——14px 明體 500、印刷藍（`print-ink`）的欄位名稱，下面一條印刷雙線（1px、2px 空隙、1px，`print` 色；用 `::after` 的上下框線畫，不佔版面、不靠底色。不用背景漸層：對比檢查工具會把漸層當成文字的底色，誤報「4.4:1」）。表格的每個表頭格各畫一段，連成一條。用在 `<thead>`、表頭的 `<tr>`，或 div／li 做的表頭列；表頭列自己不要再加 `border-b`。目前用在：持倉表（桌面 `<thead>`、手機「持有 N 檔／現價・今日漲跌」）、交易列表、股利的「接下來」與「已入帳」（已入帳每一年一張表：年份與合計 → 表頭 → 列，年份列不另畫底線）、已出清（桌面 `<thead>`；手機展開的年份下面「名稱・持有／已實現」）、群組排行（桌面與手機）。排序中的欄位用墨色字＋箭頭（lucide ArrowDown／ArrowUp，和字同高），不用 ▲▼（那是價格漲跌的符號）。
 - **`.date-cell`**：聯絡簿的日期格——日期墨色 500（等寬數字），星期（`.weekday`）12px 淡墨，右邊一條 1px 格線。元件 `apps/web/src/components/date-cell.tsx`（`<DateCell date=…>`，帳本與個股頁共用）：撐滿整列高度（抵掉列的上下內距），一列接一列時格線連成一條直線；星期的全形括號用 `halt`（半寬），兩行時左緣和日期對齊。預設手機日期與星期上下兩行、桌面一行——只給很窄的欄（交易列表的 3.25rem）；欄夠寬時用 `inline`，任何寬度都一行（股利清單的 88px 欄：「10/12（四）」）。下面可以再放一行 13px 淡墨（例如「6 天後」）。用在交易列表與股利清單的第一欄。
 
 ### Cards / Containers
