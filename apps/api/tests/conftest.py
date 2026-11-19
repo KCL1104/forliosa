@@ -30,6 +30,12 @@ os.environ.pop("NEWS_LANGSEARCH_ENABLED", None)
 os.environ.pop("LANGSEARCH_API_KEY", None)
 os.environ.pop("AI_LANGSEARCH_ENABLED", None)
 
+# Same reason for the .env file: running pytest from apps/api would read the local deployment settings
+# (US_PRICE_SOURCE=databento, AI keys, …) because Settings has env_file=".env". Tests read the environment only.
+import forliosa.config as _config
+
+_config.Settings.model_config["env_file"] = None
+
 import pytest
 from fastapi.testclient import TestClient
 
