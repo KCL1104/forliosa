@@ -107,7 +107,7 @@ const AREA = `${LINE}L100 100L0 100Z`
 const LAST = CLOSES.at(-1)!
 const PREV = CLOSES.at(-2)!
 
-/** 個股頁：名稱、收盤價與漲跌、我的部位、走勢 */
+/** 個股頁：名稱、收盤價與漲跌、我的持有、走勢 */
 export function StockSpecimen() {
   const change = LAST - PREV
   return (

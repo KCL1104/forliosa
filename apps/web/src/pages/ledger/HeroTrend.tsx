@@ -101,34 +101,47 @@ const NOTE_DOT_CLEAR = 9
  * 走勢畫不出來、而且後端說了原因時：一行淡墨原因，連到績效（手機也看得到；觸控 44px）。
  * 每個分段都放、一樣高（換分段時分段列不跳）；已經在績效分段時不連到自己，只是一行字。
  */
-function TrendMissing({ reason, linked }: { reason: string; linked: boolean }) {
+function TrendMissing({ reason, linked, titled, className }: { reason: string; linked: boolean; titled: boolean; className?: string }) {
   const box = "inline-flex items-center text-sm text-ink-2 max-lg:min-h-11 pointer-coarse:min-h-11"
+  // 手機的「總資產走勢」托盤：標題已經是「總資產走勢」，看得到的只寫原因；連結的名稱照樣是完整的（連結清單裡也聽得懂）
+  const text = titled ? (
+    <>
+      <span className="sr-only">總資產走勢：</span>
+      {reason}
+    </>
+  ) : (
+    `總資產走勢：${reason}`
+  )
   return (
-    <p className="mt-4 lg:mt-6">
+    <p className={cn("mt-4 lg:mt-6", className)}>
       {linked ? (
         <PlainLink to="/" search={{ view: "performance" }} className={cn(box, "underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink")}>
-          總資產走勢：{reason}
+          {text}
         </PlainLink>
       ) : (
-        <span className={box}>總資產走勢：{reason}</span>
+        <span className={box}>{text}</span>
       )}
     </p>
   )
 }
 
-export function HeroTrend({ view }: { view: LedgerView }) {
+/**
+ * `className`：外層的上邊距（桌面在總資產那一盤裡、接在數字下面；手機自己一盤時是 0）。
+ * `titled`：放在標題已經是「總資產走勢」的托盤裡（手機），畫不出來的原因前面不再寫「總資產走勢：」。
+ */
+export function HeroTrend({ view, className, titled = false }: { view: LedgerView; className?: string; titled?: boolean }) {
   const showTrend = useLedgerPrefs((s) => s.showTrend)
   const { perf, range, setRange } = useTrendRange()
   const desktop = useIsDesktop()
   const readOnly = useReadOnly()
   if (!showTrend || perf.isError) return null
-  if (!perf.data) return <Skeleton aria-label="總資產走勢載入中" className="mt-6 h-[224px] w-full rounded-sm lg:mt-8 lg:h-[252px]" />
+  if (!perf.data) return <Skeleton aria-label="總資產走勢載入中" className={cn("mt-6 h-[224px] w-full rounded-sm lg:mt-8 lg:h-[252px]", className)} />
   const series = perf.data.series
   const notes = perf.data.notes ?? []
   const state = trendState(series.length)
   if (state === "missing") {
     const reason = trendMissingReason(notes)
-    return reason ? <TrendMissing reason={reason} linked={view !== "performance"} /> : null
+    return reason ? <TrendMissing reason={reason} linked={view !== "performance"} titled={titled} className={className} /> : null
   }
   // 2～6 個收盤：區間按鈕下面一行說明（後端的原文＋目前幾個收盤日）。每個分段都寫同一句（高度不跟著分段變）；
   // 績效分段的說明因此不再重複這一句
@@ -159,7 +172,7 @@ export function HeroTrend({ view }: { view: LedgerView }) {
     shortNote,
   }
   // main 的高度（桌面 120、手機 96）；手機有「估計」括線、股利記號那兩列時加高（`TrendBand` 看這個帳本有沒有那兩列）
-  return <TrendBand {...props} height={desktop ? 120 : 96} />
+  return <TrendBand {...props} height={desktop ? 120 : 96} className={className} titled={titled} />
 }
 
 /** 縱軸刻度（資產組成）：負號用「−」、0 寫「0」（本金已收回時本金線畫在 0，v2 的刻度不會到負的） */
@@ -178,6 +191,8 @@ function TrendBand({
   few,
   shortNote,
   composition,
+  className,
+  titled = false,
 }: {
   series: PerformancePoint[]
   /** 後端的 `reference_until`：這一天（含）以前用 Yahoo 參考價估值 */
@@ -192,6 +207,10 @@ function TrendBand({
   /** 2～6 個收盤：每一點一個圓點 */
   few: boolean
   shortNote: React.ReactNode
+  /** 外層的上邊距 */
+  className?: string
+  /** 在標題是「總資產走勢」的托盤裡：托盤本身就是那個區塊，這裡不再是另一個同名的 region */
+  titled?: boolean
 }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const close = useLedgerClose()
@@ -523,7 +542,8 @@ function TrendBand({
   const legendPlace = "lg:col-span-2 lg:col-start-1 lg:row-start-2"
   // 窄（手機）：兩行兩欄（本金、賺的｜股利、總資產），金額寫完整；本金開關關掉時只有一行，高度照留（圖不會跳）。
   // 本金在圖外、圖裡放不下那一行字時：第一行是本金（後面寫在哪一邊），第二行是其他三項
-  const gridBox = cn("num h-10 text-sm leading-5 text-ink-2", legendPlace)
+  // 2026-11-21：托盤裡 320px 的手機只剩 248px，金額很大（上千億）時一行放不下——第二欄換到下一行（高度照最寬的金額定，滑過時不跳），不撐出畫面
+  const gridBox = cn("num min-h-10 text-sm leading-5 text-ink-2", legendPlace)
   const legend = !comp ? null : stacked ? (
     !inv ? (
       <div className={cn(gridBox, "flex gap-x-4")} data-legend-grid>
@@ -533,7 +553,7 @@ function TrendBand({
     ) : legendWhere ? (
       <div className={cn(gridBox, "flex flex-col")} data-legend-grid>
         <div className="flex">{legendInvested}</div>
-        <div className="flex gap-x-3">
+        <div className="flex flex-wrap gap-x-3">
           <span className="inline-flex flex-col">
             {legendGain}
             {gainSizer}
@@ -543,7 +563,7 @@ function TrendBand({
         </div>
       </div>
     ) : (
-      <div className={cn(gridBox, "flex gap-x-5")} data-legend-grid>
+      <div className={cn(gridBox, "flex flex-wrap gap-x-5")} data-legend-grid>
         <div className="flex flex-col" data-legend-col>
           {legendInvested}
           {legendGain}
@@ -578,7 +598,7 @@ function TrendBand({
   )
 
   return (
-    <section aria-label="總資產走勢" className="mt-5 lg:mt-6 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-x-6">
+    <section aria-label={titled ? undefined : "總資產走勢"} className={cn("mt-5 lg:mt-6 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-x-6", className)}>
       {/* 讀數：固定兩行（高度不變，畫面不跳）；不做跟著游標跑的浮動框，手指不會擋住數字。
           資產組成而且窄（手機）時本金開關在第二行的右邊 */}
       <div className={cn("h-11 lg:col-start-1 lg:row-start-1", stacked && "relative")} data-readout>

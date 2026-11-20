@@ -173,7 +173,8 @@ describe("審查後的修正：首頁走勢", { timeout: 20_000 }, () => {
     const readout = await waitFor(() => region.querySelector<HTMLElement>("[data-readout]")!, T)
     // v2 的手機：讀數兩行（日期與總資產、報酬與股利；和 main 一樣高）＋下面兩行圖例，滑過時高度不變
     expect(readout).toHaveClass("h-11")
-    expect(region.querySelector("[data-legend-grid]")).toHaveClass("h-10")
+    // 至少兩行（2026-11-21：托盤裡 320px、金額上千億時第二欄換到下一行，不撐出畫面；高度照最寬的金額定，滑過時不跳）
+    expect(region.querySelector("[data-legend-grid]")).toHaveClass("min-h-10")
     const g = chart(region)
     act(() => g.focus())
     fireEvent.keyDown(g, { key: "End" })

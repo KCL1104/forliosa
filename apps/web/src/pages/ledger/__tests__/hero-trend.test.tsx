@@ -92,8 +92,8 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
     // 起訖寫區間的起始日（和績效分段的期間同一天：11/12 往前一個月是 10/12），不是當基準畫的前一個收盤（10/9）
     expect(within(region).getByText("10/12 – 11/12")).toBeInTheDocument()
     expect([...within(region).getByRole("img").querySelectorAll("text")].map((t) => t.textContent)).toContain("10/12")
-    // 首頁只問「全部」一次（不帶基準），不再另外問 1M
-    expect(spy.mock.calls.filter(([q]) => q.range !== "ALL" || q.benchmark)).toEqual([])
+    // 首頁的走勢只問「全部」一次（不帶基準），不再另外問 1M；本月（MTD）是分享卡問的（有加入群組時帳本也放，2026-11-21）
+    expect(spy.mock.calls.filter(([q]) => (q.range !== "ALL" || q.benchmark) && q.range !== "MTD")).toEqual([])
     const before = spy.mock.calls.length
     await userEvent.click(within(chips).getByRole("radio", { name: "3月" }))
     expect(within(region).getByText("近 3 個月")).toBeInTheDocument()
@@ -310,7 +310,11 @@ describe("歷史短（正式存檔 2026/11/12 才開始）", { timeout: 20_000 }
     renderApp("/")
     const link = await screen.findByRole("link", { name: "總資產走勢：資料還不夠" }, T)
     expect(link.className).not.toMatch(/max-lg:hidden/)
-    expect(screen.queryByRole("region", { name: "總資產走勢" })).toBeNull()
+    // 手機（2026-11-21）：「總資產走勢」那一盤只有這一行原因——標題已經寫了「總資產走勢」，看得到的只寫原因；沒有圖
+    const region = screen.getByRole("region", { name: "總資產走勢" })
+    expect(within(region).queryByRole("img")).toBeNull()
+    expect(link).toHaveTextContent(/^總資產走勢：資料還不夠$/)
+    expect(within(link).getByText("總資產走勢：")).toHaveClass("sr-only")
     expect(screen.queryByRole("radiogroup")).toBeNull()
   })
 

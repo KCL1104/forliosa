@@ -1,6 +1,7 @@
 import { usePerformance, useSummary } from "@/api/queries"
 import { DEFAULT_TREND_RANGE, isTrendRange, trendState, type TrendRange } from "@/lib/trend-range"
 import { useLedgerPrefs } from "./ledger-prefs"
+import { trendMissingReason } from "./trend-reason"
 
 /**
  * 帳本整頁只有一個區間（產品負責人 2026-11-17：首頁走勢負責總資產＋投入本金，績效分段負責報酬率與基準）：
@@ -18,6 +19,18 @@ export function useTrendRange(accountId?: string): {
   const raw = useLedgerPrefs((s) => s.trendRange)
   const setRange = useLedgerPrefs((s) => s.setTrendRange)
   return { perf, range: isTrendRange(raw) ? raw : DEFAULT_TREND_RANGE, setRange }
+}
+
+/**
+ * 帳本要不要放總資產走勢（手機上它自己一盤「總資產走勢」，要先知道畫不畫才放托盤）：和 `HeroTrend` 回傳的東西同一個條件——
+ * 「自訂」沒關掉、序列讀得到，而且畫得出走勢或後端說了畫不出來的原因。
+ */
+export function useHeroTrendShown(): boolean {
+  const showTrend = useLedgerPrefs((s) => s.showTrend)
+  const { perf } = useTrendRange()
+  if (!showTrend || perf.isError) return false
+  if (!perf.data) return true
+  return trendState(perf.data.series.length) !== "missing" || !!trendMissingReason(perf.data.notes ?? [])
 }
 
 /**

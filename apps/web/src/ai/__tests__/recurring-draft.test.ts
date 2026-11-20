@@ -22,8 +22,9 @@ describe("定期定額草稿的說明", () => {
   it("補記：有那天的收盤價就說「那天的收盤價」", () => {
     const c = recurringDraftCopy(draft(), missed)
     expect(c.tradeDate).toBe("2026-11-06")
-    // 訊息只說事實（哪一天、還沒記）；怎麼估的寫在草稿卡的說明行，不講兩次
-    expect(c.text).toBe("11/6 是元大台灣50 定期定額的扣款日，帳本裡還沒有這一筆。")
+    // 草稿前面不加句子（2026-11-21）：哪一天的扣款、怎麼估的都在草稿卡的說明行，只講一次
+    expect(c).not.toHaveProperty("text")
+    expect(c.notes[0]).toContain("這是 11/6 的扣款")
     expect(c.notes[0]).toContain("股數用 11/6 收盤價 50.00 估算")
   })
   it("補記：後端沒有那天的收盤價、改用最近收盤價時照實說", () => {
@@ -32,11 +33,9 @@ describe("定期定額草稿的說明", () => {
   })
   it("示範價格（is_demo）不說成收盤價", () => {
     const c = recurringDraftCopy(draft({ is_demo: true }), missed)
-    expect(c.text).not.toContain("收盤價")
     expect(c.notes[0]).toContain("股數用示範價格 50.00 估算（不是真實行情")
     expect(c.notes[0]).not.toContain("收盤價")
     const today = recurringDraftCopy(draft({ is_demo: true }), { ...missed, missed: false })
-    expect(today.text).toBe("今天是元大台灣50 定期定額的扣款日。")
     expect(today.notes[0]).toContain("股數用示範價格 50.00 估算")
   })
 })

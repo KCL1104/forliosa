@@ -190,11 +190,11 @@ export function DividendsView() {
                         <DateCell date={t.trade_date} inline />
                         {/*
                           每股金額與來源標示一定看得到（不截斷、不縮）：放不下時整個換到名稱下面一行（靠左，和「接下來」同一招）；
-                          名稱自己就超過一行時才截斷名稱
+                          名稱自己就超過一行時換行（2026-11-21：名稱不截斷）
                         */}
                         <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
                           {t.symbol && (
-                            <span className="max-w-full min-w-0 truncate">
+                            <span className="max-w-full min-w-0 [overflow-wrap:anywhere]" data-name>
                               <Link to="/stock/$symbol" params={{ symbol: t.symbol }} className={cn("font-medium", STRETCH)}>
                                 {nameOf.get(t.symbol) ?? codeOf(t.symbol)}
                               </Link>

@@ -32,7 +32,8 @@ export function dividendAsk(code?: string): string {
 /** 常用動作（依頁面）：記一筆交易、股利入帳… */
 export type AiAction = "trade" | "dividend" | "alert" | "checkup" | "form"
 
-// 草稿卡本身就是回答：前面不加句子（手續費與稅不自動算，2026-11-14）
+// 草稿卡本身就是回答：前面不加句子（手續費與稅不自動算，2026-11-14）。股利與定期定額的草稿也一樣（2026-11-21：
+// 「實拿已扣稅與費用」「今天是…的扣款日」重述卡片上與使用者那一句已經有的東西；「草稿」標記和簽名格已經說了它還沒入帳）
 const DRAFT_SAYS = ""
 /** 正在送出簽名的草稿（擋住連點；模組層級，面板與全螢幕的 runner 共用） */
 const signing = new Set<string>()
@@ -53,7 +54,7 @@ function describe(d: Pick<Draft, "input" | "instrument">): string {
 export function recurringDraftCopy(
   d: RecurringDraft,
   r: NonNullable<Suggestion["recurring"]>,
-): { tradeDate: string; notes: string[]; text: string } {
+): { tradeDate: string; notes: string[] } {
   const tradeDate = d.scheduled_date === r.scheduledDate ? d.transaction.trade_date : r.date
   const price = formatPrice(d.transaction.price, marketOf(d.transaction.symbol))
   const asOf = formatDateShort(d.price_as_of, false)
@@ -64,10 +65,8 @@ export function recurringDraftCopy(
       ? `${estimate}這是 ${formatDateShort(tradeDate, false)} 的扣款。照對帳單改成實際的股數和價格。`
       : `${estimate}實際成交以對帳單為準。`,
   ]
-  const text = r.missed
-    ? `${formatDateShort(tradeDate, false)} 是${inText(d.name)}定期定額的扣款日，帳本裡還沒有這一筆。`
-    : `今天是${inText(d.name)}定期定額的扣款日。`
-  return { tradeDate, notes, text }
+  // 草稿前面不再加「今天是…的扣款日」：使用者按的那一列（「記下今天的 00878 定期定額」）就是它，補記的日期在說明行與成交日
+  return { tradeDate, notes }
 }
 
 export function useAiRunner(ctx: AiContext) {
@@ -172,7 +171,7 @@ export function useAiRunner(ctx: AiContext) {
     }
     const draft: Draft = { id: newId("dft"), status: "loading", input, instrument, notes, createdAt: new Date().toISOString() }
     upsertDraft(draft)
-    push({ role: "ai", text: intent.kind === "dividend" ? "實拿已扣稅與費用。" : DRAFT_SAYS, model: false, draftId: draft.id })
+    push({ role: "ai", text: DRAFT_SAYS, model: false, draftId: draft.id })
     await preview(draft.id, input)
     return true
   }
@@ -328,7 +327,7 @@ export function useAiRunner(ctx: AiContext) {
         recurring: { planId: r.planId, date: r.date },
       }
       upsertDraft(draft)
-      push({ role: "ai", text: copy.text, model: false, draftId: draft.id })
+      push({ role: "ai", text: DRAFT_SAYS, model: false, draftId: draft.id })
     } catch (err) {
       say({
         text: `這次的定期定額草稿沒有寫成：${err instanceof Error ? err.message : "請再試一次"}。`,

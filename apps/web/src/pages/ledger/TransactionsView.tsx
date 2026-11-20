@@ -318,7 +318,7 @@ function TxnRow({ txn: t, account, name }: { txn: Transaction; account?: Account
         <span className="flex min-w-0 items-baseline gap-2">
           <span className={cn("shrink-0 @2xl:hidden", strong ? "font-medium" : "text-ink-2")}>{TYPE_LABEL[t.type]}</span>
           {t.symbol ? (
-            // 名稱連結在整列的「編輯」按鈕裡：可點範圍上下各加 10px（44px），不改版面；截斷放在裡面那層，才不會把加大的範圍裁掉
+            // 名稱連結在整列的「編輯」按鈕裡：可點範圍上下各加 10px（44px），不改版面。名稱不截斷（2026-11-21）：放不下就換行
             <Link
               to="/stock/$symbol"
               params={{ symbol: t.symbol }}
@@ -326,7 +326,7 @@ function TxnRow({ txn: t, account, name }: { txn: Transaction; account?: Account
               title={name ?? undefined}
               className="relative min-w-0 font-medium before:absolute before:inset-x-0 before:-inset-y-2.5 before:content-[''] hover:underline"
             >
-              <span className="block truncate">{name ?? code}</span>
+              <span className="block [overflow-wrap:anywhere]">{name ?? code}</span>
             </Link>
           ) : (
             <span className="min-w-0 truncate text-ink-2">{t.note || "現金"}</span>
