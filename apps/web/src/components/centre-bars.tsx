@@ -74,7 +74,7 @@ export function CentreBars({
                 {r.short ? (
                   <>
                     <span className="@max-2xs:sr-only">{r.label}</span>
-                    <span aria-hidden title={r.label} className="num hidden @max-2xs:inline">
+                    <span aria-hidden title={r.label} className="num hidden whitespace-nowrap @max-2xs:inline">
                       {r.short}
                     </span>
                   </>
