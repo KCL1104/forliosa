@@ -25,15 +25,15 @@ Forliosa 由兩部分組成：
 | worker | 服務 `worker`，新加坡，一個副本，沒有網域 |
 | 新聞元搜尋 | 服務 **`searxng-news`**（不是 `searxng`），新加坡，沒有公開網域；api 與 worker 的 `NEWS_SEARXNG_URL=http://searxng-news.railway.internal:8080` |
 | 資料庫 | 服務 `Postgres`（官方 image＋volume），新加坡。**沒有備份**：Railway 的備份與排程只給 Pro 方案（2026-11-13 API 回覆），見第 6 節 |
-| 行銷網站（2026-11-19） | Ploy 網站 `ae204fd9-54b4-4b18-a958-722cf336602f`（workspace Forliosa，Starter 方案），production 已發佈：`https://my-site-ae204fd9.ploy.build`。自訂網域 **`www.forliosa.trade`** 設定中：DNS 兩筆已加、Ploy 驗證通過；還差在 Ploy 後台 Domains → www.forliosa.trade 的 Universal SSL 提示按「只移除主網域」，Ploy 才會簽發 www 的憑證（CLI 的 `ploy domain add` 會把主網域自動配對回來，做不到只留 www）。接上之後在後台設 www 為主要網域、重新發佈。app 仍在 `forliosa.trade`，行銷網站不碰後端、OAuth 與 cookie |
-| DNS（Cloudflare） | 根網域 CNAME → `forliosa.pages.dev`（Proxied）；`api` CNAME → Railway 給的目標（DNS only）；`_railway-verify.api` TXT；`www` CNAME → `proxy.runploy.com`（DNS only）；`_acme-challenge.www` CNAME → `www.forliosa.trade.a93c3620a44f1490.dcv.cloudflare.com`（DNS only） |
+| 行銷網站（2026-11-19） | Ploy 網站 `ae204fd9-54b4-4b18-a958-722cf336602f`（workspace Forliosa，Starter 方案），自訂網域 **`about.forliosa.trade`**（2026-11-20 接上；備用網址 `https://my-site-ae204fd9.ploy.build`）。不用 `www` 的原因：Ploy 一定把 `www` 和根網域綁成一組，要求根網域也指過去（A `207.207.209.209`），根網域是 app，不能給；後台也沒有出現「只留一個」的選項。一般子網域（`about`）是單獨一筆，只要兩筆 DNS。app 仍在 `forliosa.trade`，行銷網站不碰後端、OAuth 與 cookie |
+| DNS（Cloudflare） | 根網域 CNAME → `forliosa.pages.dev`（Proxied）；`api` CNAME → Railway 給的目標（DNS only）；`_railway-verify.api` TXT；`about` CNAME → `proxy.runploy.com`（DNS only）；`_acme-challenge.about` CNAME → `about.forliosa.trade.a93c3620a44f1490.dcv.cloudflare.com`（DNS only）；`www`、`_acme-challenge.www` 是 2026-11-19 試接 www 留下的，待改成轉址到 about |
 | 信箱 | Cloudflare Email Routing：`support@forliosa.trade` 轉寄到產品負責人的信箱 |
 
 > **不要在 Ploy 後台用「Connect with Cloudflare」（Entri 一鍵設定）**。2026-11-19 23:09 在 Ploy 後台按了自動設定，它把根網域的
 > 「CNAME → `forliosa.pages.dev`（Proxied）」換成「A `207.207.209.209`（DNS only）」並新增 `_acme-challenge.forliosa.trade`，
 > Cloudflare Pages 的自訂網域隨即變成 deactivated，app 回 403（Cloudflare 1034）。23:14 用 API 改回原本的 CNAME（Proxied）、
 > 刪掉多出來的驗證紀錄、對 Pages 的網域按重試驗證（`PATCH /accounts/{id}/pages/projects/forliosa/domains/forliosa.trade`），
-> 一分鐘內恢復；之後只剩各地 DNS 快取裡的舊紀錄（本機可 `ipconfig /flushdns`）。原則：根網域永遠是 Pages，Ploy 只用 `www`，
+> 一分鐘內恢復；之後只剩各地 DNS 快取裡的舊紀錄（本機可 `ipconfig /flushdns`）。原則：根網域永遠是 Pages，Ploy 只用子網域（`about`；`www` 會被 Ploy 綁上根網域，不能用），
 > DNS 一律手動加（或用只限 forliosa.trade、DNS Edit 權限的 token）。Cloudflare 的 token 在 Railway api 服務的 `CF_API_TOKEN`
 > （account token：`/user/tokens/verify` 會回 Invalid，要用 `/accounts/{id}/tokens/verify` 驗）。
 
