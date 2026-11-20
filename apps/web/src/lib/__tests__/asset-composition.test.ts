@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { PerformancePoint } from "@/api/types"
-import { decompose, dividendsByDay, estimatedRuns, fromZero, inSpan, inSpans, monthlyBreakdown, profitDomain, profitOf, snapDividends, spanIndexes } from "../asset-composition"
+import { dividendsByDay, estimatedRuns, fromZero, inSpan, inSpans, monthlyBreakdown, profitOf, snapDividends, spanIndexes } from "../asset-composition"
 import { trendWindow } from "../trend-range"
 
 /** 一天：總資產、投入本金、時間加權指數、基準指數 */
@@ -10,42 +10,6 @@ describe("資產組成：投入本金＋累積損益＝總資產", () => {
   it("累積損益是總資產減投入本金（不含股利）", () => {
     expect(profitOf(p("2026-01-02", 1_200_000, 1_000_000))).toBe(200_000)
     expect(profitOf(p("2026-01-02", 900_000, 1_000_000))).toBe(-100_000)
-  })
-
-  it("區間的拆解：總資產的變化＝加碼（或拿回）＋損益；從基準收盤算起，基準那天的股利不算；金額到元、一定加得起來", () => {
-    const series = [p("2026-09-30", 1_000_000.4, 900_000.3), p("2026-10-01", 1_010_000, 900_000), p("2026-10-15", 1_450_000.6, 1_300_000.2), p("2026-11-12", 1_500_000, 1_300_000)]
-    const win = { points: series }
-    const d = decompose(win, "1M", [
-      { t: "2026-09-30", amount: 999 }, // 基準收盤那天：不算
-      { t: "2026-10-20", amount: 3_000 },
-      { t: "2026-11-02", amount: 1_200.4 },
-    ])!
-    expect(d).toEqual({ kind: "change", total: 500_000, flows: 400_000, profit: 100_000, dividends: 4_200 })
-    expect(d.kind === "change" && d.flows + d.profit).toBe(d.total)
-  })
-
-  it("賣出：投入本金下降（拿回），累積損益不受影響", () => {
-    const series = [p("2026-07-14", 2_000_000, 1_500_000), p("2026-07-15", 1_700_000, 1_200_000)]
-    expect(decompose({ points: series }, "5D", [])).toEqual({ kind: "change", total: -300_000, flows: -300_000, profit: 0, dividends: 0 })
-  })
-
-  it("「全部」寫現在的組成；股利用全部領過的（主數字的 dividend_income），序列只從存檔開始時也不會少算", () => {
-    const series = [p("2026-06-01", 300_000, 280_000), p("2026-11-12", 4_107_724.4, 2_876_405.2)]
-    const d = decompose({ points: series }, "ALL", [{ t: "2026-09-16", amount: 7_500 }], { lifetimeDividends: 181_009 })!
-    expect(d).toEqual({ kind: "levels", total: 4_107_724, invested: 2_876_405, profit: 1_231_319, dividends: 181_009 })
-    // 沒有主數字時：序列裡的股利
-    expect(decompose({ points: series }, "ALL", [{ t: "2026-09-16", amount: 7_500 }])).toMatchObject({ dividends: 7_500 })
-  })
-
-  it("虧損：損益是負的，總資產少了", () => {
-    const d = decompose({ points: [p("2026-10-09", 1_000_000, 900_000), p("2026-11-12", 950_000, 920_000)] }, "1M", [])!
-    expect(d).toEqual({ kind: "change", total: -50_000, flows: 20_000, profit: -70_000, dividends: 0 })
-  })
-
-  it("拆到第幾點（滑過那一天）；沒有點時是 null", () => {
-    const series = [p("2026-10-09", 1_000_000, 900_000), p("2026-10-12", 1_100_000, 950_000), p("2026-11-12", 1_200_000, 950_000)]
-    expect(decompose({ points: series }, "1M", [], { upto: 1 })).toMatchObject({ total: 100_000, flows: 50_000, profit: 50_000 })
-    expect(decompose({ points: [] }, "1M", [])).toBeNull()
   })
 
   it("一天領好幾筆股利加起來", () => {
@@ -90,21 +54,6 @@ describe("估計的那一段", () => {
     })
     // 只剩一點的粗線不畫
     expect(estimatedRuns(5, [{ first: 1, last: 3 }])).toEqual({ thin: [[0, 1, 2, 3, 4]], thick: [] })
-  })
-})
-
-describe("組成那一格的縱軸", () => {
-  it("一定包含 0；刻度是 0 和離 0 最遠那一邊的整齊數字", () => {
-    const up = profitDomain([0, 120_000, 1_231_319])
-    expect(up.min).toBe(0)
-    expect(up.max).toBeGreaterThan(1_231_319)
-    expect(up.ticks).toEqual([0, 1_000_000])
-    const both = profitDomain([-270_185, 74_302])
-    expect(both.min).toBeLessThan(-270_185)
-    expect(both.max).toBeGreaterThan(74_302)
-    expect(both.ticks).toEqual([-250_000, 0])
-    // 都是 0：給一個小範圍，不除以 0
-    expect(profitDomain([0, 0])).toMatchObject({ min: -1.24, max: 1.24, ticks: [0, 1] })
   })
 })
 
@@ -160,14 +109,12 @@ describe("每個月的拆解（每月報酬率）", () => {
 })
 
 describe("審查後的修正", () => {
-  it("#5 區間比資料長：從 0 起算（和 trendWindow 的報酬分母 1 同一個規則），寫現在的組成，和「全部」一樣", () => {
+  it("#5 區間比資料長：從 0 起算（和 trendWindow 的報酬分母 1 同一個規則），和「全部」一樣", () => {
     const s = [p("2026-11-10", 100_000, 97_000, 1.03), p("2026-11-11", 101_000, 97_000, 1.04), p("2026-11-12", 103_000, 100_000, 1.06)]
     const win = trendWindow(s, "1Y")
     expect(win.exceeds).toBe(true)
     expect(win.base).toBe(1)
     expect(fromZero(win, "1Y")).toBe(true)
-    expect(decompose(win, "1Y", [])).toEqual({ kind: "levels", total: 103_000, invested: 100_000, profit: 3_000, dividends: 0 })
-    expect(decompose(win, "1Y", [])).toEqual(decompose(trendWindow(s, "ALL"), "ALL", []))
     // 資料夠長的區間照舊從基準收盤算
     expect(fromZero({ exceeds: false }, "1M")).toBe(false)
   })
@@ -201,14 +148,5 @@ describe("審查後的修正", () => {
     expect(monthlyBreakdown(points, { base, importDays: ["2025-11-20"] }).skippedImport).toBe(0)
     // 不傳 importDays：照舊全部列（這條規則可以整個拿掉）
     expect(monthlyBreakdown(points, { base }).months).toHaveLength(3)
-  })
-})
-
-describe("和首頁走勢同一個區間", () => {
-  it("trendWindow 的第一點就是拆解的基準收盤", () => {
-    const series = [p("2026-10-09", 1_000_000, 900_000), p("2026-10-12", 1_010_000, 900_000), p("2026-11-12", 1_100_000, 950_000)]
-    const win = trendWindow(series, "1M")
-    expect(win.points[0]!.t).toBe("2026-10-09")
-    expect(decompose(win, "1M", [])).toMatchObject({ total: 100_000, flows: 50_000, profit: 50_000 })
   })
 })

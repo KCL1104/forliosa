@@ -1,12 +1,12 @@
 import type { PerformanceMonth, PerformancePoint } from "@/api/types"
-import type { TrendRange, TrendWindow } from "@/lib/trend-range"
+import type { TrendRange } from "@/lib/trend-range"
 
 /**
  * 資產組成（原型；`docs/proposals/asset-composition.md`）：本金＋賺的（或－虧的）＝總資產。
  * - 本金：買股票花的錢減掉賣股票收到的錢（和走勢的 `net_invested` 同一個數字；股利不扣）。程式裡有些地方還叫「投入本金」。
  * - 賺的／虧的（程式裡叫累積損益、`profit`）：總資產（持股市值）減本金。不含股利：股利另外列（領到的那一天一個記號）。
  * - 賣出讓本金下降、賺的不變（app 不記現金：賣出收到的錢不在總資產裡）。
- * 這裡只有純函式：首頁走勢的塗色（v2）、拆解句子、v1 下面那一格、mock 的每月拆解都用它。
+ * 這裡只有純函式：首頁走勢的塗色（v2）、估計的那幾段、股利的記號、mock 的每月拆解都用它。
  */
 
 /** 累積損益：總資產減投入本金 */
@@ -61,47 +61,9 @@ export function estimatedRuns(n: number, est: readonly { first: number; last: nu
 
 /**
  * 區間從 0 起算嗎（和 `trendWindow` 的 `base` 同一個規則）：「全部」、區間比資料長（`exceeds`）時，報酬的分母是 1——
- * 區間從資料的第一個收盤以前算起，所以錢也從 0 算起（寫現在的組成）；其他區間從基準收盤（`points[0]`）算起。
+ * 區間從資料的第一個收盤以前算起，所以錢也從 0 算起（首頁走勢的圖例寫「賺的」、股利從第一筆算）；其他區間從基準收盤（`points[0]`）算起。
  */
 export const fromZero = (win: { exceeds?: boolean }, range: TrendRange) => range === "ALL" || !!win.exceeds
-
-/**
- * 拆解一個區間（首頁走勢下面那一句）：
- * - 「全部」與區間比資料長（`fromZero`）：寫現在的組成——總資產＝投入本金＋累積損益（從第一筆開始，變化就等於現在的數字；
- *   存檔開始以後才有資料時也對）。和區間報酬同一個起點（報酬的分母也是 1）。
- * - 其他區間：從區間的基準收盤（`win.points[0]`）到最後一個收盤的變化——總資產的變化＝加碼（或拿回）＋損益。
- * 股利不算在裡面，另外加總這段期間領到的（`dividends`：每天一筆，新台幣，日期已經對到收盤日，見 `snapDividends`）。
- * `upto`：拆到第幾點（預設最後一點）。
- * 金額都四捨五入到元，而且損益由另外兩個數字相減：畫面上的三個數字一定加得起來（總資產＝本金＋損益）。
- */
-export type Decomposition =
-  | { kind: "levels"; total: number; invested: number; profit: number; dividends: number }
-  | { kind: "change"; total: number; flows: number; profit: number; dividends: number }
-
-export function decompose(
-  win: Pick<TrendWindow<PerformancePoint>, "points"> & { exceeds?: boolean },
-  range: TrendRange,
-  dividends: readonly { t: string; amount: number }[],
-  opts: { upto?: number; lifetimeDividends?: number | null } = {},
-): Decomposition | null {
-  const first = win.points[0]
-  const last = win.points[opts.upto ?? win.points.length - 1]
-  if (!first || !last) return null
-  const r = Math.round
-  if (fromZero(win, range)) {
-    // 「全部」：累積損益是從第一筆算的，股利也要是全部領過的（主數字的 `dividend_income`）——序列可能只從存檔開始，
-    // 序列裡的股利會少算之前的。累積損益＋股利＝主數字的「總損益（含股利）」
-    const received = opts.lifetimeDividends ?? dividends.filter((d) => d.t <= last.t).reduce((s, d) => s + d.amount, 0)
-    const total = r(last.market_value)
-    const invested = r(last.net_invested)
-    return { kind: "levels", total, invested, profit: total - invested, dividends: r(received) }
-  }
-  // 基準收盤那天領的股利不算進區間（和區間報酬同一個起點：基準收盤之後）
-  const received = dividends.filter((d) => d.t > first.t && d.t <= last.t).reduce((s, d) => s + d.amount, 0)
-  const total = r(last.market_value) - r(first.market_value)
-  const flows = r(last.net_invested) - r(first.net_invested)
-  return { kind: "change", total, flows, profit: total - flows, dividends: r(received) }
-}
 
 /**
  * 總資產走勢（v2，一張圖）裡塗色的那幾塊：總資產在本金線上面的部分是賺的、下面的部分是虧的。
@@ -227,36 +189,6 @@ export function snapDividends(dividends: readonly { t: string; amount: number }[
     out.set(day, (out.get(day) ?? 0) + d.amount)
   }
   return [...out].map(([t, amount]) => ({ t, amount }))
-}
-
-/**
- * 累積損益那一格的縱軸：一定包含 0（看得出賺賠），上下各留 12%；都是 0 時給一個小範圍。
- * 回傳最小、最大值和要標的刻度（0 和離 0 最遠那一邊的一個整齊數字）。
- */
-export function profitDomain(values: readonly number[]): { min: number; max: number; ticks: number[] } {
-  const finite = values.filter(Number.isFinite)
-  let lo = Math.min(0, ...finite)
-  let hi = Math.max(0, ...finite)
-  if (lo === hi) {
-    lo = -1
-    hi = 1
-  }
-  const span = hi - lo
-  const min = lo < 0 ? lo - span * 0.12 : 0
-  const max = hi > 0 ? hi + span * 0.12 : 0
-  // 離 0 最遠那一邊，取一個在範圍裡的整齊數字（1、2、2.5、5 × 10ⁿ）
-  const far = Math.abs(hi) >= Math.abs(lo) ? hi : lo
-  const nice = niceBelow(Math.abs(far))
-  const ticks = nice > 0 ? (far >= 0 ? [0, nice] : [-nice, 0]) : [0]
-  return { min, max, ticks }
-}
-
-/** 不超過 v 的最大整齊數字（1、2、2.5、5 × 10ⁿ） */
-function niceBelow(v: number): number {
-  if (!(v > 0)) return 0
-  const mag = 10 ** Math.floor(Math.log10(v))
-  for (const m of [5, 2.5, 2, 1]) if (m * mag <= v) return Number((m * mag).toPrecision(12))
-  return mag
 }
 
 /** 每月拆解用的一天（和績效序列同樣的欄位） */

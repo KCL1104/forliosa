@@ -1,10 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { direction, formatPercent } from "@/lib/format"
 
-/**
- * 總資產走勢（`HeroTrend.tsx`）共用的尺寸與小工具。資產組成留著兩版比較（`TrendBandV1.tsx` 是 v1：圖下面一格），
- * 兩版都用這裡的東西。
- */
+/** 總資產走勢（`HeroTrend.tsx`）用的尺寸與小工具。 */
 
 export const TOP = 8
 export const AXIS = 22
@@ -105,20 +102,3 @@ export function segmentHitsBox(ax: number, ay: number, bx: number, by: number, b
 
 /** a..b（含）的位置；b < a 是空的 */
 export const indexes = (a: number, b: number) => (b < a ? [] : Array.from({ length: b - a + 1 }, (_, k) => a + k))
-
-/**
- * 資產組成的走勢要畫哪一版：v2（預設，一張圖：本金線＋賺虧塗色）；v1（圖下面一格，留著給負責人比較）。
- * 網址 `?composition=v1` 切到 v1，`?composition=v2`（或 `on`、`off`）切回。記在 sessionStorage（和 mock 的其他開關一樣）。
- */
-const CHART_KEY = "forliosa:composition-chart"
-export function readCompositionChart(): "v1" | "v2" {
-  if (typeof window === "undefined") return "v2"
-  try {
-    const q = new URLSearchParams(window.location.search).get("composition")
-    if (q === "v1") window.sessionStorage.setItem(CHART_KEY, "v1")
-    else if (q) window.sessionStorage.removeItem(CHART_KEY)
-    return window.sessionStorage.getItem(CHART_KEY) === "v1" ? "v1" : "v2"
-  } catch {
-    return "v2"
-  }
-}

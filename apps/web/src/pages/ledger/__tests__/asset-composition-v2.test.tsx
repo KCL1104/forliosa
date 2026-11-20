@@ -7,7 +7,6 @@ import type { Performance, PerformancePoint } from "@/api/types"
 import { createAppRouter } from "@/router"
 import { usePrefs } from "@/stores/prefs"
 import { DEFAULT_COLUMNS, useLedgerPrefs } from "../ledger-prefs"
-import { readCompositionChart } from "../trend-chart"
 
 /**
  * 資產組成 v2（產品負責人選的：一張圖，沒有下面那一格；docs/proposals/asset-composition.md 附錄 A）：
@@ -43,7 +42,6 @@ beforeEach(() => act(resetPrefs))
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
-  sessionStorage.removeItem("forliosa:composition-chart")
   act(resetPrefs)
 })
 
@@ -96,8 +94,7 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     expect(region.querySelector("[data-bands]")!.getAttribute("clip-path")).toBe(`url(#${clip.id})`)
     expect(region.querySelector('[data-series="invested"]')!.getAttribute("clip-path")).toBe(`url(#${clip.id})`)
     expect(region.querySelector("[data-off-chart]")).toBeNull()
-    // 沒有下面那一格；高度和 main 一樣（jsdom 不是桌面）：手機 96
-    expect(region.querySelector('[data-pane="profit"]')).toBeNull()
+    // 高度和 main 一樣（jsdom 不是桌面）：手機 96
     expect(img(region).getAttribute("height")).toBe("96")
   })
 
@@ -174,7 +171,7 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     expect(legend(region, "gain")!.textContent).toBe("虧的 −NT$5,000")
     expect(region.querySelector('[aria-live="polite"]')!.textContent).toContain("，虧的 NT$5,000，")
     // v2 圖下面沒有句子（使用者只要圖）
-    expect(region.querySelector("[data-composition-line]")).toBeNull()
+    expect(within(region).queryByText(/^這段期間總資產/)).toBeNull()
   })
 
   it("隱私模式：圖例、圖裡那一行、圖的說明都不寫金額；塗色照畫", async () => {
@@ -454,24 +451,5 @@ describe("「本金」開關（使用者 2026-11-19）", { timeout: 20_000 }, ()
     renderApp("/")
     const region = await trend()
     expect(within(region).queryByRole("switch")).toBeNull()
-  })
-})
-
-describe("v1 留著比較：網址 ?composition=v1", () => {
-  it("?composition=v1 切到 v1、記在 sessionStorage；?composition=v2（或 on、off）切回；預設 v2", () => {
-    const at = (search: string) => window.history.replaceState({}, "", `/${search}`)
-    at("")
-    expect(readCompositionChart()).toBe("v2")
-    at("?composition=v1")
-    expect(readCompositionChart()).toBe("v1")
-    at("?view=performance")
-    expect(readCompositionChart()).toBe("v1")
-    at("?composition=v2")
-    expect(readCompositionChart()).toBe("v2")
-    at("?composition=v1")
-    readCompositionChart()
-    at("?composition=off")
-    expect(readCompositionChart()).toBe("v2")
-    at("")
   })
 })

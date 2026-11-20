@@ -11,7 +11,7 @@ import { DEFAULT_COLUMNS, useLedgerPrefs } from "../ledger-prefs"
 /**
  * 資產組成 v2：本金 ≤ 0（賣股票收到的錢已經和買股票花的一樣多或更多）寫「本金已收回」（使用者 2026-11-19，取代方案 D）。
  * 圖例、滑過的讀數、圖的說明、圖裡那一行不寫金額；賺的照實寫（總資產－本金）；本金線畫在 0、塗色從 0 塗到總資產。
- * v1（`?composition=v1`）與每月表格的本金增減照舊寫金額。
+ * 每月表格的本金增減照舊寫金額。
  */
 vi.mock("@number-flow/react", () => ({
   default: ({ value, format, locales }: { value: number; format?: Intl.NumberFormatOptions; locales?: string }) => <span>{new Intl.NumberFormat(locales, format).format(value)}</span>,
@@ -42,7 +42,6 @@ beforeEach(() => act(resetPrefs))
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
-  sessionStorage.removeItem("forliosa:composition-chart")
   act(resetPrefs)
 })
 
@@ -250,16 +249,6 @@ describe("本金已收回（本金 ≤ 0）", { timeout: 20_000 }, () => {
     await waitFor(() => expect(legend(region, "total")).not.toBeNull(), T)
     expect(region.textContent).not.toMatch(/本金已收回/)
     expect(img(region).getAttribute("aria-label")).not.toMatch(/本金/)
-  })
-
-  it("v1（`?composition=v1`）不改：照舊寫負的本金", async () => {
-    sessionStorage.setItem("forliosa:composition-chart", "v1")
-    await withSeries(flat(-200_000))
-    renderApp("/")
-    const region = await trend()
-    const line = await waitFor(() => region.querySelector<HTMLElement>("[data-composition-line]")!, T)
-    expect(line.textContent).toContain("本金 −NT$200,000")
-    expect(region.textContent).not.toMatch(/本金已收回/)
   })
 
   it("每月表格的本金增減照舊寫金額（本金收回的那個月是「−NT$…」）", async () => {

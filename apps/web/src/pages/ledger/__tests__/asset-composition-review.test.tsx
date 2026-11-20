@@ -59,12 +59,9 @@ function renderApp(path: string) {
 }
 const trend = () => screen.findByRole("region", { name: "總資產走勢" }, T)
 const chart = (region: HTMLElement) => within(region).getByRole("group", { name: /^總資產走勢：/ })
-const sentence = (region: HTMLElement) => region.querySelector<HTMLElement>("[data-composition-line]")
-const paneLabel = (region: HTMLElement) => region.querySelector<HTMLElement>("[data-composition-label]")
+/** 圖下面那一句拆解（使用者 2026-11-19：只要圖，不放）：「這段期間總資產多了…」「總資產 NT$…＝本金…」 */
+const sentence = (region: HTMLElement) => within(region).queryByText(/^這段期間總資產|^總資產\s*(NT\$[\d,]+)?＝/)
 const legend = (region: HTMLElement, item: "invested" | "gain" | "dividend" | "total") => region.querySelector<HTMLElement>(`[data-legend="${item}"]`)
-/** 走勢畫 v1（圖下面一格；留著比較，網址 `?composition=v1`）：v1 的修正（#4 標籤、#15 0 那一條）用 v1 測 */
-const useV1 = () => sessionStorage.setItem("forliosa:composition-chart", "v1")
-afterEach(() => sessionStorage.removeItem("forliosa:composition-chart"))
 
 /** 改掉績效的回應（測極端情況） */
 async function withPerformance(patch: (p: Performance) => Performance) {
@@ -122,19 +119,6 @@ describe("審查後的修正：首頁走勢", { timeout: 20_000 }, () => {
       expect(s).toHaveClass("invisible", "h-0", "overflow-hidden")
       expect(s).toHaveAttribute("aria-hidden", "true")
     }
-  })
-
-  it("#4（v1）手機（窄）：組成那一格的標籤兩項各一行、金額寫完整", async () => {
-    useV1()
-    await withPerformance((p) => ({ ...p, series: seriesOf((i) => ({ market_value: 1_234_567_890 + i * 10_000_000, net_invested: 987_654_321 })), notes: [], reference_until: null, composition: comp0 }))
-    act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
-    renderApp("/")
-    const region = await trend()
-    const label = await waitFor(() => paneLabel(region)!, T)
-    expect(label).toHaveClass("flex-col")
-    expect(label).not.toHaveClass("overflow-hidden")
-    expect([...label.children].map((c) => c.textContent)).toEqual(["投入本金NT$987,654,321", "累積損益+NT$326,913,569"])
-    for (const item of label.children) expect(item).toHaveClass("whitespace-nowrap")
   })
 
   it("#5 區間比資料長（1 年、只有 9 個收盤）：錢的拆解和報酬同一個起點（從 0 算起），和「全部」一模一樣", async () => {
@@ -226,31 +210,6 @@ describe("審查後的修正：首頁走勢", { timeout: 20_000 }, () => {
     await userEvent.click(within(region).getByRole("radio", { name: "全部" }))
     expect(region.querySelectorAll("[data-dividend-mark]")).toHaveLength(1)
   })
-
-  it("#15（v1）組成那一格的 0 和其他格線同一個顏色（不是鉛筆灰：貼著 0 的投入本金階梯線才看得出來）", async () => {
-    useV1()
-    renderApp("/")
-    const region = await trend()
-    const zero = region.querySelector('[data-pane="profit"] [data-tick="zero"]')!
-    expect(zero.getAttribute("stroke")).toBe("var(--chart-grid)")
-    expect(region.querySelector('[data-pane="profit"] [stroke="var(--ctl)"]')).toBeNull()
-  })
-
-  it("#17（v1）這段期間本金沒有變：v1 的那一句寫「本金沒有變」、那一格寫「沒有加碼或拿回」（v2 圖下面沒有句子）", async () => {
-    await withPerformance((p) => ({ ...p, series: seriesOf((i) => ({ market_value: 1_000_000 + i * 1_000, net_invested: 900_000 })), notes: [], reference_until: null, composition: comp0 }))
-    act(() => useLedgerPrefs.setState({ trendRange: "5D" }))
-    renderApp("/")
-    const region = await trend()
-    await waitFor(() => expect(legend(region, "gain")).not.toBeNull(), T)
-    expect(sentence(region)).toBeNull()
-    cleanup()
-    useV1()
-    renderApp("/")
-    const v1 = await trend()
-    await waitFor(() => expect(paneLabel(v1)).not.toBeNull(), T)
-    expect(sentence(v1)!.textContent).toBe("這段期間總資產多了 NT$5,000：本金沒有變，賺了 NT$5,000。")
-    expect(paneLabel(v1)!.textContent).toMatch(/^沒有加碼或拿回損益/)
-  })
 })
 
 describe("審查後的修正：績效分段與查看別人的資產", { timeout: 20_000 }, () => {
@@ -298,7 +257,6 @@ describe("審查後的修正：績效分段與查看別人的資產", { timeout:
     renderApp("/?view=performance")
     await screen.findByText("最大回撤", {}, T)
     const region = await trend()
-    expect(region.querySelector('[data-pane="profit"]')).toBeNull()
     expect(region.querySelector("[data-bands]")).toBeNull()
     expect(region.querySelector("[data-legend]")).toBeNull()
     // 「本金」開關也不放（只給自己看）

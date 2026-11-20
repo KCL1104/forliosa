@@ -343,8 +343,7 @@ export function readMockComposition(): boolean | undefined {
   if (typeof window === "undefined") return undefined
   try {
     const fromUrl = new URLSearchParams(window.location.search).get("composition")
-    // `v1`／`v2`：走勢畫哪一版（`pages/ledger/trend-chart.ts`），也表示有資產組成的欄位
-    if (fromUrl === "on" || fromUrl === "v1" || fromUrl === "v2") window.sessionStorage.removeItem("forliosa:mock-composition")
+    if (fromUrl === "on") window.sessionStorage.removeItem("forliosa:mock-composition")
     else if (fromUrl === "off") window.sessionStorage.setItem("forliosa:mock-composition", "off")
     return window.sessionStorage.getItem("forliosa:mock-composition") === "off" ? false : undefined
   } catch {

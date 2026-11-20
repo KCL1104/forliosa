@@ -38,7 +38,6 @@ import {
   flowPathOf,
   indexes,
   pathOf,
-  readCompositionChart,
   retSpeech,
   segmentHitsBox,
   textWidth,
@@ -46,7 +45,6 @@ import {
   TOP,
   useWidth,
 } from "./trend-chart"
-import { TrendBandV1 } from "./TrendBandV1"
 import { trendClipNote, trendMissingReason, trendReferenceLine } from "./trend-reason"
 import { TrendReturn as Ret } from "./TrendReturn"
 import { useTrendRange } from "./use-trend-range"
@@ -66,7 +64,7 @@ import { useTrendRange } from "./use-trend-range"
  * - 畫得出走勢就放七顆區間按鈕（2026-11-17 負責人要求；歷史短時也放）。比資料長的區間畫全部的資料，標題照樣寫
  *   「近 3 個月」，第二行寫「只有 11/12 – 11/17 的資料」（`rangeExceedsData`），不讓人以為那是三個月的報酬。
  * - 資產組成 v2（原型，`docs/proposals/asset-composition.md` 附錄 A；後端給 `composition`、看自己的資產時才有，沒有時和上面一模一樣）：
- *   一張圖，沒有下面那一格、也沒有圖下面那一句（使用者 2026-11-19：只要圖）。v1 留著比較：`?composition=v1`，`TrendBandV1.tsx`。
+ *   一張圖，沒有下面那一格、也沒有圖下面那一句（使用者 2026-11-19：只要圖）。
  *   - 高度和 main 一樣（桌面 120、手機 96）。帳本裡有估計的那一段時，圖的上面留一列給「估計」括線；領過股利時，
  *     橫軸上面留一列給股利記號——兩列都從畫圖的範圍裡分出來，整張圖的高度不變（看這個帳本有沒有，不看區間：換區間時圖不跳）。
  *   - 讀數下面一列圖例（金額跟著滑過的那一天；手機兩行兩欄）：讀數、圖例都在圖的上面，手指按著圖時擋不到數字。
@@ -122,8 +120,6 @@ export function HeroTrend({ view }: { view: LedgerView }) {
   const { perf, range, setRange } = useTrendRange()
   const desktop = useIsDesktop()
   const readOnly = useReadOnly()
-  // 資產組成的走勢要畫哪一版（v1 留著比較；網址 `?composition=v1`）
-  const [chart] = useState(readCompositionChart)
   if (!showTrend || perf.isError) return null
   if (!perf.data) return <Skeleton aria-label="總資產走勢載入中" className="mt-6 h-[224px] w-full rounded-sm lg:mt-8 lg:h-[252px]" />
   const series = perf.data.series
@@ -161,9 +157,7 @@ export function HeroTrend({ view }: { view: LedgerView }) {
     few: state === "short",
     shortNote,
   }
-  // v1（凍結的第一版，留著比較）：圖下面多一格本金與損益（桌面 228、手機 200）
-  if (composition && chart === "v1") return <TrendBandV1 {...props} height={desktop ? 228 : 200} />
-  // v2 和沒有資產組成時都是 main 的高度（桌面 120、手機 96）：「估計」括線與股利記號那兩列從畫圖的範圍裡分出來
+  // 有和沒有資產組成時都是 main 的高度（桌面 120、手機 96）：「估計」括線與股利記號那兩列從畫圖的範圍裡分出來
   return <TrendBand {...props} height={desktop ? 120 : 96} />
 }
 
@@ -819,7 +813,7 @@ function TrendBand({
 
       {/* 七顆一律放（比資料長的也可以選）；歷史短時說明在按鈕下面——按鈕的位置和歷史夠長以後一樣 */}
       <RangeChips className="mt-2 lg:col-start-2 lg:row-start-1 lg:mt-0 lg:self-start" label="走勢區間" value={range} options={TREND_RANGES} onChange={onRange} />
-      {/* 圖下面不放拆解的句子（使用者 2026-11-19：只要圖；v1 照舊有）。只留資料說明：歷史短、估計的那幾天、Yahoo 參考價 */}
+      {/* 圖下面不放拆解的句子（使用者 2026-11-19：只要圖）。只留資料說明：歷史短、估計的那幾天、Yahoo 參考價 */}
       {shortNote && <p className="mt-1.5 text-sm text-ink-2 lg:col-span-2">{shortNote}</p>}
       {estText && <p className="mt-1.5 text-sm text-ink-2 lg:col-span-2">{estText} 用估計的買入日計算</p>}
       {referenceLine && <p className="mt-1.5 text-sm text-ink-2 lg:col-span-2">{referenceLine}</p>}

@@ -23,7 +23,7 @@ export function roughMoney(v: number): string {
 /**
  * 本金 ≤ 0（賣股票收到的錢已經和買股票花的一樣多或更多）：首頁走勢 v2 的圖例、滑過的讀數、圖的說明、圖裡那一行都不寫金額，
  * 寫「本金已收回」（使用者 2026-11-19；負的本金看不懂）。賺的照實寫（總資產－本金），本金線畫在 0。
- * v1（`?composition=v1`）與每月表格的本金增減照舊寫金額。金額先四捨五入到元再判斷（和畫面上的數字一致）。
+ * 本金開關關掉時沒有本金；每月表格的本金增減照舊寫金額。金額先四捨五入到元再判斷（和畫面上的數字一致）。
  */
 export const INVESTED_RECOVERED = "本金已收回"
 export const isRecovered = (invested: number) => invested <= 0

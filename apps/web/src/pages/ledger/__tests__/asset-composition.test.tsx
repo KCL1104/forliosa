@@ -6,7 +6,6 @@ import { toast, Toaster } from "sonner"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
 import type { Performance, PerformancePoint, Transaction } from "@/api/types"
-import { formatMoney } from "@/lib/format"
 import { createAppRouter } from "@/router"
 import { usePrefs } from "@/stores/prefs"
 import { BuyDatePicker } from "../BuyDatePicker"
@@ -14,7 +13,7 @@ import { DEFAULT_COLUMNS, useLedgerPrefs } from "../ledger-prefs"
 
 /**
  * 資產組成（原型；docs/proposals/asset-composition.md）：
- * A 首頁走勢（v2：一張圖，本金線＋賺虧塗色；v1 圖下面一格留著比較，`?composition=v1`）＋一句拆解；B 股利的記號；C 估計的那一段；D 每月報酬率；E 買入日的標記與選日期；G 贏過幾成的基金。
+ * A 首頁走勢（v2：一張圖，本金線＋賺虧塗色；圖下面沒有拆解的句子）；B 股利的記號；C 估計的那一段；D 每月報酬率；E 買入日的標記與選日期；G 贏過幾成的基金。
  * 示範帳本：2025/12/1 匯入過庫存，VOO、環球晶的買入日是估計的，聯發科找不到（用匯入那天），台積電 8/6 那一筆是自己選的。
  * 後端沒有這些欄位時（舊版），每一樣都不出現、畫面和以前一樣。
  */
@@ -64,14 +63,11 @@ function renderApp(path: string) {
 }
 const trend = () => screen.findByRole("region", { name: "總資產走勢" }, T)
 const chart = (region: HTMLElement) => within(region).getByRole("group", { name: /^總資產走勢：/ })
-const sentence = (region: HTMLElement) => region.querySelector<HTMLElement>("[data-composition-line]")
-const paneLabel = (region: HTMLElement) => region.querySelector<HTMLElement>("[data-composition-label]")
+/** 圖下面那一句拆解（使用者 2026-11-19：只要圖，不放）：「這段期間總資產多了…」「總資產 NT$…＝本金…」 */
+const sentence = (region: HTMLElement) => within(region).queryByText(/^這段期間總資產|^總資產\s*(NT\$[\d,]+)?＝/)
 const legend = (region: HTMLElement, item: "invested" | "gain" | "dividend" | "total") => region.querySelector<HTMLElement>(`[data-legend="${item}"]`)
 /** 「NT$1,234」「−NT$1,234」「+NT$1,234」→ 數字 */
 const money = (s: string) => Number(s.replace(/[^\d−-]/g, "").replace("−", "-"))
-/** 走勢畫 v1（圖下面一格；留著比較，網址 `?composition=v1`） */
-const useV1 = () => sessionStorage.setItem("forliosa:composition-chart", "v1")
-afterEach(() => sessionStorage.removeItem("forliosa:composition-chart"))
 
 /** 舊版後端：績效沒有 composition、fund_rank */
 async function withoutComposition() {
@@ -88,23 +84,11 @@ async function withPerformance(patch: (p: Performance) => Performance) {
 }
 
 describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
-  /** 區間的那一句：「這段期間總資產多了 X：本金少了 A（賣出），賺了 B。」→ 帶正負號的三個數字 */
-  const changeOf = (text: string) => {
-    const m = /^這段期間總資產(多了|少了) (NT\$[\d,]+)：本金(多了|少了) (NT\$[\d,]+)（(買進|賣出)），(賺了|虧了) (NT\$[\d,]+)。/.exec(text)
-    if (!m) throw new Error(`不是區間的那一句：${text}`)
-    const [, dir, total, flowDir, flows, why, pnlDir, pnl] = m
-    expect(why).toBe(flowDir === "多了" ? "買進" : "賣出")
-    return { total: (dir === "多了" ? 1 : -1) * money(total!), flows: (flowDir === "多了" ? 1 : -1) * money(flows!), pnl: (pnlDir === "賺了" ? 1 : -1) * money(pnl!) }
-  }
-
   it("區間（3 個月）：圖下面沒有拆解的句子（使用者只要圖）；圖例寫「目前賺的」（累積到最後一天），滑過時寫那一天的「賺的」；本金＋賺的＝總資產", async () => {
     act(() => useLedgerPrefs.setState({ trendRange: "3M" }))
     renderApp("/")
     const region = await trend()
     expect(sentence(region)).toBeNull()
-    expect(region.querySelector("[data-composition-note]")).toBeNull()
-    // v2：一張圖，沒有下面那一格
-    expect(region.querySelector('[data-pane="profit"]')).toBeNull()
     expect(region.querySelector("[data-bands]")).not.toBeNull()
     const gainText = legend(region, "gain")!.textContent!
     expect(gainText).toMatch(/^目前賺的 \+NT\$[\d,]+$/)
@@ -121,21 +105,6 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     expect(money(legend(region, "invested")!.textContent!) + money(legend(region, "gain")!.textContent!)).toBe(money(shown))
   })
 
-  it("v1（網址 ?composition=v1，留著比較）：圖下面一格；格子的標籤和那一句同一組數字", async () => {
-    useV1()
-    act(() => useLedgerPrefs.setState({ trendRange: "3M" }))
-    renderApp("/")
-    const region = await trend()
-    expect(region.querySelector('[data-pane="profit"]')).not.toBeNull()
-    expect(region.querySelector('[data-series="flows"]')).not.toBeNull()
-    expect(region.querySelector("[data-bands]")).toBeNull()
-    // v1 的高度（jsdom 不是桌面）：手機 200
-    expect(within(region).getByRole("img").getAttribute("height")).toBe("200")
-    const { flows, pnl } = changeOf(sentence(region)!.textContent!)
-    // 格子的標籤還是 v1 的說法（加碼／拿回、損益）；那一句和 v2 共用
-    expect(paneLabel(region)!.textContent).toBe(`${flows > 0 ? "加碼" : "拿回"}${formatMoney(Math.abs(flows))}損益${formatMoney(pnl, { signed: true })}`)
-  })
-
   it("「全部」：圖例寫「賺的」（不寫「目前」）；本金＋賺的＝主數字的總資產，賺的＋全部領過的股利＝主數字的「總損益（含股利）」；圖的說明念資產組成、本金只算還在股票裡的錢", async () => {
     act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
     renderApp("/")
@@ -148,7 +117,7 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     expect(money(invested) + money(profit)).toBe(Math.round(summary.market_value))
     expect(money(profit) + Math.round(summary.dividend_income)).toBe(Math.round(summary.total_pnl))
     // 決定 1：「資產組成」念在圖的說明裡；決定 5（只算還在股票裡的錢）畫面上不寫、念在這裡
-    expect(region.querySelector("[data-composition-note]")).toBeNull()
+    expect(within(region).queryByText(/只算還在股票裡的錢/)).toBeNull()
     expect(within(region).getByRole("img").getAttribute("aria-label")).toMatch(
       new RegExp(`，資產組成：最後一天本金 ${invested.replace("$", "\\$")}，賺的 ${profit.replace("$", "\\$")}。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢$`),
     )
@@ -250,8 +219,6 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
     renderApp("/")
     const region = await trend()
-    expect(region.querySelector('[data-pane="profit"]')).toBeNull()
-    expect(paneLabel(region)).toBeNull()
     expect(region.querySelector("[data-bands]")).toBeNull()
     expect(region.querySelector("clipPath")).toBeNull()
     expect(region.querySelector("[data-legend]")).toBeNull()
