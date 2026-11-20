@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from forliosa import history_backfill, perfcache
+from forliosa import backup, history_backfill, perfcache
 from forliosa.ai import store
 from forliosa.ai.keypool import get_key_pool
 from forliosa.api.errors import ApiError, not_found, unprocessable
@@ -57,6 +57,8 @@ def ai_summary(db: Session) -> dict[str, Any]:
 
 
 def _dataset_name(key: str) -> tuple[str, str | None]:
+    if key == backup.STATUS_KEY:  # the nightly pg_dump: flagged here once backups stop (forliosa.backup)
+        return "資料庫備份", "Railway Bucket"
     ds = DATASETS.get(key)
     if ds is not None:
         return ds.title, ds.agency

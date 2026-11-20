@@ -112,6 +112,14 @@ class Settings(BaseSettings):
     sec_enabled: bool = True
     sec_stale_hours: float = 24.0
     sec_on_demand_timeout_seconds: float = 6.0
+    # Nightly database backup (product owner 2026-11-21; forliosa.backup): the worker pg_dumps the PostgreSQL database
+    # at 04:00 Taipei to an S3-compatible bucket (production: the Railway Bucket ``db-backups``). Off unless all four
+    # are set and DATABASE_URL is PostgreSQL. BACKUP_S3_ENDPOINT is the S3 endpoint (objects at https://<bucket>.<host>/…).
+    backup_s3_endpoint: str | None = None
+    backup_s3_bucket: str | None = None
+    backup_s3_access_key_id: str | None = None
+    backup_s3_secret_access_key: SecretStr | None = None
+    backup_s3_region: str = "auto"
     cache_dir: Path = Path("var/cache")
     http_timeout_seconds: float = 20.0
     finmind_token: str | None = None
@@ -558,7 +566,8 @@ class Settings(BaseSettings):
         return v.rstrip("/") if v else v
 
     @field_validator("discord_client_secret", "google_client_secret", "telegram_bot_token", "databento_api_key",
-                     "langsearch_api_key", mode="before")
+                     "langsearch_api_key", "backup_s3_secret_access_key", "backup_s3_endpoint", "backup_s3_bucket",
+                     "backup_s3_access_key_id", mode="before")
     @classmethod
     def _blank_secret(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v

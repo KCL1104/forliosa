@@ -24,7 +24,7 @@ Forliosa 由兩部分組成：
 | API | Railway 專案 `forliosa`、環境 `production`、服務 `api`，**`https://api.forliosa.trade`**，新加坡（`asia-southeast1-eqsg3a`） |
 | worker | 服務 `worker`，新加坡，一個副本，沒有網域 |
 | 新聞元搜尋 | 服務 **`searxng-news`**（不是 `searxng`），新加坡，沒有公開網域；api 與 worker 的 `NEWS_SEARXNG_URL=http://searxng-news.railway.internal:8080` |
-| 資料庫 | 服務 `Postgres`（官方 image＋volume），新加坡。**沒有備份**：Railway 的備份與排程只給 Pro 方案（2026-11-13 API 回覆），見第 6 節 |
+| 資料庫 | 服務 `Postgres`（官方 image＋volume），新加坡。每天備份到 Railway Bucket `db-backups`（2026-11-21 起，見 2.1 節「資料庫備份」） |
 | 行銷網站（2026-11-19） | Ploy 網站 `ae204fd9-54b4-4b18-a958-722cf336602f`（workspace Forliosa，Starter 方案），自訂網域 **`about.forliosa.trade`**（2026-11-20 接上；備用網址 `https://my-site-ae204fd9.ploy.build`）。不用 `www` 的原因：Ploy 一定把 `www` 和根網域綁成一組，要求根網域也指過去（A `207.207.209.209`），根網域是 app，不能給；後台也沒有出現「只留一個」的選項。一般子網域（`about`）是單獨一筆，只要兩筆 DNS。app 仍在 `forliosa.trade`，行銷網站不碰後端、OAuth 與 cookie |
 | DNS（Cloudflare） | 根網域 CNAME → `forliosa.pages.dev`（Proxied）；`api` CNAME → Railway 給的目標（DNS only）；`_railway-verify.api` TXT；`about` CNAME → `proxy.runploy.com`（DNS only）；`_acme-challenge.about` CNAME → `about.forliosa.trade.a93c3620a44f1490.dcv.cloudflare.com`（DNS only）；`www` AAAA `100::`（Proxied，只做轉址）＋ Redirect Rule：`www.forliosa.trade/*` 301 → `https://about.forliosa.trade/*`（保留網址參數） |
 | 信箱 | Cloudflare Email Routing：`support@forliosa.trade` 轉寄到產品負責人的信箱 |
@@ -89,6 +89,18 @@ worker 記錄有 `worker started: …` 與 `close watch: TPEX has published the 
 1. **New → Database → PostgreSQL**，服務名稱保持 `Postgres`（下面的變數引用用到這個名字）。
 2. （選用）**New → Database → Redis**。目前的程式不使用 Redis（報價快取在 API 程序記憶體內），之後多副本與
    SSE 共用報價時才需要；現在建立的話只要把 `REDIS_URL` 接上即可。
+
+**資料庫備份（2026-11-21）**：Railway 的 volume 備份只給 Pro 方案，所以由 worker 自己備份（`forliosa.backup`）。
+- 每天 04:00（台北）`pg_dump --format=custom` 整個資料庫，上傳到 Railway Bucket **`db-backups`**（新加坡、私有）的
+  `postgres/forliosa-<日>.dump`。每個月的同一天會覆蓋上個月那份，所以大約保留 30 天，不用另外清。
+- 成功後寫 `dataset_status` 的 `db-backup`：管理後台「資料」裡叫「資料庫備份」，3 個交易日沒有新備份就排到最上面、標「沒有更新」。
+- 變數只設在 worker：`BACKUP_S3_ENDPOINT`、`BACKUP_S3_BUCKET`、`BACKUP_S3_ACCESS_KEY_ID`、`BACKUP_S3_SECRET_ACCESS_KEY`
+  （值來自 `railway bucket credentials --bucket db-backups --json`；四個缺一個就不備份）。映像檔裝的是 PGDG 的
+  `postgresql-client-18`，版本不能比 Postgres 伺服器舊。
+- 立刻備份一次：`railway ssh --service worker`，再執行 `python -c "from forliosa import backup; print(backup.run())"`。
+- 還原：在 worker 容器裡（有 18 版的 `pg_restore`）下載那天的檔案，**先還原到另一個資料庫核對**，確定沒問題才考慮覆蓋正式資料庫：
+  `pg_restore --no-owner --no-privileges -d <另一個資料庫> forliosa-DD.dump`。下載用 S3 簽章（例如
+  `curl --aws-sigv4 "aws:amz:auto:s3" --user "$BACKUP_S3_ACCESS_KEY_ID:$BACKUP_S3_SECRET_ACCESS_KEY" https://$BACKUP_S3_BUCKET.t3.storageapi.dev/postgres/forliosa-DD.dump -o forliosa-DD.dump`）。
 
 ### 2.2 api 服務
 
@@ -375,5 +387,5 @@ compose 把 repo 裡的 `deploy/searxng/settings.yml` 唯讀掛進容器：官�
 | **群組週報與頻道推播** | 後端完成（M5 第二批）：worker 每分鐘推播、每週六 20:00 產生週報；前端的週報與頻道設定畫面還沒接 | 部署 worker（`SESSION_SECRET` 與 api 相同、單一副本、Claude 金鑰）；要用 Telegram 時建立 bot（2.5 節） |
 | **帳戶刪除 UI、只記持股快照輸入畫面** | API 已有，前端還沒有畫面 | 見 `apps/web/OPEN_QUESTIONS.md` |
 | **SearXNG 新聞元搜尋** | 預設開啟（2.6 節）；只用合成回應測過，沒有實際建置或查詢過 | 第一次部署後跑 `searxng-check`；SearXNG 送給上游搜尋引擎的是瀏覽器樣式的請求（SearXNG 本身的做法），要產品負責人確認可以接受（見 `apps/api/CONTRACT_NOTES.md`「2026-11-12 新聞報導」待確認） |
-| **資料備份、監控** | 未設定。Railway 的 volume 備份只給 Pro 方案（目前的方案不能開） | 正式開放前擇一：升級 Railway Pro 用內建備份，或加一個每天 `pg_dump` 到 Cloudflare R2 的工作；錯誤追蹤（例如 Sentry）、uptime 監控 |
+| **資料備份、監控** | 備份：2026-11-21 起每天備份到 Railway Bucket（2.1 節）。監控未設定 | 錯誤追蹤（例如 Sentry）、uptime 監控；想要多一份不在 Railway 的備份時，啟用 Cloudflare R2 再加一個上傳目的地 |
 | **個資法** | 資料匯出／刪除帳號（M5） | 上線前的隱私權政策與服務條款 |

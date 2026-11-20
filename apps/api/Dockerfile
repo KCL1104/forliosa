@@ -1,6 +1,19 @@
 # Forliosa API / worker image (Railway). Build context: apps/api
 FROM python:3.13-slim
 
+# pg_dump / pg_restore for the worker's nightly backup (forliosa.backup). The client must be at least the server's
+# major version (Railway Postgres 18); Debian's own is older, so it comes from the PostgreSQL apt repository (PGDG).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir uv==0.11.32
 
 ENV PYTHONUNBUFFERED=1 \
