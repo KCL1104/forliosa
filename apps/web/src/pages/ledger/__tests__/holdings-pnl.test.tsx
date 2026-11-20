@@ -125,7 +125,7 @@ function cellOf(table: HTMLElement, name: string, header: string) {
   const row = within(table).getAllByRole("row").find((r) => within(r).queryByRole("link", { name }))!
   return within(row).getAllByRole("cell")[idx - 1]!
 }
-/** 持股那幾列的順序（第一個 tbody；觀察清單是第二個） */
+/** 持股那幾列的順序（觀察清單 2026-11-21 起自己一盤，不在這張表裡） */
 const rowOrder = (table: HTMLElement) =>
   within(table.querySelector("tbody")!)
     .getAllByRole("rowheader")
@@ -236,11 +236,12 @@ describe("持倉表的「損益」欄", { timeout: 20_000 }, () => {
     // 數字欄之間至少 12px（寬窄都一樣），窄的時候只佔自己需要的寬度
     expect(day).toHaveClass("pl-3")
     expect(dayPct).toHaveClass("pl-3", "@max-[52rem]:w-px")
-    // 名稱欄拿剩下的寬度，放不下就截斷、滑過看全名（列高不變）
-    const nameCell = within(table).getByRole("link", { name: "台積電" }).closest("th")!
-    expect(nameCell).toHaveClass("@max-[52rem]:max-w-0")
-    expect(within(table).getByRole("link", { name: "台積電" })).toHaveAttribute("title", "台積電")
-    expect(within(table).getByRole("link", { name: "台積電" })).toHaveClass("@max-[52rem]:truncate")
+    // 名稱欄拿剩下的寬度；名稱不截斷（2026-11-21）：放不下就換行、那一列長高，股數本身不拆開
+    const nameLink = within(table).getByRole("link", { name: "台積電" })
+    expect(nameLink.className).not.toMatch(/truncate/)
+    expect(nameLink).toHaveClass("[overflow-wrap:break-word]")
+    expect(nameLink.closest("th")!.className).not.toMatch(/max-w-0/)
+    expect(within(nameLink.closest("th")!).getByText(/張|股/).closest(".whitespace-nowrap")).not.toBeNull()
 
     // 只開今日損益：不用併，也沒有第二行
     cleanup()
@@ -253,7 +254,7 @@ describe("持倉表的「損益」欄", { timeout: 20_000 }, () => {
     expect(within(table).queryByRole("button", { name: "漲跌" })).toBeNull()
   })
 
-  it("主欄窄的時候也能照漲跌幅排：今日損益的表頭多一個「漲跌」；最窄（< 46rem）時只在正照它排的時候出現", async () => {
+  it("主欄窄的時候也能照漲跌幅排：今日損益的表頭多一個「漲跌」；最窄（< 44rem）時只在正照它排的時候出現", async () => {
     const holdings = await api.getHoldings()
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderApp("/")
@@ -261,14 +262,14 @@ describe("持倉表的「損益」欄", { timeout: 20_000 }, () => {
     const button = within(table).getByRole("button", { name: "漲跌" })
     const wrap = button.parentElement!
     // 寬的時候藏起來（有自己的「今日漲跌」欄）；最窄的時候沒有照它排就藏起來，省下名稱的寬度
-    expect(wrap).toHaveClass("@min-[52rem]:hidden", "@max-[46rem]:hidden")
+    expect(wrap).toHaveClass("@min-[52rem]:hidden", "@max-[44rem]:hidden")
     expect(button.closest("th")!.textContent).toMatch(/損益・漲跌$/)
 
     await user.click(button)
     const byPct = [...holdings].sort((a, b) => (b.day_change_pct ?? 0) - (a.day_change_pct ?? 0)).map((h) => h.name)
     expect(rowOrder(table)).toEqual(byPct)
     // 正照它排：最窄的時候也看得到（箭頭、墨色），螢幕閱讀器讀得到排序方向
-    expect(wrap).not.toHaveClass("@max-[46rem]:hidden")
+    expect(wrap).not.toHaveClass("@max-[44rem]:hidden")
     expect(wrap).toHaveClass("@min-[52rem]:hidden")
     expect(within(table).getByRole("button", { name: "漲跌" })).toHaveClass("text-ink")
     expect(within(wrap).getByText("（照漲跌由大到小排）")).toHaveClass("sr-only")
@@ -312,8 +313,8 @@ describe("手機持倉：表頭切換今日漲跌與報酬率", { timeout: 20_00
     renderApp("/")
     const list = await phoneList()
     const table = await holdingsTable()
-    // 觀察那一段（同一張表的第二個 tbody，有自己的表頭）載入完才記下桌面的表頭：整份一起跑、機器忙的時候它比持股晚到
-    await within(table).findByRole("columnheader", { name: /^觀察/ }, T)
+    // 觀察清單 2026-11-21 起自己一盤（不在持倉表裡）：等它載入完才記下桌面的表頭，整份一起跑、機器忙的時候它比持股晚到
+    await screen.findByRole("list", { name: "觀察清單" }, T)
     const desktopHeads = headerNames(table)
 
     // 真的按鈕、和表頭一樣高（44px）；名稱是看得到的字＋要換成什麼

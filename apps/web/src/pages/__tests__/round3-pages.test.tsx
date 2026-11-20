@@ -287,7 +287,7 @@ describe("資料來源與授權", () => {
 })
 
 describe("手機的股利列：每股金額一定看得到", () => {
-  it("每股金額與來源標示不在會截斷的那一段裡（放不下時整個換到下一行）；只有名稱會截斷", async () => {
+  it("每股金額與來源標示不在名稱那一段裡（放不下時整個換到下一行）；名稱放不下時換行、不截斷（2026-11-21）", async () => {
     renderInRouter(<DividendsView />)
     const received = await screen.findByRole("region", { name: "已入帳" }, T)
     const amounts = await within(received).findAllByText(/^每股 /, undefined, T)
@@ -297,8 +297,11 @@ describe("手機的股利列：每股金額一定看得到", () => {
       expect(amount.closest(".truncate")).toBeNull()
       expect(amount.parentElement!.className).toMatch(/\bshrink-0\b/)
       const row = amount.closest("li")!
-      // 名稱（連結）在自己的截斷容器裡
-      expect(within(row).getByRole("link").closest(".truncate")).not.toBeNull()
+      // 名稱（連結）在自己的那一段裡，放不下時換行（不截斷）
+      const name = within(row).getByRole("link").closest("[data-name]")!
+      expect(name).not.toBeNull()
+      expect(name.className).not.toMatch(/truncate/)
+      expect(amount.closest("[data-name]")).toBeNull()
     }
   })
 })
@@ -332,7 +335,7 @@ describe("鍵值格：手機 2 欄不留半列的孤格", () => {
 describe("價格是收盤價（沒有盤中即時報價）", () => {
   const status = (o: Partial<MarketStatus["tw"]>): MarketStatus => ({ tw: { date: "2026-11-13", is_trading_day: true, is_open: false, open: "09:00", close: "13:30", ...o } })
 
-  it("預設（最新的收盤價已經進來）：只標「收盤價・11/12（四）」，沒有說明；帳本寫「11/12 收盤」與「今日」", async () => {
+  it("預設（最新的收盤價已經進來）：只標「收盤價・11/12（四）」，沒有說明；帳本寫「收盤價・11/12（四）」與「今日」（2026-11-21 起和個股頁同一個寫法）", async () => {
     renderApp("/stock/2330.TW")
     await screen.findByText("參考價", undefined, T)
     expect(await screen.findByText(/^收盤價$/, undefined, T)).toBeInTheDocument()
@@ -342,8 +345,8 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     expect(document.body.textContent).not.toMatch(/延遲/)
     cleanup()
     renderApp("/")
-    expect(await screen.findByText("11/12 收盤", undefined, T)).toBeInTheDocument()
-    expect(screen.getByText("今日")).toBeInTheDocument()
+    expect(await screen.findByText("收盤價・11/12（四）", undefined, T)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "總資產" })).getByText("今日")).toBeInTheDocument()
     expect(await screen.findByText("收盤價・今日漲跌", undefined, T)).toBeInTheDocument()
   })
 
@@ -363,15 +366,15 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     expect(screen.getByText("11/12 漲跌")).toBeInTheDocument()
     cleanup()
     renderApp("/")
-    expect(await screen.findByText("11/12 收盤・盤中不更新", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("收盤價・11/12（四）・盤中不更新", undefined, T)).toBeInTheDocument()
     // 「今日」損益、「今日漲跌」寫成收盤價的日期
     await waitFor(() => expect(screen.queryByText("今日")).toBeNull())
     expect(await screen.findByText("收盤價・11/12 漲跌", undefined, T)).toBeInTheDocument()
-    const hero = screen.getByText("11/12 收盤・盤中不更新").closest("div")!
+    const hero = screen.getByText("收盤價・11/12（四）・盤中不更新").closest("div")!
     expect(within(hero).getByText("11/12", { selector: "dt" })).toBeInTheDocument()
   })
 
-  it("收盤後、今天的收盤價還沒公布（舊版後端，沒有 closes）：一行說明，沒有連結；帳本「11/12 收盤・今天的還沒公布」", async () => {
+  it("收盤後、今天的收盤價還沒公布（舊版後端，沒有 closes）：一行說明，沒有連結；帳本「收盤價・11/12（四）・今天的還沒公布」", async () => {
     vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({}))
     vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-13T15:10:00+08:00"))
     renderApp("/stock/2330.TW")
@@ -380,8 +383,8 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     expect(screen.getByText("11/12 漲跌")).toBeInTheDocument()
     cleanup()
     renderApp("/")
-    const label = await screen.findByText("11/12 收盤", undefined, T)
-    expect(label.parentElement!.textContent).toContain("11/12 收盤・今天的還沒公布")
+    const label = await screen.findByText("收盤價・11/12（四）", undefined, T)
+    expect(label.parentElement!.textContent).toContain("收盤價・11/12（四）・今天的還沒公布")
   })
 
   /** 上市、上櫃的收盤價各自什麼時候進來（產品負責人 2026-11-16）：`tw.closes` 的時間窗 */
@@ -401,8 +404,8 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     expect(await screen.findByText("今天的收盤價預計今晚 8:30–11:45 更新", undefined, T)).toBeInTheDocument()
     cleanup()
     renderApp("/")
-    const label = await screen.findByText("11/12 收盤", undefined, T)
-    await waitFor(() => expect(label.parentElement!.textContent).toContain("11/12 收盤・上市預計下午 2:30 前更新・上櫃預計今晚更新"))
+    const label = await screen.findByText("收盤價・11/12（四）", undefined, T)
+    await waitFor(() => expect(label.parentElement!.textContent).toContain("收盤價・11/12（四）・上市預計下午 2:30 前更新・上櫃預計今晚更新"))
     expect(await screen.findByText("收盤價・11/12 漲跌", undefined, T)).toBeInTheDocument()
   })
 
@@ -414,7 +417,7 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
       (await getHoldings(id)).map((h) => ({ ...h, price_date: h.market === "TWSE" && h.price !== null ? "2026-11-13" : h.price_date })),
     )
     renderApp("/")
-    const label = await screen.findByText("上市 11/13・上櫃 11/12 收盤", undefined, T)
+    const label = await screen.findByText("收盤價・上市 11/13・上櫃 11/12", undefined, T)
     expect(label.parentElement!.textContent).toContain("上櫃預計今晚 8:30–11:45 更新")
     const hero = label.closest("div")!
     await waitFor(() => expect(within(hero).getByText("當日", { selector: "dt" })).toBeInTheDocument())
@@ -450,7 +453,7 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
   }
   /** 主數字旁寫紐約的收盤，「今日」換成那一天；不寫台北的日期，也沒有台股的「盤中不更新／今天的還沒公布」 */
   const expectUsHero = async (day: string, taipeiDay: string) => {
-    const label = await screen.findByText(`${day} 收盤（美東）`, undefined, T)
+    const label = await screen.findByText(`收盤價・${day}（美東）`, undefined, T)
     const hero = label.closest("div")!
     await waitFor(() => expect(within(hero).getByText(day, { selector: "dt" })).toBeInTheDocument())
     expect(hero.textContent).not.toMatch(/今日|盤中不更新|還沒公布/)
@@ -460,7 +463,7 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     expect(screen.queryByText(/今日漲跌|今日損益/)).toBeNull()
   }
 
-  it("帳本只有美股・週六早上（台北 11/14）：寫紐約週五的「11/13 收盤（美東）」與「11/13」，不寫週六的日期或「今日」", async () => {
+  it("帳本只有美股・週六早上（台北 11/14）：寫紐約週五的「收盤價・11/13（美東）」與「11/13」，不寫週六的日期或「今日」", async () => {
     vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ date: "2026-11-14", is_trading_day: false }))
     vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-14T10:00:00+08:00"))
     usOnlyLedger("2026-11-14T05:00:00+08:00", "2026-11-13")
@@ -468,7 +471,7 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     await expectUsHero("11/13", "11/14")
   })
 
-  it("帳本只有美股・週一台股盤中（台北 11/16 10:00）：仍是「11/13 收盤（美東）」，沒有台股的「盤中不更新」", async () => {
+  it("帳本只有美股・週一台股盤中（台北 11/16 10:00）：仍是「收盤價・11/13（美東）」，沒有台股的「盤中不更新」", async () => {
     vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ date: "2026-11-16", is_open: true }))
     vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-16T10:00:00+08:00"))
     usOnlyLedger("2026-11-14T05:00:00+08:00", "2026-11-13")
@@ -476,7 +479,7 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     await expectUsHero("11/13", "11/14")
   })
 
-  it("帳本只有美股・週二早上（台北 11/17 07:00）：紐約週一的收盤寫「11/16 收盤（美東）」與「11/16」，不是「今日」", async () => {
+  it("帳本只有美股・週二早上（台北 11/17 07:00）：紐約週一的收盤寫「收盤價・11/16（美東）」與「11/16」，不是「今日」", async () => {
     vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ date: "2026-11-17" }))
     vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-17T07:00:00+08:00"))
     usOnlyLedger("2026-11-17T05:00:00+08:00", "2026-11-16")

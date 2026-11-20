@@ -5,6 +5,7 @@ import { lazy, Suspense, useEffect } from "react"
 import { createPortal } from "react-dom"
 import { api } from "@/api"
 import { useHoldings, usePerformance, useSummary, useUpcoming } from "@/api/queries"
+import { useGroups } from "@/api/sharing-queries"
 import type { PortfolioSummary } from "@/api/types"
 import { usePanelSlot } from "@/ai/panel-slot"
 import { useAskAi } from "@/ai/use-ask"
@@ -13,7 +14,10 @@ import { Masked } from "@/components/finance"
 import { DateCell } from "@/components/date-cell"
 import { DemoTag } from "@/components/section"
 import { Segmented } from "@/components/segmented"
+import { ShareCopyButton, ShareSlip } from "@/components/share-card"
+import { useShareCard } from "@/components/use-share-card"
 import { ErrorState } from "@/components/states"
+import { Tray, type TrayTint } from "@/components/tray"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, directionGlyph, formatMoney, formatPercent, toneClass } from "@/lib/format"
@@ -23,7 +27,6 @@ import type { LedgerSearch, LedgerView } from "@/router"
 import { CustomizeButton } from "./CustomizeButton"
 import { HoldingsView } from "./HoldingsView"
 import { useLedgerCounts } from "./use-ledger-counts"
-import { useLedgerClose } from "@/hooks/use-close"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { SourcesFooter } from "@/components/data-notes"
 import { SourcesProvider } from "@/components/sources"
@@ -35,7 +38,11 @@ import { useCanImport } from "@/pages/transactions/import/access"
 import { PageFrame } from "@/app/PageFrame"
 import { usePageTitle } from "@/app/page-title"
 import { HeroTrend } from "./HeroTrend"
+import { useHeroTrendShown } from "./use-trend-range"
 import { useLedgerPrefs } from "./ledger-prefs"
+import { TodayPnl } from "./TodayPnl"
+import { useHeroClose } from "./use-hero-close"
+import { WatchList } from "./WatchList"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
@@ -49,14 +56,25 @@ const AllocationView = lazy(() => import("./AllocationView").then((m) => ({ defa
  */
 type Segment = "holdings" | "records" | "performance" | "allocation"
 const SEGMENT_KEYS: readonly Segment[] = ["holdings", "records", "performance", "allocation"]
+const SEGMENT_TITLE: Record<Segment, string> = { holdings: "持倉", records: "紀錄", performance: "績效", allocation: "配置" }
 const segmentOf = (view: LedgerView): Segment => (view === "transactions" || view === "dividends" ? "records" : view)
 const viewOf = (segment: Segment): LedgerView => (segment === "records" ? "transactions" : segment)
 
 /**
- * 帳本（首頁）。首屏給持倉（產品負責人 2026-11-19 選 B／C2）：
- * - 桌面：主數字（總資產旁是今日與總損益）→ 總資產走勢（區間按鈕在讀數那一列右邊）→ 分段 → 清單；本週事項在 AI 面板標題下面
- *   （面板收著或看對話紀錄時接在清單後面）。
- * - 手機：主數字 → 分段 → 清單 → 走勢 → 本週事項；績效分段的走勢在分段列與內容之間（走勢的區間就是績效的區間）。
+ * 托盤的底色照順序 1 → 2 → 3 輪流（DESIGN.md〈托盤〉：底色不代表意思，只讓相鄰的兩盤分得開）。
+ * 並排的兩盤（分享卡、觀察清單）各拿一個，下一盤再接著輪：上下、左右相鄰的托盤都不同色。
+ */
+const tintAfter = (t: TrayTint): TrayTint => ((t % 3) + 1) as TrayTint
+
+/**
+ * 帳本（首頁）。內頁重新設計（產品負責人 2026-11-21 選方向 C「圓桌」的結構，不要它的旁白）：一組一組放在托盤裡，
+ * 頁面只有標籤和數字。由上到下：
+ * 1. 總資產（印好的「總資產」＋「收盤價・11/12（四）」、總資產大字、今日、總損益）；桌面接著總資產走勢，同一盤
+ * 2. 分段（持倉・紀錄・績效・配置）與內容；持倉下面直接是已出清（同一盤）
+ * 3. 手機：總資產走勢自己一盤，在內容後面（首屏給持倉，2026-11-19）；績效分段時在分段列與內容之間
+ * 4. 持倉分段才有：今日損益（每一檔的中線橫條，在持倉後面，不把持倉擠出第一屏）→ 分享卡（有加入群組時）＋觀察清單
+ * 5. 本週事項：桌面 AI 面板開著時放在面板標題下面（`ai/panel-slot.ts`）；其他時候是最後一盤
+ * 首屏給持倉（2026-11-19）照舊：1440×900 至少 5 列、1280×800 至少 3 列、iPhone 15 至少 3 列。
  */
 export function LedgerPage() {
   const search = useSearch({ from: "/" }) as LedgerSearch
@@ -65,15 +83,17 @@ export function LedgerPage() {
   const segment = segmentOf(view)
   usePageTitle("帳本")
   const summary = useSummary()
+  const holdings = useHoldings()
   // 總資產走勢的序列（「全部」、不帶基準，和 HeroTrend 同一個查詢）和主數字同時開始讀，兩個都回來才一起換掉主數字的骨架：
   // 走勢一出現就是最後的大小（一張圖、或歷史短時的一行原因），不會先放一塊整張圖大的骨架再收成一行、把下面整片往上拉
   const showTrend = useLedgerPrefs((s) => s.showTrend)
   const trendPerf = usePerformance("ALL")
   const heroReady = !!summary.data && (!showTrend || !!trendPerf.data || trendPerf.isError)
+  const trendShown = useHeroTrendShown() && heroReady
   const counts = useLedgerCounts()
   const pending = usePendingCount()
   const ask = useAskAi()
-  // 查看別人的資產（唯讀）：沒有待簽名的草稿（那是自己的 AI）
+  // 查看別人的資產（唯讀）：沒有待簽名的草稿（那是自己的 AI），也沒有分享卡與觀察清單（那是自己的）
   const readOnly = useReadOnly()
   // 空的帳本（持倉這一段、一檔都沒有）：空狀態本身就有「記第一筆／匯入」，工具列的匯入、記一筆、自訂先不放（動作不重複）
   const emptyHoldings = view === "holdings" && counts.holdings === 0
@@ -82,7 +102,11 @@ export function LedgerPage() {
   const isDesktop = useIsDesktop()
   // 面板的本頁欄位只在桌面、面板開著、不是看對話紀錄時存在（`ai/panel-slot.ts`）
   const panelSlot = usePanelSlot((s) => s.el)
-  const trend = heroReady ? <HeroTrend view={view} /> : null
+  // 分享卡：和群組頁同一張；帳本上只在有加入群組、帳本不是空的時候放
+  const groups = useGroups(!readOnly)
+  const blank = !!summary.data && isBlank(summary.data)
+  const shareShown = !readOnly && !blank && (groups.data?.length ?? 0) > 0
+  const holdingsTab = segment === "holdings"
 
   const setView = (v: LedgerView) => void navigate({ to: "/", search: (s: LedgerSearch) => ({ ...s, view: v === "holdings" ? undefined : v, symbol: v === "transactions" ? s.symbol : undefined }), replace: true })
 
@@ -103,142 +127,207 @@ export function LedgerPage() {
     return () => window.removeEventListener("keydown", onKey)
   }, [navigate])
 
-  return (
-    // 資產組成原型：績效分段「贏過幾成的台股基金」把基金淨值的來源登記到頁尾（沒有登記任何來源時頁尾和以前一樣是一個連結）
-    <SourcesProvider>
-    <PageFrame>
-      <h1 className="sr-only">帳本</h1>
-      {summary.isError ? (
-        <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
-      ) : (
-        <Hero summary={heroReady ? summary.data : undefined} />
-      )}
-      {/* 總資產走勢（產品負責人 2026-11-17 選方案 B；「自訂」可以整塊關掉）。首屏給持倉（2026-11-19 選 B／C2）：
-          桌面在主數字正下方；手機在內容下面——績效分段例外，走勢的區間就是績效的區間，放在分段列與內容之間 */}
-      {isDesktop && trend}
+  // 托盤的底色：照畫面上真的放出來的順序輪流（並排的分享卡、觀察清單各拿一個）
+  const phoneTrend = !isDesktop && view !== "performance" && trendShown
+  const todayShown = holdingsTab && (holdings.data ?? []).some((h) => h.price !== null)
+  const lowerShown = holdingsTab && !readOnly
+  let tint: TrayTint = 1
+  const heroTint = tint
+  const contentTint = (tint = tintAfter(tint))
+  const trendTint = phoneTrend ? (tint = tintAfter(tint)) : tint
+  const todayTint = todayShown ? (tint = tintAfter(tint)) : tint
+  const shareTint = lowerShown && shareShown ? (tint = tintAfter(tint)) : tint
+  const watchTint = lowerShown ? (tint = tintAfter(tint)) : tint
+  const weekTint = tintAfter(tint)
 
-      <div className="mt-5 flex items-center gap-4 lg:mt-8">
-        <Segmented
-          label="帳本內容"
-          value={segment}
-          onChange={(v) => setView(viewOf(v))}
-          controls="ledger-view"
-          className="max-lg:flex-1"
-          options={[
-            { value: "holdings", label: "持倉", count: counts.holdings, shortcut: "1" },
-            { value: "records", label: "紀錄", shortcut: "2" },
-            { value: "performance", label: "績效", shortcut: "3" },
-            { value: "allocation", label: "配置", shortcut: "4" },
-          ]}
-        />
-        {pending > 0 && !readOnly && (
-          <button
-            type="button"
-            onClick={() => {
-              const id = latestPendingDraftId()
-              ask.showDraft(id)
-            }}
-            className="press hidden h-8 items-center rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3 text-sm font-medium text-ai hover:border-ai lg:inline-flex"
-            aria-label={`待簽名 ${pending} 筆：到 AI 面板的草稿確認`}
-          >
-            待簽名 {pending} 筆
-          </button>
-        )}
-        {/* 手動記一筆：直接開輸入框（用一句話記的入口在 AI 面板）。手機放在分段旁邊的「＋」。
-            匯入（2026-11-17）：開了匯入的帳號在記一筆左邊多一顆「匯入」，先選匯入庫存或對帳單（原本藏在記一筆、AI「＋」裡，朋友找不到） */}
-        {!readOnly && !emptyHoldings && (
-          <>
-            {canImport && (
-              <Button variant="outline" className="ml-auto max-lg:hidden" onClick={() => openImport()}>
-                匯入
-              </Button>
-            )}
-            <Button variant="outline" className={cn("max-lg:hidden", !canImport && "ml-auto")} onClick={() => ask.action("form")}>
-              記一筆
-            </Button>
-            <div className="flex shrink-0 gap-2 self-stretch lg:hidden">
-              {/* 400px 以下放不下四段＋匯入＋「＋」（360px 的分段會斷成直排），匯入改從記一筆裡的「匯入庫存或對帳單」進去 */}
-              {canImport && (
-                <button type="button" onClick={() => openImport()} className="press grid place-items-center rounded-sm border border-ctl px-3 text-base text-ink hover:bg-hov max-[400px]:hidden">
-                  匯入
-                </button>
-              )}
-              <button type="button" aria-label="記一筆" onClick={() => ask.action("form")} className="press grid w-11 place-items-center rounded-sm border border-ctl text-ink hover:bg-hov">
-                <PlusIcon aria-hidden className="size-5" />
-              </button>
-            </div>
-          </>
-        )}
-        {view === "holdings" && !emptyHoldings && <CustomizeButton className={cn("max-lg:hidden", readOnly && "ml-auto")} />}
-      </div>
+  const toolbar = (
+    <div className="flex w-full min-w-0 items-center gap-4">
+      <Segmented
+        label="帳本內容"
+        value={segment}
+        onChange={(v) => setView(viewOf(v))}
+        controls="ledger-view"
+        className="max-lg:flex-1"
+        options={[
+          { value: "holdings", label: "持倉", count: counts.holdings, shortcut: "1" },
+          { value: "records", label: "紀錄", shortcut: "2" },
+          { value: "performance", label: "績效", shortcut: "3" },
+          { value: "allocation", label: "配置", shortcut: "4" },
+        ]}
+      />
       {pending > 0 && !readOnly && (
         <button
           type="button"
           onClick={() => ask.showDraft(latestPendingDraftId())}
-          className="press mt-3 flex h-11 w-full items-center justify-between rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3.5 text-base font-medium text-ai lg:hidden"
+          className="press hidden h-8 items-center rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3 text-sm font-medium text-ai hover:border-ai lg:inline-flex"
+          aria-label={`待簽名 ${pending} 筆：到 AI 面板的草稿確認`}
         >
           待簽名 {pending} 筆
-          <span aria-hidden className="font-normal">→</span>
         </button>
       )}
-
-      {!isDesktop && view === "performance" && trend}
-      <div id="ledger-view" role="tabpanel" aria-labelledby={`tab-${segment}`} className="mt-5 lg:mt-5">
-        {segment === "records" && (
-          // 紀錄裡的兩個小分頁：交易（買進、賣出與其他）、股利（台股的現金股利與配股是系統在除息日自動記的）
-          <div role="tablist" aria-label="紀錄的內容" className="mb-4 flex gap-5 border-b border-rule">
-            {([["transactions", "交易", counts.transactions], ["dividends", "股利", counts.dividends]] as const).map(([v, label, count]) => (
-              <button
-                key={v}
-                type="button"
-                role="tab"
-                id={`subtab-${v}`}
-                aria-selected={view === v}
-                aria-controls="ledger-records"
-                tabIndex={view === v ? 0 : -1}
-                onClick={() => setView(v)}
-                onKeyDown={(e) => {
-                  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return
-                  e.preventDefault()
-                  setView(v === "transactions" ? "dividends" : "transactions")
-                  const list = e.currentTarget.parentElement
-                  requestAnimationFrame(() => list?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus())
-                }}
-                className={cn("sel-tab -mb-px inline-flex min-h-10 items-baseline gap-1.5 text-base text-ink-2 pointer-coarse:min-h-11", view === v && "active")}
-              >
-                {label}
-                {count != null && <span className="num text-sm font-normal text-ink-2">{count}</span>}
+      {/* 手動記一筆：直接開輸入框（用一句話記的入口在 AI 面板）。手機放在分段旁邊的「＋」。
+          匯入（2026-11-17）：開了匯入的帳號在記一筆左邊多一顆「匯入」，先選匯入庫存或對帳單 */}
+      {!readOnly && !emptyHoldings && (
+        <>
+          {canImport && (
+            <Button variant="outline" className="ml-auto max-lg:hidden" onClick={() => openImport()}>
+              匯入
+            </Button>
+          )}
+          <Button variant="outline" className={cn("max-lg:hidden", !canImport && "ml-auto")} onClick={() => ask.action("form")}>
+            記一筆
+          </Button>
+          <div className="flex shrink-0 gap-2 self-stretch lg:hidden">
+            {/* 400px 以下放不下四段＋匯入＋「＋」（分段會斷成直排），匯入改從記一筆裡的「匯入庫存或對帳單」進去 */}
+            {canImport && (
+              <button type="button" onClick={() => openImport()} className="press grid place-items-center rounded-sm border border-ctl px-3 text-base text-ink hover:bg-hov max-[400px]:hidden">
+                匯入
               </button>
-            ))}
-          </div>
-        )}
-        {view === "holdings" ? (
-          <HoldingsView />
-        ) : (
-          <Suspense fallback={<Skeleton className="h-64 w-full rounded-sm" />}>
-            {segment === "records" && (
-              <div id="ledger-records" role="tabpanel" aria-labelledby={`subtab-${view}`}>
-                {view === "transactions" ? <TransactionsView symbol={search.symbol} /> : <DividendsView />}
-              </div>
             )}
-            {view === "performance" && <PerformanceView />}
-            {view === "allocation" && <AllocationView />}
-          </Suspense>
-        )}
-      </div>
-      {!isDesktop && view !== "performance" && <div className="mt-3">{trend}</div>}
-      {/* 本週事項：桌面 AI 面板開著時放在面板標題下面（本頁欄位）；面板收著、看對話紀錄、手機時接在內容後面 */}
-      {panelSlot ? createPortal(<WeekLine variant="panel" />, panelSlot) : <WeekLine />}
-      <SourcesFooter />
-    </PageFrame>
+            <button type="button" aria-label="記一筆" onClick={() => ask.action("form")} className="press grid w-11 place-items-center rounded-sm border border-ctl text-ink hover:bg-hov">
+              <PlusIcon aria-hidden className="size-5" />
+            </button>
+          </div>
+        </>
+      )}
+      {view === "holdings" && !emptyHoldings && <CustomizeButton className={cn("max-lg:hidden", readOnly && "ml-auto")} />}
+    </div>
+  )
+
+  return (
+    // 資產組成原型：績效分段「贏過幾成的台股基金」把基金淨值的來源登記到頁尾（沒有登記任何來源時頁尾和以前一樣是一個連結）
+    <SourcesProvider>
+      {/* 托盤自己有內距：版心頂端和托盤之間的距離一樣（手機 12px、桌面 16px），首屏留給持倉 */}
+      <PageFrame className="lg:pt-4">
+        <h1 className="sr-only">帳本</h1>
+        <div className="@container flex flex-col gap-tray-gap">
+          {summary.isError ? (
+            <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
+          ) : (
+            // 第一行是印好的「總資產」：標題只給螢幕閱讀器
+            <Tray title="總資產" titleHidden tint={heroTint}>
+              <Hero summary={heroReady ? summary.data : undefined} />
+              {/* 總資產走勢（產品負責人 2026-11-17 選方案 B；「自訂」可以整塊關掉）：桌面在主數字正下方、同一盤 */}
+              {isDesktop && heroReady && <HeroTrend view={view} className="lg:mt-4" />}
+            </Tray>
+          )}
+
+          {/* 分段與內容：分頁列在標題列的動作位置、撐滿整列（標題只給螢幕閱讀器，就是現在這一段的名稱） */}
+          <Tray title={SEGMENT_TITLE[segment]} titleHidden action={toolbar} tint={contentTint} className="[&>header>div]:ml-0 [&>header>div]:flex-1">
+            {pending > 0 && !readOnly && (
+              <button
+                type="button"
+                onClick={() => ask.showDraft(latestPendingDraftId())}
+                className="press mb-3 flex h-11 w-full items-center justify-between rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3.5 text-base font-medium text-ai lg:hidden"
+              >
+                待簽名 {pending} 筆
+                <span aria-hidden className="font-normal">
+                  →
+                </span>
+              </button>
+            )}
+            {/* 手機的績效分段：走勢的區間就是績效的區間，放在分段列與內容之間 */}
+            {!isDesktop && view === "performance" && heroReady && <HeroTrend view={view} className="mt-0 mb-5" />}
+            <div id="ledger-view" role="tabpanel" aria-labelledby={`tab-${segment}`}>
+              {segment === "records" && (
+                // 紀錄裡的兩個小分頁：交易（買進、賣出與其他）、股利（台股的現金股利與配股是系統在除息日自動記的）
+                <div role="tablist" aria-label="紀錄的內容" className="mb-4 flex gap-5 border-b border-rule">
+                  {(
+                    [
+                      ["transactions", "交易", counts.transactions],
+                      ["dividends", "股利", counts.dividends],
+                    ] as const
+                  ).map(([v, label, count]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      role="tab"
+                      id={`subtab-${v}`}
+                      aria-selected={view === v}
+                      aria-controls="ledger-records"
+                      tabIndex={view === v ? 0 : -1}
+                      onClick={() => setView(v)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return
+                        e.preventDefault()
+                        setView(v === "transactions" ? "dividends" : "transactions")
+                        const list = e.currentTarget.parentElement
+                        requestAnimationFrame(() => list?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus())
+                      }}
+                      className={cn("sel-tab -mb-px inline-flex min-h-10 items-baseline gap-1.5 text-base text-ink-2 pointer-coarse:min-h-11", view === v && "active")}
+                    >
+                      {label}
+                      {count != null && <span className="num text-sm font-normal text-ink-2">{count}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {view === "holdings" ? (
+                <HoldingsView />
+              ) : (
+                <Suspense fallback={<Skeleton className="h-64 w-full rounded-sm" />}>
+                  {segment === "records" && (
+                    <div id="ledger-records" role="tabpanel" aria-labelledby={`subtab-${view}`}>
+                      {view === "transactions" ? <TransactionsView symbol={search.symbol} /> : <DividendsView />}
+                    </div>
+                  )}
+                  {view === "performance" && <PerformanceView />}
+                  {view === "allocation" && <AllocationView />}
+                </Suspense>
+              )}
+            </div>
+          </Tray>
+
+          {/* 手機：總資產走勢自己一盤，在內容後面（首屏給持倉，2026-11-19） */}
+          {phoneTrend && (
+            <Tray title="總資產走勢" tint={trendTint}>
+              <HeroTrend view={view} titled className="mt-0" />
+            </Tray>
+          )}
+
+          {todayShown && <TodayPnl tint={todayTint} />}
+          {lowerShown && (
+            // 寬的時候分享卡與觀察清單並排（分享卡寬一點：三格百分比要放得下「總報酬（含股利）」），同一列等高
+            <div className={cn("grid gap-tray-gap", shareShown && "@min-[56rem]:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]")}>
+              {shareShown && <ShareTray tint={shareTint} />}
+              <WatchList tint={watchTint} />
+            </div>
+          )}
+          {/* 本週事項：桌面 AI 面板開著時放在面板標題下面（本頁欄位）；面板收著、看對話紀錄、手機時是最後一盤 */}
+          {!panelSlot && <WeekLine tint={weekTint} />}
+        </div>
+        {panelSlot && createPortal(<WeekLine variant="panel" />, panelSlot)}
+        <SourcesFooter />
+      </PageFrame>
     </SourcesProvider>
+  )
+}
+
+/** 還沒記過任何東西（沒有市值、沒有成本、也沒有已實現的損益） */
+const isBlank = (s: PortfolioSummary) => s.market_value === 0 && s.cost_basis === 0 && s.total_pnl === 0
+
+/** 分享卡（和群組頁同一張，`components/share-card.tsx`）：只有百分比；「複製分享文字」在標題列 */
+function ShareTray({ tint }: { tint: TrayTint }) {
+  const data = useShareCard()
+  return (
+    <Tray title="分享卡" tint={tint} action={<ShareCopyButton data={data} size="sm" />} className="h-full">
+      <ShareSlip data={data} />
+    </Tray>
   )
 }
 
 function BigTotal({ value }: { value: number }) {
   const privacy = usePrefs((s) => s.privacyMode)
+  // 幾個字（數字與千分位，負數多一個號）：上千億的帳本在 320px 的手機上也不會撐出畫面——字放不下時照這一盤的寬度縮小
+  // （一個字約 0.6em；手機最大 36px、桌面 64px，扣掉前面的「NT$」）
+  const chars = formatMoney(value, { bare: true }).length
   return (
-    <p className="hero-figure mt-1 flex items-baseline text-4xl font-medium tracking-[-0.015em] text-ink lg:mt-1.5 lg:text-big lg:tracking-[-0.02em]">
+    // 數字捲動的遮罩在數字上下各留 0.25em 的空白（NumberFlow 的 --number-flow-mask-height），負的上下邊距抵掉：
+    // 數字的位置和大小不變，只是那兩塊看不見的空白不再把持倉往下推（桌面 32px、手機 18px）
+    <p
+      style={{ "--hero-chars": chars } as React.CSSProperties}
+      className="hero-figure mt-1 flex items-baseline text-[length:min(2.25rem,calc((100cqi_-_2.75rem)/(var(--hero-chars)*0.6)))] leading-[1.1] font-medium tracking-[-0.015em] text-ink lg:mt-1.5 lg:text-[length:min(4rem,calc((100cqi_-_3.5rem)/(var(--hero-chars)*0.6)))] lg:leading-[1.05] lg:tracking-[-0.02em] [&>number-flow-react]:-my-[0.25em]"
+    >
       <span className="mr-1.5 text-lg font-normal tracking-normal text-ink-2 lg:mr-2 lg:text-2xl">NT$</span>
       {privacy ? (
         <Masked className="tracking-[0.2em] text-ink" />
@@ -267,30 +356,35 @@ function Delta({ amount, pct, className }: { amount: number; pct: number | null;
 }
 
 /**
- * 主數字（手機與桌面同一套）：標籤一行 → 總資產大字 → 今日、總損益（含股利）。沒有卡片、沒有展開鈕。
- * 桌面（2026-11-19）：今日與總損益疊成兩行放在總資產右邊，今日 32px（「今天賺賠多少」是最常看的）、總損益 18px；
- * 手機：兩行、標籤對齊成一欄，今日 20px。滑過走勢時這裡的數字不變。
+ * 主數字（手機與桌面同一套）：標籤一行（印好的「總資產」＋「收盤價・11/12（四）」）→ 總資產大字 → 今日、總損益（含股利）。
+ * 沒有卡片、沒有展開鈕。滑過走勢時這裡的數字不變。
+ * - 桌面、這一盤 40rem 以上（1280px 開著 AI 面板也是）：今日與總損益疊成兩行放在總資產右邊——今日 24px，52rem 以上 32px
+ *   （「今天賺賠多少」是最常看的），總損益 18px；數字太長放不下時整組換到總資產下面（flex-wrap），不會擠成直排。
+ * - 比較窄的桌面（1024px 開著 AI 面板）：照舊排在總資產下面一行，今日 24px。
+ * - 手機：兩行、標籤對齊成一欄，今日 20px。
  */
 function Hero({ summary }: { summary?: PortfolioSummary }) {
   const holdings = useHoldings()
   // 沒有盤中即時報價：總資產旁寫的是收盤價的日期（上市、上櫃日期不同時分開寫）；盤中多半句「盤中不更新」，
   // 收盤價還沒進來時多一句預計幾點更新。「今日」只在每個市場的收盤價都是今天的時候寫。
-  // 只有美股有價格時是紐約的交易日（「11/13 收盤（美東）」「11/13」），不套台股的說明
-  const close = useLedgerClose()
+  // 只有美股有價格時是紐約的交易日（「收盤價・11/13（美東）」「11/13」），不套台股的說明
+  const close = useHeroClose()
   if (!summary) return <HeroSkeleton />
   // 手機：dt／dd 直接是格線的格子（display: contents），標籤一欄、數字一欄；桌面：一項一組排成一行。
-  // 主欄 52rem 以上（`@container`，和持倉表同一條線）：今日與總損益疊成兩行放在總資產右邊；
-  // 比較窄的桌面（1024–1350px 開著 AI 面板）並排會把「今日」擠成直排，所以照舊排在總資產下面一行
   const item = "contents lg:flex lg:items-baseline lg:gap-2.5"
-  // 還沒記過任何東西（沒有市值、沒有成本、也沒有已實現的損益）：今日與總損益都是 NT$0 0.00%，只是一排雜訊，不放
-  const blank = summary.market_value === 0 && summary.cost_basis === 0 && summary.total_pnl === 0
+  // 還沒記過任何東西：今日與總損益都是 NT$0 0.00%，只是一排雜訊，不放
+  const blank = isBlank(summary)
   return (
-    <div className="@container min-w-0 max-lg:mt-1.5">
+    <div className="@container min-w-0">
       <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-ink-2">
-        <b className="print-label text-base">總資產</b>
-        <span className="num whitespace-nowrap">{close.label}</span>
+        {/* 托盤的標題（螢幕閱讀器）已經是「總資產」：這裡印出來的字不再念一次 */}
+        <b aria-hidden className="print-label text-base">
+          總資產
+        </b>
+        {/* 只在「・」後面換行（keep-all：中文字之間不斷開；市場名稱和日期之間是不換行的空白），320px 也不撐出畫面 */}
+        {close.label && <span className="num [word-break:keep-all]">{close.label.replaceAll(" ", " ")}</span>}
         {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
-        {/* 在等的收盤價預計幾點進來（只在需要時）：桌面接在日期後面（「11/12 收盤・今天的預計下午 2:00–2:30 更新」），
+        {/* 在等的收盤價預計幾點進來（只在需要時）：桌面接在日期後面（「收盤價・11/12（四）・今天的預計下午 2:00–2:30 更新」），
             手機自己一行，日期那一行不會被擠到換行 */}
         {close.note && (
           <span className="num whitespace-nowrap max-sm:basis-full sm:-ml-2.5">
@@ -301,24 +395,27 @@ function Hero({ summary }: { summary?: PortfolioSummary }) {
           </span>
         )}
       </p>
-      <div className="lg:@min-[52rem]:flex lg:@min-[52rem]:items-end lg:@min-[52rem]:gap-x-14">
-      <BigTotal value={summary.market_value} />
-      {!blank && (
-      <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 lg:mt-3 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2 lg:@min-[52rem]:mt-0 lg:@min-[52rem]:mb-1.5 lg:@min-[52rem]:flex-col lg:@min-[52rem]:gap-y-1">
-        <div className={item}>
-          <dt className="num print-label text-sm whitespace-nowrap">{close.day}</dt>
-          <dd className="text-xl font-medium lg:text-2xl lg:@min-[52rem]:text-3xl">
-            <Delta amount={summary.day_change} pct={summary.day_change_pct} />
-          </dd>
-        </div>
-        <div className={item}>
-          <dt className="print-label text-sm whitespace-nowrap">總損益（含股利）</dt>
-          <dd className="text-lg font-medium">
-            <Delta amount={summary.total_pnl} pct={summary.total_return_pct} />
-          </dd>
-        </div>
-      </dl>
-      )}
+      <div className="lg:@min-[40rem]:flex lg:@min-[40rem]:flex-wrap lg:@min-[40rem]:items-end lg:@min-[40rem]:gap-x-8 lg:@min-[52rem]:gap-x-14">
+        <BigTotal value={summary.market_value} />
+        {!blank && (
+          // 20rem 以下（320px 的手機，托盤裡 248px）：標籤在上、數字在下，金額太大時也不撐出畫面
+          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 @max-[20rem]:grid-cols-1 @max-[20rem]:gap-y-0 lg:mt-3 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2 lg:@min-[40rem]:mt-0 lg:@min-[40rem]:flex-col lg:@min-[40rem]:gap-y-1">
+            <div className={item}>
+              <dt className="num print-label text-sm whitespace-nowrap">{close.day}</dt>
+              {/* 手機：托盤裡只剩 321px（iPhone 15），20px 會讓金額和百分比斷成兩行——22rem 以下 18px */}
+              <dd className="text-lg font-medium max-lg:@min-[22rem]:text-xl lg:text-2xl lg:@min-[52rem]:text-3xl">
+                <Delta amount={summary.day_change} pct={summary.day_change_pct} />
+              </dd>
+            </div>
+            <div className={item}>
+              <dt className="print-label text-sm whitespace-nowrap">總損益（含股利）</dt>
+              {/* 手機 22rem 以下、桌面 40–52rem 並排時（1280px 開著 AI 面板）16px，其他時候 18px */}
+              <dd className="text-base font-medium max-lg:@min-[22rem]:text-lg lg:text-lg lg:@min-[40rem]:text-base lg:@min-[52rem]:text-lg">
+                <Delta amount={summary.total_pnl} pct={summary.total_return_pct} />
+              </dd>
+            </div>
+          </dl>
+        )}
       </div>
     </div>
   )
@@ -331,7 +428,7 @@ function demoTitle(holdings?: { name: string; is_demo: boolean }[]) {
 
 function HeroSkeleton() {
   return (
-    <div aria-busy="true" aria-label="總資產載入中" className="flex flex-col gap-3 pt-2">
+    <div aria-busy="true" aria-label="總資產載入中" className="flex flex-col gap-3">
       <Skeleton className="h-4 w-48" />
       <Skeleton className="h-14 w-80 max-w-full" />
       <Skeleton className="h-5 w-96 max-w-full" />
@@ -340,18 +437,19 @@ function HeroSkeleton() {
 }
 
 /**
- * 本週 N 件事：除息、股利入帳、定期定額（規則計算，不是 AI 簡報）。
- * 一行格線列（上下各一條格線）：聯絡簿的日期格 → 最近的一件事 →「本週 N 件事 →」。
- * 連到股利分段；它不是導覽，不標 aria-current（PlainLink）。
- * `panel`：桌面 AI 面板標題下面的本頁欄位（2026-11-19 選 B，首屏給持倉）——面板窄，兩行：事情一行、「本週 N 件事 →」一行，
- * 左右和面板的內距對齊、只有下緣一條格線（上緣是面板標題的線）。
+ * 本週 N 件事：除息、股利入帳、定期定額（規則計算，不是 AI 簡報）。一列，不是對話：
+ * 聯絡簿的日期格 → 最近的一件事 →「本週 N 件事 →」。連到股利分段；它不是導覽，不標 aria-current（PlainLink）。
+ * 事情的字不截斷：放不下就換行（內頁重新設計 2026-11-21：名稱不截斷）。
+ * - `panel`：桌面 AI 面板標題下面的本頁欄位（2026-11-19 選 B，首屏給持倉）——面板窄，兩行：事情一行、「本週 N 件事 →」一行，
+ *   左右和面板的內距對齊、只有下緣一條格線（上緣是面板標題的線）。
+ * - `inline`：面板收著、看對話紀錄、手機時，帳本的最後一盤（標題「本週事項」只給螢幕閱讀器：那一列自己就寫了「本週 N 件事」）。
  */
-function WeekLine({ variant = "inline" }: { variant?: "inline" | "panel" }) {
+function WeekLine({ variant = "inline", tint = 1 }: { variant?: "inline" | "panel"; tint?: TrayTint }) {
   const upcoming = useUpcoming(7)
   const privacy = usePrefs((s) => s.privacyMode)
   const items = upcoming.data ?? []
   const panel = variant === "panel"
-  if (upcoming.isLoading) return <Skeleton className={panel ? "h-[60px] w-full rounded-none" : "mt-5 h-[52px] w-full rounded-none lg:mt-6"} />
+  if (upcoming.isLoading) return <Skeleton className={panel ? "h-[60px] w-full rounded-none" : "h-[84px] w-full rounded-tray"} />
   // 讀不到就不放這一行（不寫成「接下來 7 天沒有…」騙人；2026-11-14 review）
   if (upcoming.isError) return null
   const first = items[0]
@@ -368,9 +466,7 @@ function WeekLine({ variant = "inline" }: { variant?: "inline" | "panel" }) {
           <>
             <DateCell date={first.date} pad="-my-2 py-2" className="w-24" />
             <span className="min-w-0">
-              <span className="block truncate" title={upcomingText(first, privacy)}>
-                {upcomingText(first, privacy)}
-              </span>
+              <span className="block [overflow-wrap:anywhere]">{upcomingText(first, privacy)}</span>
               <span className="block text-sm text-ink-2">本週 {items.length} 件事 →</span>
             </span>
           </>
@@ -383,27 +479,29 @@ function WeekLine({ variant = "inline" }: { variant?: "inline" | "panel" }) {
       </PlainLink>
     )
   return (
-    <PlainLink
-      to="/"
-      search={{ view: "dividends" }}
-      className="mt-5 grid min-h-[52px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-y border-rule py-2 text-base text-ink hover:bg-hov active:bg-hov lg:mt-6"
-      aria-label={label}
-    >
-      {first ? (
-        <>
-          <DateCell date={first.date} pad="-my-2 py-2" className="w-[3.25rem] lg:w-24" />
-          <span className="min-w-0 truncate">
-            <span className="max-lg:hidden">{upcomingText(first, privacy)}</span>
-            <span className="lg:hidden">{upcomingShort(first)}</span>
-          </span>
-          <span className="text-sm whitespace-nowrap text-ink-2">本週 {items.length} 件事 →</span>
-        </>
-      ) : (
-        <>
-          <span className="col-span-2 text-ink-2">接下來 7 天沒有除息、入帳或定期定額</span>
-          <span className="text-sm whitespace-nowrap text-ink-2">股利 →</span>
-        </>
-      )}
-    </PlainLink>
+    <Tray title="本週事項" titleHidden tint={tint}>
+      <PlainLink
+        to="/"
+        search={{ view: "dividends" }}
+        className="-my-2 grid min-h-[52px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 rounded-xs py-2 text-base text-ink hover:bg-hov active:bg-hov"
+        aria-label={label}
+      >
+        {first ? (
+          <>
+            <DateCell date={first.date} pad="-my-2 py-2" className="w-[3.25rem] lg:w-24" />
+            <span className="min-w-0 [overflow-wrap:anywhere]">
+              <span className="max-lg:hidden">{upcomingText(first, privacy)}</span>
+              <span className="lg:hidden">{upcomingShort(first)}</span>
+            </span>
+            <span className="text-sm whitespace-nowrap text-ink-2">本週 {items.length} 件事 →</span>
+          </>
+        ) : (
+          <>
+            <span className="col-span-2 text-ink-2">接下來 7 天沒有除息、入帳或定期定額</span>
+            <span className="text-sm whitespace-nowrap text-ink-2">股利 →</span>
+          </>
+        )}
+      </PlainLink>
+    </Tray>
   )
 }

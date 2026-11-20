@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useIsDesktop } from "@/hooks/use-media-query"
-import { useLedgerClose } from "@/hooks/use-close"
 import { allocationRows, GROUPINGS, limitOf, limitText, noIndustryText, overNote, topN, UNCLASSIFIED, type AllocRow } from "@/lib/allocation"
 import { inText } from "@/lib/cjk"
 import { formatMoney, formatMoneyCompact, formatPercent, MASK } from "@/lib/format"
@@ -23,6 +22,7 @@ import { useCanImport } from "@/pages/transactions/import/access"
 import { usePrefs } from "@/stores/prefs"
 import { AllocationDonut, Swatch } from "./AllocationDonut"
 import { LIMITS_EDITOR_ID, LimitsEditor, LimitValues } from "./AllocationLimits"
+import { useHeroClose } from "./use-hero-close"
 
 const pct = (w: number) => formatPercent(w, { signed: false, decimals: 1 })
 /**
@@ -345,7 +345,8 @@ function Breakdown({
   children?: React.ReactNode
 }) {
   const privacy = usePrefs((s) => s.privacyMode)
-  const close = useLedgerClose()
+  // 和總資產那一行同一個寫法（「收盤價・11/12（四）」）
+  const close = useHeroClose()
   const [active, setActive] = useState<string | null>(null)
   const rows = useMemo(() => allocationRows(alloc, grouping), [alloc, grouping])
   const activeRow = rows.find((r) => r.key === active)
@@ -457,7 +458,7 @@ function Row({ row, privacy, open, onToggle, onActive, kid }: { row: AllocRow; p
         {!kid && <Swatch tone={row.tone} />}
       </span>
       <span className="flex min-w-0 items-center gap-2 [grid-area:nm]">
-        <span className={cn("truncate", kid ? "text-base" : "text-lg leading-6 font-medium")} title={row.label}>
+        <span className={cn("min-w-0 [overflow-wrap:anywhere]", kid ? "text-base" : "text-lg leading-6 font-medium")}>
           {row.label}
         </span>
         {row.over && row.limit !== null && (
