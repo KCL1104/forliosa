@@ -3,9 +3,10 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } fr
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { api, ApiError } from "@/api"
+import type { InstrumentDetail, Position } from "@/api/types"
 import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { monthTicks } from "../month-ticks"
-import { OverviewTab } from "../tabs/OverviewTab"
+import { OverviewTab, OverviewTrays } from "../tabs/OverviewTab"
 import { TabLead } from "../tabs/kit"
 import { labelsCollide, sourceNotes, valuationSpan, withFigures, withoutKind } from "../text"
 
@@ -32,13 +33,23 @@ function renderPage(ui: React.ReactNode) {
 
 const T = { timeout: 8000 }
 
+/** 總覽和個股頁一樣：分頁托盤裡的鍵值帶（OverviewTab）＋後面的托盤（事件、相關股票、法人觀點、新聞報導、關於） */
+function Overview({ inst, position }: { inst: InstrumentDetail; position: Position | null }) {
+  return (
+    <>
+      <OverviewTab inst={inst} position={position} />
+      <OverviewTrays inst={inst} position={position} />
+    </>
+  )
+}
+
 // 整個總覽一次載入十幾個查詢：全部測試一起跑時比較慢，給長一點的時間
 describe("總覽的三層", { timeout: 20_000 }, () => {
   afterEach(() => vi.restoreAllMocks())
   it("第一層：一條鍵值帶；估值位置只說一次，規則句是墨色 Noto Sans（不是石墨灰楷體），刻度尺不用 ▼△", async () => {
     const inst = await api.getInstrument("2330.TW")
     const position = await api.getPosition("2330.TW")
-    renderPage(<OverviewTab inst={inst} position={position} />)
+    renderPage(<Overview inst={inst} position={position} />)
     const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
     // 商用模式的本益比存檔從 6/1 才開始（示範序列每週一點，第一點是 6/5）：期間照實際寫，不說「5 年」，尺下放「資料累積中」
     const sentence = await within(band).findByText(/比 \d+\/\d+ 以來/, undefined, T)
@@ -75,7 +86,7 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     const inst = await api.getInstrument("2330.TW")
     const real = await api.getOverview("2330.TW")
     vi.spyOn(api, "getOverview").mockResolvedValue({ ...real, eps_ttm: null })
-    renderPage(<OverviewTab inst={inst} position={null} />)
+    renderPage(<Overview inst={inst} position={null} />)
     const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
     await within(band).findByText(/比 \d+\/\d+ 以來/, undefined, T)
     expect(band.textContent).not.toContain("虧損")
@@ -83,7 +94,7 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
 
   it("第二層：接下來與公告合併成一張依日期排的表，第一欄是聯絡簿的日期格", async () => {
     const inst = await api.getInstrument("2330.TW")
-    renderPage(<OverviewTab inst={inst} position={null} />)
+    renderPage(<Overview inst={inst} position={null} />)
     const events = await screen.findByRole("region", { name: "事件" }, T)
     const rows = await within(events).findAllByRole("listitem", undefined, T)
     expect(rows.length).toBeGreaterThan(3)
@@ -109,7 +120,7 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
 
   it("第二層（美股）：SEC 申報也是官方公告，10-K 在事件表裡；空狀態不寫台股的「90 天」", async () => {
     const inst = await api.getInstrument("AAPL")
-    renderPage(<OverviewTab inst={inst} position={null} />)
+    renderPage(<Overview inst={inst} position={null} />)
     const events = await screen.findByRole("region", { name: "事件" }, T)
     const rows = await within(events).findAllByRole("listitem", undefined, T)
     expect(rows.some((r) => r.textContent!.includes("10-K"))).toBe(true)
@@ -135,7 +146,7 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     const nulls = Object.fromEntries(Object.entries(overview).filter(([, v]) => typeof v === "number").map(([k]) => [k, null]))
     vi.spyOn(api, "getOverview").mockResolvedValue({ ...overview, ...nulls, eps_ttm: overview.eps_ttm })
     vi.spyOn(api, "getQuote").mockRejectedValue(new ApiError(404, "not_found", "沒有報價"))
-    renderPage(<OverviewTab inst={inst} position={null} />)
+    renderPage(<Overview inst={inst} position={null} />)
     // 併進「關於」的鍵值格（排在會計年度結束後面、曾用名稱前面），數字還在、寫法一樣（US$）
     const about = await screen.findByRole("region", { name: "關於「Apple」" }, T)
     const eps = await within(about).findByText("近四季 EPS", undefined, T)
@@ -152,7 +163,7 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
 
   it("第三層與頁尾：新聞先 3 則；各區塊不寫授權段落，整頁只有一個「資料來源與授權」", async () => {
     const inst = await api.getInstrument("2330.TW")
-    renderPage(<OverviewTab inst={inst} position={null} />)
+    renderPage(<Overview inst={inst} position={null} />)
     const news = await screen.findByRole("region", { name: "新聞報導" }, T)
     await within(news).findAllByRole("link", undefined, T)
     expect(within(news).getAllByRole("link")).toHaveLength(3)
@@ -175,7 +186,7 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
 
   it("ETF：鍵值格只有 ETF 有的欄位（淨值、折溢價、殖利率…），沒有本益比、股價淨值比、EPS 這些「—」", async () => {
     const inst = await api.getInstrument("0050.TW")
-    renderPage(<OverviewTab inst={inst} position={null} />)
+    renderPage(<Overview inst={inst} position={null} />)
     const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
     await within(band).findByText("淨值（11/12）", undefined, T)
     const terms = within(band).getAllByRole("term").map((t) => t.textContent)
@@ -191,7 +202,7 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
 
   it("ETF（00679B）：沒有值的欄位不列，一格「—」都沒有", async () => {
     const inst = await api.getInstrument("00679B.TWO")
-    renderPage(<OverviewTab inst={inst} position={null} />)
+    renderPage(<Overview inst={inst} position={null} />)
     const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
     await within(band).findAllByRole("definition", undefined, T)
     const values = within(band).getAllByRole("definition").map((d) => d.textContent)

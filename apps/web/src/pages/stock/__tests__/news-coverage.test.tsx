@@ -67,8 +67,9 @@ describe("總覽的「新聞報導」", () => {
   it("媒體・時間＋原標題連到原文（另開新視窗、noopener）；先 3 則，「看更多」每次加 8 則；收集方式與 GDELT 引用在頁尾", async () => {
     const tsmc = await api.getInstrument("2330.TW")
     withSourcesFooter(<NewsCoverage inst={tsmc} />)
+    // 載入中是同一盤（標題已經在，裡面是骨架）：等連結出來
     const section = await screen.findByRole("region", { name: "新聞報導" }, { timeout: 3000 })
-    const links = within(section).getAllByRole("link")
+    const links = await within(section).findAllByRole("link", undefined, { timeout: 3000 })
     expect(links).toHaveLength(3)
     for (const a of links) {
       expect(a).toHaveAttribute("target", "_blank")

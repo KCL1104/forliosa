@@ -26,20 +26,25 @@ export function NewsCoverage({ inst }: { inst: InstrumentDetail }) {
   const [shown, setShown] = useState(NEWS_FIRST)
   const items = mediaNews(news.data)
   useSourceNote(sourceNotes([...new Set(items.flatMap((n) => n.sources ?? []))]))
-  if (news.isLoading) return <Skeleton className="h-40 w-full rounded-sm" />
+  if (news.isLoading)
+    return (
+      <QuietSection title="新聞報導">
+        <Skeleton className="h-40 w-full rounded-sm" />
+      </QuietSection>
+    )
   // 請求失敗不能說成「沒有報導」：顯示錯誤與重試（已有資料時照常顯示，背景重抓失敗不打斷）
   if (news.isError && !news.data) {
     return (
-      <QuietSection title="新聞報導" titleId="ov-media">
-        <ErrorState className="mt-2" title="新聞報導沒有載入" error={news.error} onRetry={() => void news.refetch()} />
+      <QuietSection title="新聞報導">
+        <ErrorState title="新聞報導沒有載入" error={news.error} onRetry={() => void news.refetch()} />
       </QuietSection>
     )
   }
   const now = appNow()
   return (
-    <QuietSection title="新聞報導" titleId="ov-media">
+    <QuietSection title="新聞報導">
       {items.length === 0 ? (
-        <NotYet className="-mt-1 border-t-0" title={`最近沒有找到${inText(inst.name)}的媒體報導`}>
+        <NotYet title={`最近沒有找到${inText(inst.name)}的媒體報導`}>
           新聞大約每小時更新一次。
         </NotYet>
       ) : (

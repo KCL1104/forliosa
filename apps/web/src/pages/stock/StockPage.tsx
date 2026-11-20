@@ -9,6 +9,7 @@ import { ApiError } from "@/api"
 import { qk, useInstrument, useOverview, usePosition, usePositionHistory, useQuote, useToggleWatch, useWatchlist, useWhy } from "@/api/queries"
 import type { ClosedRound, InstrumentDetail, Position, Quote, Why } from "@/api/types"
 import { Masked, Pct } from "@/components/finance"
+import { Tray } from "@/components/tray"
 import { holdingPeriod } from "@/lib/ledger-display"
 import { kaiSize } from "@/ai/kai-size"
 import { KaiText } from "@/ai/kai-text"
@@ -21,7 +22,8 @@ import { ErrorState } from "@/components/states"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, directionGlyph, formatDateShort, formatMoney, formatPercent, formatPrice, formatQuantity, toneClass } from "@/lib/format"
-import { formatQuoteChange, limitPrices, limitState, quoteDecimals } from "@/lib/tick"
+import { formatQuoteChange, limitState, quoteDecimals } from "@/lib/tick"
+import { quoteLimits } from "@/lib/limit-track"
 import { cn } from "@/lib/utils"
 import type { StockTab } from "@/router"
 import { usePrefs } from "@/stores/prefs"
@@ -29,8 +31,9 @@ import { SymbolRecords } from "@/pages/ledger/SymbolRecords"
 import { asOfLabel, closeDay, twseLiveQuoteUrl, withDayWord } from "@/lib/as-of"
 import { useClose } from "@/hooks/use-close"
 import { useSourceNote } from "@/hooks/use-source-note"
+import { LimitTrack } from "./LimitTrack"
 import { PriceChart } from "./PriceChart"
-import { OverviewTab } from "./tabs/OverviewTab"
+import { OverviewTab, OverviewTrays } from "./tabs/OverviewTab"
 import { marketLine, sourceNotes, twOpenApi, US_PRICE_KEY, useDatasetSources, useUsClosesServed, withFigures } from "./text"
 import { usCloseLabel, usDay, usTradeDate } from "@/lib/labels"
 import { useReadOnly, useWho } from "@/api/view-as"
@@ -54,8 +57,10 @@ const TABS: { value: StockTab; label: string }[] = [
 ]
 
 /**
- * 個股頁：上半部共用（報價、「為什麼」那一行、我的部位、走勢圖），下半部七個分頁（最後一個是標記這檔股票的討論）。
- * 持有的人先看到自己：部位緊接在價格下，圖上有均價線與買賣點（隱私模式隱藏）。
+ * 個股頁（產品負責人 2026-11-21：方向 C「圓桌」的結構、不要它的旁白）：名稱與代號（h1）在最上面，下面一盤一盤：
+ * 收盤價與漲跌停軌道 → 我的持有 → 收盤價走勢 → 分頁（總覽・估值・財務・籌碼・股利・事件・討論）→（總覽）事件、相關股票、
+ * 法人觀點、新聞報導、關於。頁面只有標籤和數字；句子只在 AI 面板（「為什麼」、公司簡介、法人觀點是 AI 寫的內容，照舊在原位）。
+ * 持有的人先看到自己：持有緊接在價格下，圖上有均價線與買賣點（隱私模式隱藏）。
  * 各區塊用到的資料來源登記到頁尾，整頁只有一個「資料來源與授權」。
  */
 export function StockPage() {
@@ -131,88 +136,119 @@ function StockPageInner() {
       ) : (
         <>
           <Breadcrumb inst={inst} held={!!position.data} />
-          <QuoteHeader inst={inst} quote={quote.data} missing={noQuote} held={!!position.data} />
-          <WhyLine inst={inst} />
-          {position.data ? (
-            <PositionBlock inst={inst} position={position.data} rounds={rounds} priced={!noQuote && !refreshing} />
-          ) : (
-            rounds.length > 0 && <PastHolding inst={inst} rounds={rounds} />
-          )}
-          {/* 還沒有收盤價（剛加入、還沒抓過的美股）：價格那一格已經說了，走勢圖整塊不放，不再說一次 */}
-          {!noQuote && <PriceChart inst={inst} quote={quote.data} position={position.data ?? null} markers={history.data?.markers} />}
+          <StockTitle inst={inst} />
         </>
       )}
 
-      <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-8 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 xl:-mx-14 xl:px-14">
-        <ScrollRow role="tablist" aria-label="個股資料" className="gap-1">
-          {tabs.map((t) => {
-            const active = t.value === tab
-            return (
-              <button
-                key={t.value}
-                type="button"
-                role="tab"
-                id={`stock-tab-${t.value}`}
-                aria-selected={active}
-                aria-controls="stock-tabpanel"
-                tabIndex={active ? 0 : -1}
-                onKeyDown={(e) => {
-                  const i = tabs.findIndex((x) => x.value === tab)
-                  const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0
-                  if (!d) return
-                  e.preventDefault()
-                  const next = tabs[(i + d + tabs.length) % tabs.length]!
-                  // 和按的一樣不捲回頂端（分頁列黏在上面時，用方向鍵換分頁不會跳走；2026-11-14 review）
-                  void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: next.value === "overview" ? undefined : next.value }, replace: true, resetScroll: false })
-                  requestAnimationFrame(() => document.getElementById(`stock-tab-${next.value}`)?.focus())
-                }}
-                onClick={() => void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: t.value === "overview" ? undefined : t.value }, replace: true, resetScroll: false })}
-                // 和群組頁同一種分頁：手機上每個至少 44px 寬、平分整列，七個分頁在 393px 的螢幕上全部看得到（更窄才捲動）
-                className="sel-tab -mb-px flex h-12 min-w-11 shrink-0 items-center justify-center px-1 text-base text-ink-2 max-sm:grow sm:px-3"
-              >
-                {t.label}
-              </button>
-            )
-          })}
-        </ScrollRow>
-      </div>
+      {/* 托盤：寬的時候（主欄 ≥ 56rem）事件和相關股票並排（8＋4 欄），其他一盤一列；窄的時候一盤一列。
+          底色照出現的順序輪流（TRAY_CYCLE） */}
+      <div className="@container mt-4 lg:mt-5">
+        <div className={cn("grid grid-cols-1 gap-tray-gap @4xl:grid-cols-12", TRAY_CYCLE)}>
+          {inst && <QuoteTray inst={inst} quote={quote.data} missing={noQuote} held={!!position.data} />}
+          {inst &&
+            (position.data ? (
+              <HoldingTray inst={inst} position={position.data} rounds={rounds} priced={!noQuote && !refreshing} />
+            ) : (
+              rounds.length > 0 && <PastHolding inst={inst} rounds={rounds} />
+            ))}
+          {/* 還沒有收盤價（剛加入、還沒抓過的美股）：價格那一格已經說了，走勢圖整塊不放，不再說一次 */}
+          {inst && !noQuote && <PriceChart inst={inst} quote={quote.data} position={position.data ?? null} markers={history.data?.markers} />}
 
-      <div id="stock-tabpanel" role="tabpanel" aria-labelledby={`stock-tab-${tab}`} className="pt-6">
-        {inst && (
-          <Suspense fallback={<Skeleton className="h-72 w-full rounded-sm" />}>
-            {tab === "overview" && <OverviewTab inst={inst} quote={quote.data} position={position.data ?? null} />}
-            {tab === "valuation" && <ValuationTab inst={inst} position={position.data ?? null} noQuote={noQuote} />}
-            {tab === "financials" && <FinancialsTab inst={inst} />}
-            {tab === "chips" && <ChipsTab inst={inst} />}
-            {tab === "dividends" && <DividendsTab inst={inst} quote={quote.data} position={position.data ?? null} />}
-            {tab === "events" && <EventsTab inst={inst} position={position.data ?? null} markers={history.data?.markers ?? position.data?.markers ?? []} />}
-            {tab === "discussions" && <DiscussionsTab inst={inst} />}
-          </Suspense>
-        )}
+          <Tray title="個股資料" titleHidden className="@4xl:col-span-12">
+            {/* 分頁列在托盤的內容裡（不在 h2 裡）：黏在頂部列下面，只在這一盤看得到的時候；放不下時自己橫向捲動 */}
+            <div className="sticky top-(--sticky-top) z-20 -mx-tray-pad -mt-tray-pad rounded-t-tray bg-paper px-tray-pad">
+              <ScrollRow role="tablist" aria-label="個股資料" className="border-b border-rule sm:gap-1">
+                {tabs.map((t) => {
+                  const active = t.value === tab
+                  return (
+                    <button
+                      key={t.value}
+                      type="button"
+                      role="tab"
+                      id={`stock-tab-${t.value}`}
+                      aria-selected={active}
+                      aria-controls="stock-tabpanel"
+                      tabIndex={active ? 0 : -1}
+                      onKeyDown={(e) => {
+                        const i = tabs.findIndex((x) => x.value === tab)
+                        const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0
+                        if (!d) return
+                        e.preventDefault()
+                        const next = tabs[(i + d + tabs.length) % tabs.length]!
+                        // 和按的一樣不捲回頂端（分頁列黏在上面時，用方向鍵換分頁不會跳走；2026-11-14 review）
+                        void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: next.value === "overview" ? undefined : next.value }, replace: true, resetScroll: false })
+                        requestAnimationFrame(() => document.getElementById(`stock-tab-${next.value}`)?.focus())
+                      }}
+                      onClick={() => void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: t.value === "overview" ? undefined : t.value }, replace: true, resetScroll: false })}
+                      // 和群組頁同一種分頁：手機上每個至少 44px 寬、沒有間隔、平分整列——七個合計 308px，
+                      // 393px 的手機托盤裡（321px）全部看得到；更窄的手機（320px）才捲動
+                      className="sel-tab -mb-px flex h-12 min-w-11 shrink-0 items-center justify-center px-1 text-base text-ink-2 max-sm:grow sm:px-3"
+                    >
+                      {t.label}
+                    </button>
+                  )
+                })}
+              </ScrollRow>
+            </div>
+            <div id="stock-tabpanel" role="tabpanel" aria-labelledby={`stock-tab-${tab}`} className="pt-5">
+              {inst ? (
+                <Suspense fallback={<Skeleton className="h-72 w-full rounded-sm" />}>
+                  {tab === "overview" && <OverviewTab inst={inst} quote={quote.data} position={position.data ?? null} />}
+                  {tab === "valuation" && <ValuationTab inst={inst} position={position.data ?? null} noQuote={noQuote} />}
+                  {tab === "financials" && <FinancialsTab inst={inst} />}
+                  {tab === "chips" && <ChipsTab inst={inst} />}
+                  {tab === "dividends" && <DividendsTab inst={inst} quote={quote.data} position={position.data ?? null} />}
+                  {tab === "events" && <EventsTab inst={inst} position={position.data ?? null} markers={history.data?.markers ?? position.data?.markers ?? []} />}
+                  {tab === "discussions" && <DiscussionsTab inst={inst} />}
+                </Suspense>
+              ) : (
+                <Skeleton className="h-72 w-full rounded-sm" />
+              )}
+            </div>
+          </Tray>
+          {/* 總覽的其他托盤：事件、相關股票、法人觀點、新聞報導、關於（分頁托盤的兄弟，跟著版面的格子排） */}
+          {inst && tab === "overview" && <OverviewTrays inst={inst} quote={quote.data} position={position.data ?? null} />}
+        </div>
       </div>
       <SourcesFooter />
     </div>
   )
 }
 
+/**
+ * 托盤的底色照出現的順序輪流 1→2→3（`:nth-child(… of .tray)`）。哪幾盤會出現看資料（持有、走勢、相關股票…），
+ * 寫死的 `tint` 會讓相鄰的兩盤撞色；照順序輪流的話，相鄰的兩盤——上下或並排（事件＋相關股票）——一定不同色。
+ * 底色不代表任何意思（DESIGN.md〈托盤〉）。
+ */
+const TRAY_CYCLE = [
+  "[&>.tray:nth-child(3n+2_of_.tray)]:[--tray-bg:var(--tray-2)]",
+  "[&>.tray:nth-child(3n+2_of_.tray)]:[--tray-hov-bg:var(--tray-2-hov)]",
+  "[&>.tray:nth-child(3n_of_.tray)]:[--tray-bg:var(--tray-3)]",
+  "[&>.tray:nth-child(3n_of_.tray)]:[--tray-hov-bg:var(--tray-3-hov)]",
+].join(" ")
+
 function HeaderSkeleton() {
   return (
     <div aria-busy="true" aria-label="報價載入中" className="flex flex-col gap-3 pt-4">
       <Skeleton className="h-4 w-48" />
       <Skeleton className="h-8 w-40" />
-      <Skeleton className="h-12 w-64" />
-      <Skeleton className="mt-6 h-72 w-full rounded-sm" />
     </div>
   )
 }
 
-/** 手機的代號與市場別（桌面寫在上面的位置列） */
-function CodeLine({ inst }: { inst: InstrumentDetail }) {
+/**
+ * 名稱與代號（h1，整頁第一個標題）＋市場・產業。名稱不截斷：長的 ETF 全名換行；
+ * 代號是 h1 的一部分（螢幕閱讀器念「台積電 2330」），字小一級、淡墨，和名稱之間有空隙（C 的「台積電2330」黏在一起）。
+ */
+function StockTitle({ inst }: { inst: InstrumentDetail }) {
   return (
-    <p className="mt-0.5 flex gap-x-3 text-sm text-ink-2 sm:hidden">
-      <span className="num">{inst.code}</span>
-      <span>{marketLine(inst)}</span>
-    </p>
+    <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+      <h1 className="min-w-0 font-print text-2xl font-bold [overflow-wrap:anywhere] lg:text-3xl">
+        {inst.name}{" "}
+        <span className="num ml-1 font-sans text-lg font-normal whitespace-nowrap text-ink-2 lg:ml-1.5 lg:text-xl">{inst.code}</span>
+      </h1>
+      <p className="text-sm text-ink-2">{marketLine(inst)}</p>
+    </div>
   )
 }
 
@@ -232,9 +268,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
         <ArrowLeftIcon aria-hidden className="size-4" />
         帳本
       </Link>
-      {/* 手機：代號與市場別寫在股票名稱下面（`CodeLine`），這一列只放返回與按鈕，任何一檔都不會把按鈕擠到下一行 */}
-      <span className="num max-sm:hidden">{inst.code}</span>
-      <span className="max-sm:hidden">{marketLine(inst)}</span>
+      {/* 代號與市場別寫在名稱那一行（`StockTitle`）：這一列只放返回、狀態與按鈕，任何一檔都不會把按鈕擠到下一行 */}
       {status?.attention && (
         <span className="demo-tag border-ink font-medium" title={status.note ?? undefined}>
           注意股
@@ -275,7 +309,12 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   )
 }
 
-function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentDetail; quote?: Quote; missing?: boolean; held?: boolean }) {
+/**
+ * 收盤價那一盤：左邊是價格（收盤價・日期、漲跌、參考價；需要時多一行「預計…更新」或盤中的連結）與「為什麼」，
+ * 右邊是漲跌停軌道（台股才有；美股沒有漲跌停，寫「昨收」）。托盤的標題只給螢幕閱讀器：第一行就是價格。
+ * 托盤夠寬（≥ 42rem）時左右並排，窄的時候上下排。
+ */
+function QuoteTray({ inst, quote, missing, held = false }: { inst: InstrumentDetail; quote?: Quote; missing?: boolean; held?: boolean }) {
   // 報價下方的參考價、漲跌停每個分頁都看得到：資料集登記到頁尾（台股的收盤價由走勢圖登記）。
   // 美股的收盤價（Databento）在這裡就登記：走勢圖沒有畫出來的區間也要顯名
   const tw = twOpenApi(inst.market)
@@ -289,94 +328,108 @@ function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentD
   if (missing && !quote) {
     // 沒有報價：整頁只在價格這一格說一次——不放一個大大的「—」，走勢圖、估值、殖利率這些由價格算出來的區塊不再各自重複
     return (
-      <header className="mt-1">
-        <h1 className="font-print text-2xl font-bold lg:text-3xl">{inst.name}</h1>
-        <CodeLine inst={inst} />
-        {us ? <UsNoClose key={inst.symbol} inst={inst} held={held} /> : <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">沒有報價</p>}
-      </header>
+      <Tray title="收盤價" titleHidden className="@4xl:col-span-12">
+        {us ? <UsNoClose key={inst.symbol} inst={inst} held={held} /> : <p className="flex min-h-12 items-center text-xl font-medium text-ink-2">沒有報價</p>}
+      </Tray>
     )
   }
   const ref = quote?.reference_price ?? quote?.prev_close ?? null
-  const limits = quote && quote.limit_up !== undefined && quote.limit_up !== null ? { up: quote.limit_up, down: quote.limit_down ?? null } : limitPrices(ref, inst.market, inst.type)
+  const limits = quoteLimits(quote, ref, inst.market, inst.type)
   const change = quote ? (quote.change ?? (ref !== null ? quote.price - ref : null)) : null
   const pct = quote ? (quote.change_pct ?? (ref ? quote.price / ref - 1 : null)) : null
   const d = direction(change)
   const atLimit = limitState(quote?.price, limits?.up, limits?.down)
   const digits = quote ? quoteDecimals(quote.price, inst.market, inst.type) : 0
+  const track =
+    quote && limits && ref !== null ? (
+      <LimitTrack close={quote.price} reference={ref} up={limits.up} down={limits.down} low={quote.low} high={quote.high} market={inst.market} type={inst.type} />
+    ) : null
   return (
-    <header className="mt-1">
-      <h1 className="font-print text-2xl font-bold lg:text-3xl">{inst.name}</h1>
-      <CodeLine inst={inst} />
-      <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <p className="hero-figure text-4xl font-medium tracking-[-0.015em] lg:text-[3rem] lg:leading-tight">
-          {inst.market === "US" && <span className="mr-1 text-xl font-normal text-ink-2">US$</span>}
-          {quote ? <NumberFlow value={quote.price} locales="zh-TW" format={{ minimumFractionDigits: digits, maximumFractionDigits: digits }} /> : "—"}
-        </p>
-        <p className={cn("num text-xl font-medium", toneClass(d))}>
-          {change === null ? (
-            <span className="text-ink-2">—</span>
-          ) : (
-            <>
-              {directionGlyph(d)}
-              {formatQuoteChange(change, quote!.price, inst.market, inst.type)}
-              <span className="ml-3">
-                {directionGlyph(d)}
-                {formatPercent(pct === null ? null : Math.abs(pct), { signed: false })}
+    <Tray title="收盤價" titleHidden className="@4xl:col-span-12" bodyClassName="@container">
+      <div className={cn("grid grid-cols-1 gap-y-4", track && "@2xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] @2xl:gap-x-10")}>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <p className="hero-figure text-4xl font-medium tracking-[-0.015em] lg:text-[3rem] lg:leading-tight">
+              {us && <span className="mr-1 text-xl font-normal text-ink-2">US$</span>}
+              {quote ? <NumberFlow value={quote.price} locales="zh-TW" format={{ minimumFractionDigits: digits, maximumFractionDigits: digits }} /> : "—"}
+            </p>
+            <p className={cn("num text-xl font-medium", toneClass(d))}>
+              {change === null ? (
+                <span className="text-ink-2">—</span>
+              ) : (
+                <>
+                  {directionGlyph(d)}
+                  {formatQuoteChange(change, quote!.price, inst.market, inst.type)}
+                  <span className="ml-3">
+                    {directionGlyph(d)}
+                    {formatPercent(pct === null ? null : Math.abs(pct), { signed: false })}
+                  </span>
+                  <span className="sr-only">{d === "up" ? "上漲" : d === "down" ? "下跌" : "持平"}</span>
+                </>
+              )}
+            </p>
+            {/* 收盤價不是今天的（盤中、今天的還沒公布、假日）：寫明這是哪一天的漲跌，和帳本同一種寫法（「11/12 漲跌」） */}
+            {tw && change !== null && close.day !== "今日" && <p className="num text-sm text-ink-2">{withDayWord("今日漲跌", close.day)}</p>}
+            {atLimit && <span className={cn("demo-tag font-medium", atLimit === "up" ? "border-rise text-rise" : "border-fall text-fall")}>{atLimit === "up" ? "漲停" : "跌停"}</span>}
+          </div>
+          <p className="num mt-1 flex flex-wrap gap-x-4 text-sm text-ink-2">
+            {tw && quote && closeDay(quote.as_of) ? (
+              <span>
+                <span className="text-ink">收盤價</span>・{formatDateShort(closeDay(quote.as_of)!)}
               </span>
-              <span className="sr-only">{d === "up" ? "上漲" : d === "down" ? "下跌" : "持平"}</span>
-            </>
+            ) : usDate ? (
+              // 美股：「11/13 收盤（美東）」——紐約的日期，不是台北的「11/14 05:00」
+              <span className="text-ink">{usCloseLabel(usDate)}</span>
+            ) : (
+              <span>{quote ? asOfLabel(quote.as_of) || "—" : "—"}</span>
+            )}
+            {ref !== null && (
+              // 美股沒有參考價（平盤價是台股的規則）：寫前一個交易日的收盤「昨收」，價格帶 US$
+              <span>
+                {us ? "昨收" : "參考價"} <span className="text-ink">{us && "US$"}{formatPrice(ref, inst.market, inst.type)}</span>
+              </span>
+            )}
+            {/* 漲跌停軌道畫不出來時（資料對不起來：收盤落在漲跌停外面…），漲跌停照舊寫在這一行 */}
+            {limits && !track && (
+              <span>
+                漲停 <span className="text-ink">{formatPrice(limits.up, inst.market, inst.type)}</span>・跌停 <span className="text-ink">{formatPrice(limits.down, inst.market, inst.type)}</span>
+              </span>
+            )}
+            {quote?.is_demo && <span className="sm:hidden">示範資料</span>}
+          </p>
+          {close.note && (
+            // 只在需要時出現的一行：盤中（附證交所的連結——只是連結，本站不擷取那個網站）、收盤價還沒進來（預計幾點更新）
+            <p className="mt-1 flex flex-wrap items-center text-sm text-ink-2">
+              <span>{close.note}</span>
+              {close.state === "open" && (
+                <>
+                  <span aria-hidden>・</span>
+                  <a
+                    href={twseLiveQuoteUrl(inst.code, inst.market === "TPEX" ? "TPEX" : "TWSE")}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-0.5 text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:min-h-11"
+                  >
+                    到證交所看即時報價
+                    <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0" />
+                    <span className="sr-only">（另開新視窗）</span>
+                  </a>
+                </>
+              )}
+            </p>
           )}
-        </p>
-        {/* 收盤價不是今天的（盤中、今天的還沒公布、假日）：寫明這是哪一天的漲跌，和帳本同一種寫法（「11/12 漲跌」） */}
-        {tw && change !== null && close.day !== "今日" && <p className="num text-sm text-ink-2">{withDayWord("今日漲跌", close.day)}</p>}
-        {atLimit && <span className={cn("demo-tag font-medium", atLimit === "up" ? "border-rise text-rise" : "border-fall text-fall")}>{atLimit === "up" ? "漲停" : "跌停"}</span>}
+          <WhyLine inst={inst} />
+        </div>
+        {track && (
+          <section aria-labelledby={`limits-${inst.code}`} className="min-w-0 self-end">
+            <h3 id={`limits-${inst.code}`} className="print-label mb-1 text-sm">
+              漲跌停
+            </h3>
+            {track}
+          </section>
+        )}
       </div>
-      <p className="num mt-1 flex flex-wrap gap-x-4 text-sm text-ink-2">
-        {tw && quote && closeDay(quote.as_of) ? (
-          <span>
-            <span className="text-ink">收盤價</span>・{formatDateShort(closeDay(quote.as_of)!)}
-          </span>
-        ) : usDate ? (
-          // 美股：「11/13 收盤（美東）」——紐約的日期，不是台北的「11/14 05:00」
-          <span className="text-ink">{usCloseLabel(usDate)}</span>
-        ) : (
-          <span>{quote ? asOfLabel(quote.as_of) || "—" : "—"}</span>
-        )}
-        {ref !== null && (
-          // 美股沒有參考價（平盤價是台股的規則）：寫前一個交易日的收盤「昨收」，價格帶 US$
-          <span>
-            {us ? "昨收" : "參考價"} <span className="text-ink">{us && "US$"}{formatPrice(ref, inst.market, inst.type)}</span>
-          </span>
-        )}
-        {limits && (
-          <span>
-            漲停 <span className="text-ink">{formatPrice(limits.up, inst.market, inst.type)}</span>・跌停 <span className="text-ink">{formatPrice(limits.down, inst.market, inst.type)}</span>
-          </span>
-        )}
-        {quote?.is_demo && <span className="sm:hidden">示範資料</span>}
-      </p>
-      {close.note && (
-        // 只在需要時出現的一行：盤中（附證交所的連結——只是連結，本站不擷取那個網站）、收盤價還沒進來（預計幾點更新）
-        <p className="mt-1 flex flex-wrap items-center text-sm text-ink-2">
-          <span>{close.note}</span>
-          {close.state === "open" && (
-            <>
-              <span aria-hidden>・</span>
-            <a
-              href={twseLiveQuoteUrl(inst.code, inst.market === "TPEX" ? "TPEX" : "TWSE")}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-0.5 text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:min-h-11"
-            >
-              到證交所看即時報價
-              <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0" />
-              <span className="sr-only">（另開新視窗）</span>
-            </a>
-            </>
-          )}
-        </p>
-      )}
-    </header>
+    </Tray>
   )
 }
 
@@ -483,31 +536,32 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
 
 /**
  * 過去的持有：現在沒有持股、但曾經買過（已出清）。每個回合一列：持有期間、已實現損益、領過股利、手續費與稅。
+ * 標題旁的 meta 是「出清過 2 次」／「已全部賣出」（標籤，不寫「不在持倉裡」這種重述）。
  * 隱私模式遮蔽金額，保留百分比與日期。
  */
 function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedRound[] }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const money = (n: number, signed = false) => (privacy ? <Masked /> : formatMoney(n, { signed }))
   return (
-    <section aria-labelledby="past-title" className="mt-5 border-y border-rule">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pt-2.5">
-        <h2 id="past-title" className="text-base font-bold">
-          過去的持有
-        </h2>
-        <p className="text-md text-ink">{rounds.length > 1 ? `出清過 ${rounds.length} 次` : "已全部賣出"}，不在持倉裡。</p>
+    <Tray
+      title="過去的持有"
+      meta={rounds.length > 1 ? `出清過 ${rounds.length} 次` : "已全部賣出"}
+      className="@4xl:col-span-12"
+      action={
         <Link
           to="/"
           search={{ view: "transactions", symbol: inst.symbol }}
-          className="ml-auto inline-flex h-9 items-center rounded-sm text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:h-11"
+          className="inline-flex h-9 items-center rounded-sm text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink -my-1 pointer-coarse:-my-2 pointer-coarse:h-11"
         >
           在帳本中查看
         </Link>
-      </div>
+      }
+    >
       <ul>
         {rounds.map((r) => {
           const period = holdingPeriod(r)
           return (
-            <li key={`${r.account_id}-${r.opened_at}`} className="border-t border-rule py-2.5 first:border-t-0">
+            <li key={`${r.account_id}-${r.opened_at}`} className="border-t border-rule py-2.5 first:border-t-0 first:pt-0">
               <dl className="num flex flex-wrap gap-x-5 gap-y-1.5 text-base sm:gap-x-7">
                 <Item label="持有期間" value={<>{period.range}<span className="ml-1.5 text-md font-normal text-ink-2">{period.days}</span></>} />
                 <Item
@@ -526,12 +580,16 @@ function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedR
           )
         })}
       </ul>
-    </section>
+    </Tray>
   )
 }
 
-/** 我的部位：一行（股數、均價、未實現、今日、已領股利）＋展開（市值、成本、已實現、下次除息，再來是每一筆買賣） */
-function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: InstrumentDetail; position: Position; rounds: ClosedRound[]; priced?: boolean }) {
+/**
+ * 我的持有（查看別人的資產時是「爸爸的持有」）：一行（持有、均價、未實現、今日、已領股利；手機只有前三個）＋「明細」展開
+ * （今日與已領股利（手機）、市值、成本、已實現、下次除息，再來是每一筆買賣）。
+ * 隱私模式：同一行，金額、股數與均價遮成 ••••，百分比照常；沒有「明細」（每一筆買賣會露出股數與價格）。
+ */
+function HoldingTray({ inst, position: p, rounds, priced = true }: { inst: InstrumentDetail; position: Position; rounds: ClosedRound[]; priced?: boolean }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
   const me = useWho("我")
@@ -542,50 +600,50 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
   const close = useClose(inst.market === "US" ? null : quote.data?.as_of, inst.market)
   const usDate = inst.market === "US" && quote.data ? usTradeDate(quote.data.trade_date, quote.data.as_of) : null
   const day = usDate ? formatDateShort(usDate, false) : close.day
+  const hide = (v: React.ReactNode) => (privacy ? <Masked /> : v)
   const money = (n: number, signed = false) => formatMoney(n, { signed })
   // 均價與成交價：和報價同一套小數位；美股寫 US$（帳本的金額是新台幣，價格是美元）
   const price = (n: number | null) => `${inst.market === "US" ? "US$" : ""}${formatPrice(n, inst.market, inst.type)}`
-  if (privacy) {
-    return (
-      <section aria-label={`${me}的部位`} className="mt-5 flex min-h-12 items-center border-y border-rule text-md text-ink-2">
-        持有中・隱私模式開啟，部位與圖上的均價、買賣點已隱藏。
-      </section>
-    )
-  }
+  const details = !privacy
   return (
-    <section aria-label={`${me}的部位`} className="mt-5 border-y border-rule">
-      <div className="flex items-center gap-3 py-2.5">
-        <dl className="num flex min-w-0 flex-1 flex-wrap gap-x-5 gap-y-1.5 text-base sm:gap-x-7">
-          <Item label="持有" value={formatQuantity(p.quantity, unit, inst.market)} />
-          <Item label="均價" value={price(p.avg_cost)} />
-          {/* 沒有報價時，未實現與今日是算不出來的：不放兩個「—」（價格那一格已經說了原因） */}
-          {priced && (
-            <Item
-              label="未實現"
-              value={
-                <span className="inline-flex items-baseline gap-1.5">
-                  <span className={toneClass(direction(p.unrealized_pnl))}>{money(p.unrealized_pnl, true)}</span>
-                  <Pct value={p.unrealized_pnl_pct} className="text-md" />
-                </span>
-              }
-            />
-          )}
-          {priced && <Item className="max-sm:hidden" label={day} value={<span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span>} />}
-          <Item className="max-sm:hidden" label="已領股利" value={money(p.dividends_received)} />
-        </dl>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls="position-more"
-          aria-label={open ? "收起部位明細" : "展開部位明細"}
-          onClick={() => setOpen(!open)}
-          className="press grid size-10 shrink-0 place-items-center self-start rounded-full text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:size-11"
-        >
-          <ChevronDownIcon aria-hidden className={cn("size-5 transition-transform duration-200", open && "rotate-180")} />
-        </button>
-      </div>
-      {open && (
-        <div id="position-more" className="note-in border-t border-rule py-4">
+    <Tray
+      title={`${me}的持有`}
+      className="@4xl:col-span-12"
+      action={
+        details && (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls="position-more"
+            onClick={() => setOpen(!open)}
+            className="press inline-flex h-9 items-center gap-0.5 rounded-sm px-1 text-sm text-ink hover:bg-hov -my-1 pointer-coarse:-my-2 pointer-coarse:h-11"
+          >
+            明細
+            <ChevronDownIcon aria-hidden className={cn("size-4 text-ink-2 transition-transform duration-200", open && "rotate-180")} />
+          </button>
+        )
+      }
+    >
+      <dl className="num flex min-w-0 flex-wrap gap-x-5 gap-y-1.5 text-base sm:gap-x-7">
+        <Item label="持有" value={hide(formatQuantity(p.quantity, unit, inst.market))} />
+        <Item label="均價" value={hide(price(p.avg_cost))} />
+        {/* 沒有報價時，未實現與今日是算不出來的：不放兩個「—」（價格那一格已經說了原因） */}
+        {priced && (
+          <Item
+            label="未實現"
+            value={
+              <span className="inline-flex items-baseline gap-1.5">
+                <span className={toneClass(direction(p.unrealized_pnl))}>{hide(money(p.unrealized_pnl, true))}</span>
+                <Pct value={p.unrealized_pnl_pct} className="text-md" />
+              </span>
+            }
+          />
+        )}
+        {priced && <Item className={details ? "max-sm:hidden" : undefined} label={day} value={<span className={toneClass(direction(p.day_change))}>{hide(money(p.day_change, true))}</span>} />}
+        <Item className={details ? "max-sm:hidden" : undefined} label="已領股利" value={hide(money(p.dividends_received))} />
+      </dl>
+      {details && open && (
+        <div id="position-more" className="note-in mt-3 border-t border-rule pt-4">
           <dl className="num grid grid-cols-[repeat(2,minmax(0,1fr))] content-start gap-x-6 gap-y-2 text-md md:grid-cols-[repeat(4,minmax(0,1fr))]">
             {priced && <Item className="sm:hidden" label={day} value={<span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span>} />}
             <Item className="sm:hidden" label="已領股利" value={money(p.dividends_received)} />
@@ -639,7 +697,7 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
           </div>
         </div>
       )}
-    </section>
+    </Tray>
   )
 }
 
