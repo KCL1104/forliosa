@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest"
 import type { ImportFlag, LedgerHolding, PositionRow } from "@/api/types"
+import { symbolFromCode } from "../flags"
 import { maskPlainText } from "../mask"
 import { ImageReadError } from "../prepare-image"
 import { imageError } from "../read-utils"
 import {
   applyCheck,
+  applyEstimate,
+  BATCH_DATE_HINT,
   checkable,
   costTotals,
   costTotalsText,
+  dateHint,
   editPosition,
-  estimateHint,
-  hasEstimates,
   inLedgerLine,
   isEstimatedDate,
   isShortSale,
@@ -20,6 +22,7 @@ import {
   replacedRecordsText,
   setInclude,
   setReplace,
+  suggestedDate,
   toCommitRow,
   toDraftPosition,
   totalCost,
@@ -137,52 +140,116 @@ describe("匯入庫存的一列", () => {
   })
 })
 
-describe("估計的買入日（資產組成原型）", () => {
-  it("伺服器有估計：這一列先用估計的日期；沒改過送 estimated，改過送 picked；找不到的跟著整批（import_day）", () => {
-    const est = toDraftPosition(row({ estimated_date: "2023-05-08" }))
-    expect(est).toMatchObject({ date: "2023-05-08", estimate: "2023-05-08" })
-    expect(isEstimatedDate(est)).toBe(true)
-    expect(toCommitRow(est, "2026-11-12")).toMatchObject({ trade_date: "2023-05-08", date_basis: "estimated", estimated_date: "2023-05-08" })
-    const changed = editPosition(est, { date: "2023-06-01" })
+describe("估計的買入日（資產組成原型；產品負責人 2026-11-21：只是建議）", () => {
+  const IMPORT_DAY = "2026-11-12"
+  const est = () => toDraftPosition(row({ estimated_date: "2023-05-08" }))
+  const hongHai = symbolFromCode("2317.TW", "鴻海")!
+
+  it("預設：日期照舊跟著整批（匯入那天），估計只是建議；沒套用就送 import_day，照樣帶 estimated_date", () => {
+    const d = est()
+    expect(d).toMatchObject({ date: "", estimate: "2023-05-08", applied: false })
+    expect(isEstimatedDate(d)).toBe(false)
+    expect(suggestedDate(d, IMPORT_DAY)).toBe("2023-05-08")
+    const out = toCommitRow(d, IMPORT_DAY, IMPORT_DAY)
+    expect(out).toMatchObject({ date_basis: "import_day", estimated_date: "2023-05-08" })
+    expect(out.trade_date).toBeUndefined()
+    // 整批改成別天：那是使用者自己選的日期
+    expect(toCommitRow(d, "2026-10-01", IMPORT_DAY)).toMatchObject({ date_basis: "picked", estimated_date: "2023-05-08" })
+    // 這一列自己改了日期（沒按套用）：picked，照樣帶估計
+    expect(toCommitRow(editPosition(d, { date: "2023-06-01" }), IMPORT_DAY, IMPORT_DAY)).toMatchObject({ trade_date: "2023-06-01", date_basis: "picked", estimated_date: "2023-05-08" })
+    // 估計剛好就是這一列現在的日期：不用建議
+    expect(suggestedDate(d, "2023-05-08")).toBeNull()
+  })
+
+  it("套用：這一列的日期改成估計的那天，送 estimated；之後自己改了日期就是 picked、建議回來，再套用一次又是 estimated", () => {
+    const applied = applyEstimate(est())
+    expect(applied).toMatchObject({ date: "2023-05-08", applied: true })
+    expect(applied.edited.has("date")).toBe(true)
+    expect(isEstimatedDate(applied)).toBe(true)
+    expect(suggestedDate(applied, IMPORT_DAY)).toBeNull()
+    expect(toCommitRow(applied, IMPORT_DAY, IMPORT_DAY)).toMatchObject({ trade_date: "2023-05-08", date_basis: "estimated", estimated_date: "2023-05-08" })
+    const moved = editPosition(applied, { date: "2023-06-01" })
+    expect(isEstimatedDate(moved)).toBe(false)
+    expect(suggestedDate(moved, IMPORT_DAY)).toBe("2023-05-08")
+    expect(toCommitRow(moved, IMPORT_DAY, IMPORT_DAY)).toMatchObject({ trade_date: "2023-06-01", date_basis: "picked" })
+    // 選回整批的日期：跟著整批、整批是匯入那天 → import_day
+    expect(toCommitRow(editPosition(applied, { date: "" }), IMPORT_DAY, IMPORT_DAY)).toMatchObject({ date_basis: "import_day", estimated_date: "2023-05-08" })
+    expect(toCommitRow(applyEstimate(moved), IMPORT_DAY, IMPORT_DAY)).toMatchObject({ trade_date: "2023-05-08", date_basis: "estimated" })
+  })
+
+  it("套用之後改了股票：估計是原本那一檔的，拿掉（不建議、不送 estimated），日期回到整批的日期", () => {
+    const changed = editPosition(applyEstimate(est()), { symbol: hongHai })
+    expect(changed).toMatchObject({ date: "", estimate: null, applied: false })
     expect(isEstimatedDate(changed)).toBe(false)
-    expect(toCommitRow(changed, "2026-11-12")).toMatchObject({ trade_date: "2023-06-01", date_basis: "picked", estimated_date: "2023-05-08" })
-    // 選回整批的日期：跟著整批、不送日期，但仍是自己選的
-    expect(toCommitRow(editPosition(est, { date: "" }), "2026-11-12")).toEqual(expect.objectContaining({ date_basis: "picked" }))
-    expect(toCommitRow(editPosition(est, { date: "" }), "2026-11-12").trade_date).toBeUndefined()
-    const none = toDraftPosition(row({ estimated_date: null }))
-    expect(none).toMatchObject({ date: "", estimate: null })
-    expect(toCommitRow(none, "2026-11-12")).toMatchObject({ date_basis: "import_day", estimated_date: null })
-    expect(toCommitRow(none, "2026-11-12").trade_date).toBeUndefined()
-    expect(hasEstimates([est, none])).toBe(true)
+    expect(suggestedDate(changed, IMPORT_DAY)).toBeNull()
+    const out = toCommitRow(changed, IMPORT_DAY, IMPORT_DAY)
+    expect(out).toMatchObject({ symbol: "2317.TW", date_basis: "import_day", estimated_date: null })
+    expect(out.trade_date).toBeUndefined()
+    // 套用不了已經拿掉的估計
+    expect(applyEstimate(changed)).toBe(changed)
+    // 選回同一檔（沒有換）：估計還在
+    expect(editPosition(applyEstimate(est()), { symbol: symbolFromCode("2330.TW", "台積電") })).toMatchObject({ date: "2023-05-08", estimate: "2023-05-08", applied: true })
+  })
+
+  it("套用之後改了均價或總成本：估計是照原本的成本找的，拿掉，日期回到整批的日期", () => {
+    for (const patch of [{ price: "600" }, { total: "900,000" }]) {
+      const changed = editPosition(applyEstimate(est()), patch)
+      expect(changed).toMatchObject({ date: "", estimate: null, applied: false })
+      expect(suggestedDate(changed, IMPORT_DAY)).toBeNull()
+      expect(toCommitRow(changed, IMPORT_DAY, IMPORT_DAY)).toMatchObject({ date_basis: "import_day", estimated_date: null })
+    }
+  })
+
+  it("改了股數（沒套用）：估計也拿掉，不再建議；送 import_day、estimated_date null", () => {
+    const changed = editPosition(est(), { qty: "2,000" })
+    expect(changed).toMatchObject({ date: "", estimate: null })
+    expect(suggestedDate(changed, IMPORT_DAY)).toBeNull()
+    expect(toCommitRow(changed, IMPORT_DAY, IMPORT_DAY)).toMatchObject({ date_basis: "import_day", estimated_date: null })
+    // 套用之後改股數：日期也回到整批的日期
+    expect(editPosition(applyEstimate(est()), { qty: "2,000" })).toMatchObject({ date: "", estimate: null, applied: false })
+  })
+
+  it("套用之後自己改過日期、再改股票：日期是自己選的，留著（picked），估計拿掉", () => {
+    const own = editPosition(editPosition(applyEstimate(est()), { date: "2024-01-02" }), { symbol: hongHai })
+    expect(own).toMatchObject({ date: "2024-01-02", estimate: null })
+    expect(toCommitRow(own, IMPORT_DAY, IMPORT_DAY)).toMatchObject({ trade_date: "2024-01-02", date_basis: "picked", estimated_date: null })
+  })
+
+  it("「沒辦法估買入日」是照讀到的股票與成本說的：改了股票、股數、均價或總成本就拿掉", () => {
+    const none = { ...toDraftPosition(row({ estimated_date: null })), flags: [flag("no_crossing", "warning", "五年內的股價都沒有經過均價 612.4，沒辦法估買入日。")] }
+    for (const patch of [{ symbol: hongHai }, { qty: "2,000" }, { price: "600" }, { total: "900,000" }]) expect(editPosition(none, patch).flags).toEqual([])
+    expect(editPosition(none, { date: "2024-01-02" }).flags).toHaveLength(1)
   })
 
   it("#10 估不到的列跟著整批日期：整批日期沒改過才是 import_day；使用者把整批改成別天，那是他自己選的（picked）", () => {
     const none = toDraftPosition(row({ estimated_date: null }))
-    expect(toCommitRow(none, "2026-11-12", "2026-11-12").date_basis).toBe("import_day")
-    expect(toCommitRow(none, "2026-10-01", "2026-11-12")).toMatchObject({ date_basis: "picked", estimated_date: null })
+    expect(none).toMatchObject({ date: "", estimate: null })
+    expect(suggestedDate(none, IMPORT_DAY)).toBeNull()
+    expect(applyEstimate(none)).toBe(none)
+    expect(toCommitRow(none, IMPORT_DAY, IMPORT_DAY)).toMatchObject({ date_basis: "import_day", estimated_date: null })
+    expect(toCommitRow(none, "2026-10-01", IMPORT_DAY)).toMatchObject({ date_basis: "picked", estimated_date: null })
   })
 
-  it("#17 整批日期下面那一句照實說估到幾檔：全部、一部分（例如 4 檔估到、2 檔估不到）、一檔都沒有；「最近一次」經過均價", () => {
-    const est = toDraftPosition(row({ estimated_date: "2023-05-08" }))
+  it("整批日期下面那一句：有估計可以套用時多說估計是什麼、要按「套用」；估不到的、舊版伺服器只有原本那一句", () => {
     const none = toDraftPosition(row({ estimated_date: null }))
-    const unknown = toDraftPosition(row({ symbol: null }))
-    expect(estimateHint([est, est])).toBe("每一檔的買入日是估計的：從今天往回，股價最近一次經過均價的那一天。")
-    expect(estimateHint([est, est, est, est, none, unknown])).toBe("4 檔的買入日是估計的：從今天往回，股價最近一次經過均價的那一天。其他 2 檔用這個日期。")
-    expect(estimateHint([none, none])).toBe("估不到買入日，每一檔都用這個日期。")
-    // 舊版伺服器：null（畫面用原本那一句）
-    expect(estimateHint([toDraftPosition(row())])).toBeNull()
+    expect(dateHint([est(), none])).toBe(`${BATCH_DATE_HINT}估計買入日是從今天往回，股價最近一次經過均價的那一天；按「套用」才會改成那一天。`)
+    expect(dateHint([none, none])).toBe(BATCH_DATE_HINT)
+    expect(dateHint([toDraftPosition(row())])).toBe(BATCH_DATE_HINT)
+    // 改了股票、估計都拿掉了：回到原本那一句
+    expect(dateHint([editPosition(est(), { symbol: hongHai }), none])).toBe(BATCH_DATE_HINT)
   })
 
-  it("伺服器估計失敗（回應裡每一列都沒有 estimated_date）：當成沒有估的列，不是估不到——整批一個日期、不送 date_basis、沒有「估不到」那一句", () => {
+  it("伺服器估計失敗（回應裡每一列都沒有 estimated_date）：當成沒有估的列，不是估不到——整批一個日期、不送 date_basis、只有原本那一句", () => {
     const rows = [toDraftPosition(row()), toDraftPosition(row({ row_id: "p2", symbol: "2317.TW", name: "鴻海" }))]
     expect(rows.every((d) => d.estimate === undefined && d.date === "")).toBe(true)
-    expect(estimateHint(rows)).toBeNull()
-    for (const d of rows) expect(toCommitRow(d, "2026-11-12")).not.toHaveProperty("date_basis")
+    expect(dateHint(rows)).toBe(BATCH_DATE_HINT)
+    for (const d of rows) expect(toCommitRow(d, IMPORT_DAY)).not.toHaveProperty("date_basis")
   })
 
   it("送出前的檢查說日期早於分割、減資、配股（before_share_change）：改了日期就拿掉，重新檢查時換成新的", () => {
     const d = { ...toDraftPosition(row({ estimated_date: "2025-07-01" })), flags: [flag("before_share_change", "error", "2025/6/18 股票分割，買進日期不能早於這一天。")] }
     expect(editPosition(d, { date: "2025-06-18" }).flags).toEqual([])
+    expect(applyEstimate(d).flags).toEqual([])
     const sent = [d]
     const { rows } = applyCheck([d], sent, { rows: [{ index: 0, flags: [], in_ledger: null }] }, false)
     expect(rows[0]!.flags).toEqual([])
@@ -192,8 +259,10 @@ describe("估計的買入日（資產組成原型）", () => {
     const old = toDraftPosition(row())
     expect(old).not.toHaveProperty("estimate")
     expect(old.date).toBe("")
-    expect(hasEstimates([old])).toBe(false)
-    expect(toCommitRow(old, "2026-11-12")).toEqual({ symbol: "2330.TW", quantity: 1500, price: 612.4, currency: "TWD" })
+    expect(suggestedDate(old, IMPORT_DAY)).toBeNull()
+    expect(applyEstimate(old)).toBe(old)
+    expect(toCommitRow(old, IMPORT_DAY)).toEqual({ symbol: "2330.TW", quantity: 1500, price: 612.4, currency: "TWD" })
+    expect(toCommitRow(editPosition(old, { symbol: hongHai }), IMPORT_DAY)).not.toHaveProperty("date_basis")
   })
 })
 

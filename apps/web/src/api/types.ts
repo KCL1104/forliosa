@@ -279,7 +279,8 @@ export interface Transaction {
   import_batch_id?: string | null
   /**
    * 買進日期是怎麼來的（資產組成原型，`docs/proposals/asset-composition.md` 附錄 B；舊版後端沒有這個欄位）：
-   * `estimated` 匯入庫存時照股價估的、`picked` 使用者在走勢圖上自己選的、`import_day` 五年內股價都沒有經過成本價，用匯入那天。
+   * `estimated` 匯入庫存時套用了照股價估的日子、`picked` 使用者自己選的（匯入時或在走勢圖上）、`import_day` 用匯入那天
+   * （估不到，或估計只是建議、匯入時沒有套用；產品負責人 2026-11-21）。
    * 一般記的買賣沒有（null 或沒有）。
    */
   date_basis?: BuyDateBasis | null
@@ -289,7 +290,7 @@ export interface Transaction {
   imported_on?: string | null
 }
 
-/** 買進日期是怎麼來的（資產組成原型）：估計的、自己選的、找不到所以用匯入那天 */
+/** 買進日期是怎麼來的（資產組成原型）：套用的估計、自己選的、用匯入那天（估不到或沒套用） */
 export type BuyDateBasis = "estimated" | "picked" | "import_day"
 
 /**
@@ -608,7 +609,7 @@ export interface PositionRow {
   include: boolean
   in_ledger: LedgerHolding | null
   /**
-   * 估計的買入日（資產組成原型）：從今天往回，股價最近一次經過成本價的那一天。
+   * 估計的買入日（資產組成原型；確認表只當建議，按「套用」才用）：從今天往回，股價最近一次經過成本價的那一天。
    * null：五年內都沒有經過（買入日用整批的日期，原因在 `no_crossing` 旗標）；沒有這個欄位：舊版後端，照舊整批一個日期
    */
   estimated_date?: string | null
@@ -652,9 +653,9 @@ export interface PositionsCommitRow {
   currency?: Currency
   /** 以券商為準：先刪掉這個帳戶裡這一檔的所有紀錄 */
   replace?: boolean
-  /** 這一列的日期是怎麼來的（資產組成原型；舊版後端忽略）：沒改過的估計、自己改過、找不到所以用整批的日期 */
+  /** 這一列的日期是怎麼來的（資產組成原型；舊版後端忽略）：套用的估計、自己改過、跟著整批的日期而且整批是匯入那天（`toCommitRow`） */
   date_basis?: BuyDateBasis
-  /** 自動估的那一天（帳本留著，之後在走勢圖上選日期時標出來） */
+  /** 自動估的那一天（沒套用也照樣送；帳本留著，之後在走勢圖上選日期時標出來）；估不到或改過股票、成本是 null */
   estimated_date?: string | null
 }
 

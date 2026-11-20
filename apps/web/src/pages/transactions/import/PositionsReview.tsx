@@ -19,12 +19,12 @@ import { bodyClass, footerClass } from "./layout"
 import { replacedText } from "./undo-store"
 import {
   applyCheck,
+  applyEstimate,
   checkable,
   costTotals,
   currencyOf,
+  dateHint,
   editPosition,
-  estimateHint,
-  hasEstimates,
   hasPositionErrors,
   inLedgerLine,
   isEstimatedDate,
@@ -37,6 +37,7 @@ import {
   replacedRecordsText,
   setInclude,
   setReplace,
+  suggestedDate,
   toCommitRow,
   toDraftPosition,
   totalCost,
@@ -99,12 +100,13 @@ export function PositionsReview({
   const included = rows.filter((r) => r.include)
   const today = appToday()
   const dateHintId = useId()
-  // 資產組成原型：伺服器有給估計的買入日（舊版伺服器沒有，照舊整批一個日期）
-  const estimates = hasEstimates(rows)
+  // 資產組成原型：有估計的買入日可以套用時日期欄寬一點（照讀到的看：改了股票、估計拿掉以後也不縮回去）
+  const wideDate = useMemo(() => doc.rows.some((r) => typeof r.estimated_date === "string"), [doc.rows])
 
   const patch = (id: string, p: Partial<Pick<DraftPosition, PositionField>>) => setRows((rs) => rs.map((r) => (r.id === id ? editPosition(r, p) : r)))
   const onInclude = (id: string, on: boolean) => setRows((rs) => rs.map((r) => (r.id === id ? setInclude(r, on) : r)))
   const onReplace = (id: string, on: boolean) => setRows((rs) => rs.map((r) => (r.id === id ? setReplace(r, on) : r)))
+  const onApply = (id: string) => setRows((rs) => rs.map((r) => (r.id === id ? applyEstimate(r) : r)))
 
   /**
    * 重新檢查（dry_run，不呼叫 AI）：送出檢查得了的每一列（沒勾的也送，才知道換了帳戶、換了股票之後在不在帳本）。
@@ -219,7 +221,7 @@ export function PositionsReview({
   const totals = costTotals(rows)
   const replacing = dedupeReplacing(included)
   const errorsOf = (d: DraftPosition): PositionErrors => (showErrors && d.include ? positionErrors(d, batchDate, today) : {})
-  const rowProps = { batchDate, onPatch: patch, onPick: pickSymbol, onInclude, onReplace }
+  const rowProps = { batchDate, onPatch: patch, onPick: pickSymbol, onInclude, onReplace, onApply }
 
   return (
     <>
@@ -254,8 +256,8 @@ export function PositionsReview({
             </Row>
           </div>
           <p id={dateHintId} className="text-sm text-ink-2">
-            {/* 資產組成原型：伺服器估了買入日時照實說估到幾檔（`estimateHint`）；舊版伺服器照原本那一句 */}
-            {estimateHint(rows) ?? "損益照券商均價算；均價到這天收盤的漲跌會算進這天的報酬，這天之前沒有走勢。每一檔也可以改日期。"}
+            {/* 資產組成原型：有估計的買入日可以套用時多一句（`dateHint`）；舊版伺服器照原本那一句 */}
+            {dateHint(rows)}
           </p>
           <p className="num text-sm text-ink-2">{facts}</p>
           {doc.unreadable.length > 0 && <p className="text-base text-ink">沒讀清楚：{doc.unreadable.join("、")}。</p>}
@@ -288,8 +290,8 @@ export function PositionsReview({
                 <col className="w-[7rem]" />
                 <col className="w-[7rem]" />
                 <col className="w-[8.5rem]" />
-                {/* 資產組成原型：「估計 2024/8/14」比較長，日期欄寬一點 */}
-                <col className={estimates ? "w-[10rem]" : "w-[8.5rem]"} />
+                {/* 資產組成原型：日期下面「估計 2024/8/14」＋「套用」、套用後的「估計 2024/8/14」比較長，日期欄寬一點 */}
+                <col className={wideDate ? "w-[11rem]" : "w-[8.5rem]"} />
               </colgroup>
               <thead className="sticky top-0 z-10 bg-ai-wash">
                 <tr className="form-head text-left text-sm text-ink-2">
@@ -398,6 +400,8 @@ interface RowProps {
   onPick: (id: string, symbol: PickedSymbol) => void
   onInclude: (id: string, on: boolean) => void
   onReplace: (id: string, on: boolean) => void
+  /** 套用估計的買入日 */
+  onApply: (id: string) => void
 }
 
 /** AI 讀的是鉛筆（石墨灰），使用者改過的是墨水 */
@@ -421,11 +425,12 @@ const offRow = "bg-paper"
 const cellInput =
   "num h-9 w-full min-w-0 rounded-sm border border-transparent bg-transparent px-1.5 text-md outline-none transition-colors hover:border-ctl focus-visible:border-ink focus-visible:bg-raised aria-invalid:border-ink aria-invalid:bg-raised pointer-coarse:h-11 pointer-coarse:text-[1rem]"
 
-function DesktopRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, onReplace }: RowProps) {
+function DesktopRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, onReplace, onApply }: RowProps) {
   const nth = `第 ${n} 檔的`
   const off = !d.include
   const errorText = Object.values(errors).filter(Boolean)
   const hasNotes = d.flags.length > 0 || errorText.length > 0 || !!d.inLedger
+  const suggested = suggestedDate(d, batchDate)
   return (
     <tbody className={cn("border-b border-rule last:border-b-0", off && cn(offRow, "[&_input]:text-ink-2"))}>
       <tr className="align-middle">
@@ -442,25 +447,32 @@ function DesktopRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, 
           <RowDate row={d} batchDate={batchDate} label={`${nth}買進日期`} invalid={!!errors.date} onPatch={onPatch} compact />
         </td>
       </tr>
-      {hasNotes && (
+      {(hasNotes || suggested) && (
         <tr>
           <td />
-          <td colSpan={5} className="px-1.5 pb-2.5">
-            <Notes row={d} errors={errorText} onPick={onPick} onReplace={onReplace} />
+          {/* 有估計的買入日可以套用時，日期那一欄的下面是建議（和上面的日期對齊），句子少一欄 */}
+          <td colSpan={suggested ? 4 : 5} className="px-1.5 pb-2.5 align-top">
+            {hasNotes && <Notes row={d} errors={errorText} onPick={onPick} onReplace={onReplace} />}
           </td>
+          {suggested && (
+            <td className="pr-2 pb-2.5 pl-[27px] align-top">
+              <EstimateSuggestion row={d} n={n} date={suggested} onApply={onApply} compact />
+            </td>
+          )}
         </tr>
       )}
     </tbody>
   )
 }
 
-function MobileRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, onReplace }: RowProps) {
+function MobileRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, onReplace, onApply }: RowProps) {
   const [editing, setEditing] = useState(false)
   const nth = `第 ${n} 檔的`
   const off = !d.include
   const errorText = Object.values(errors).filter(Boolean)
   const open = editing || errorText.length > 0
   const price = priceText(d)
+  const suggested = suggestedDate(d, batchDate)
   return (
     <li className={cn("flex gap-1 border-b border-rule py-2.5 pr-3 pl-1 last:border-b-0", off && offRow)}>
       <IncludeBox row={d} onInclude={onInclude} />
@@ -477,7 +489,7 @@ function MobileRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, o
           <p className={cn("num text-md", off ? "text-ink-2" : "text-ai")}>
             {d.qty ? `${d.qty} 股` : "—"}・均價 {price || "—"}
             {d.date && d.date !== batchDate && !isEstimatedDate(d) ? `・${dayText(d.date)} 買進` : ""}
-            {/* 資產組成原型：估計的買入日自己一行（「・」不會掛在行尾），算出來的是淡墨 */}
+            {/* 資產組成原型：套用的估計買入日自己一行（「・」不會掛在行尾） */}
             {isEstimatedDate(d) && <span className="block text-sm text-ink-2">估計 {dayText(d.date)} 買進</span>}
           </p>
           {!open && (
@@ -486,6 +498,8 @@ function MobileRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, o
             </button>
           )}
         </div>
+        {/* 資產組成原型：估計的買入日只是建議，按「套用」才改（欄位打開時也在這裡，不擠進半欄的日期下面） */}
+        {suggested && <EstimateSuggestion row={d} n={n} date={suggested} onApply={onApply} />}
         {/* 沒填好的格子：原因只寫在欄位下面（欄位一定是打開的），這裡不再寫一次；打開時「選一檔」就是上面的股票欄位 */}
         {(d.flags.length > 0 || d.inLedger) && (
           <div className="mt-2">
@@ -614,9 +628,9 @@ function NumCell({
  * 表格裡（`compact`）和手機的半欄都寫短、不放圖示（手機半欄在 360 寬只有約 100px）
  */
 function RowDate({ row: d, batchDate, label, invalid, onPatch, compact }: { row: DraftPosition; batchDate: string; label: string; invalid: boolean; onPatch: RowProps["onPatch"]; compact?: boolean }) {
-  // 資產組成原型：沒改過的估計寫「估計 2024/8/14」，算出來的（和跟著整批的一樣）是淡墨；改過就是墨色、不再寫估計
+  // 資產組成原型：套用的估計寫「估計 2024/8/14」（是使用者按的，和改過的一樣是墨色）；之後自己改了日期就不再寫估計
   const estimated = isEstimatedDate(d)
-  const own = !!d.date && !estimated
+  const own = !!d.date
   return (
     <DateField
       id={`pos-date-${d.id}`}
@@ -629,6 +643,23 @@ function RowDate({ row: d, batchDate, label, invalid, onPatch, compact }: { row:
       format={estimated ? (v) => `估計 ${shortDate(v)}` : shortDate}
       className={compact ? cn(cellInput, "px-1.5", own ? "text-ink" : "text-ink-2") : own ? undefined : "text-ink-2"}
     />
+  )
+}
+
+/**
+ * 估計的買入日（資產組成原型；產品負責人 2026-11-21：只是建議）：13px 淡墨「估計買入日 2024/8/14」＋文字動作「套用」，
+ * 按了這一列的日期才改成那天。桌面寫在日期那一欄的下面（短的「估計 2024/8/14」），手機寫在那一檔的第二行下面。
+ */
+function EstimateSuggestion({ row: d, n, date, onApply, compact }: { row: DraftPosition; n: number; date: string; onApply: RowProps["onApply"]; compact?: boolean }) {
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-3 text-sm text-ink-2">
+      <span className="num">
+        {compact ? "估計" : "估計買入日"} {dayText(date)}
+      </span>
+      <button type="button" onClick={() => onApply(d.id)} className={cn(textAction, "text-sm")} aria-label={`套用第 ${n} 檔的估計買入日 ${dayText(date)}`}>
+        套用
+      </button>
+    </p>
   )
 }
 
