@@ -94,12 +94,12 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     expect(region.querySelector("[data-bands]")!.getAttribute("clip-path")).toBe(`url(#${clip.id})`)
     expect(region.querySelector('[data-series="invested"]')!.getAttribute("clip-path")).toBe(`url(#${clip.id})`)
     expect(region.querySelector("[data-off-chart]")).toBeNull()
-    // 高度和 main 一樣（jsdom 不是桌面）：手機 96
-    expect(img(region).getAttribute("height")).toBe("96")
+    // 手機（jsdom 不是桌面）：示範帳本有「估計」括線與股利記號那兩列，加高到 114（畫圖的範圍和 main 一樣 66）
+    expect(img(region).getAttribute("height")).toBe("114")
   })
 
   it("1 個月：本金離太遠（總資產的起伏不到兩條線範圍的 35%），縱軸只跟總資產；圖裡寫「本金 288萬，在圖的下方」；滑過時縱軸不跳", async () => {
-    // 桌面（120px）：圖裡放得下那一行（手機 96px 放不下，見下一個測試）
+    // 桌面（120px）：圖裡放得下那一行（手機加高到 114px 也放得下，見下一個測試）
     asDesktop()
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(900)
     renderApp("/")
@@ -124,12 +124,14 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     expect(region.querySelector("[data-off-chart]")!.textContent).toBe("本金 288萬，在圖的下方")
   })
 
-  it("手機（96px，畫圖的範圍 48px）：同一個 1 個月，兩個角落都碰到總資產線——那一行改寫在圖例「（在圖的下方）」，圖的說明照念", async () => {
+  it("手機（114px，畫圖的範圍和 main 一樣 66px）：同一個 1 個月，圖裡也放得下「本金 288萬，在圖的下方」（48px 時放不下、退回圖例），圖例不再重複", async () => {
     renderApp("/")
     const region = await trend()
-    expect(img(region).getAttribute("height")).toBe("96")
-    expect(region.querySelector("[data-off-chart]")).toBeNull()
-    expect(legend(region, "invested")!.textContent).toMatch(/^本金 NT\$[\d,]+（在圖的下方）$/)
+    expect(img(region).getAttribute("height")).toBe("114")
+    expect(region.querySelector("clipPath rect")!.getAttribute("height")).toBe("66")
+    await waitFor(() => expect(region.querySelector("[data-off-chart]")).not.toBeNull(), T)
+    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("本金 288萬，在圖的下方")
+    expect(legend(region, "invested")!.textContent).toMatch(/^本金 NT\$[\d,]+$/)
     expect(img(region).getAttribute("aria-label")).toContain("，本金 288萬，在圖的下方")
   })
 
@@ -337,6 +339,60 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     expect(within(region).getByText("近 1 個月")).toBeInTheDocument()
     expect(region.querySelector('[aria-live="polite"]')!.textContent).toBe("")
     expect(document.querySelector(".hero-figure")!.textContent).toBe(big)
+  })
+})
+
+describe("走勢圖的高度（產品負責人 2026-11-21）", { timeout: 20_000 }, () => {
+  /** 畫圖的範圍（本金開著時切塗色的那個方框） */
+  const plotHeight = (region: HTMLElement) => region.querySelector("clipPath rect")!.getAttribute("height")
+  /** 九個收盤、只換資產組成（有沒有估計的那一段、股利） */
+  async function withComposition(composition: Performance["composition"]) {
+    const real = api.getPerformance.bind(api)
+    const series = seriesOf(nineDays.map((_, i) => [1_000_000 + i * 5_000, 950_000] as [number, number]))
+    return vi.spyOn(api, "getPerformance").mockImplementation(async (q) => ({ ...(await real(q)), series, notes: [], reference_until: null, composition }) satisfies Performance)
+  }
+
+  it("桌面 120（兩列從畫圖的範圍裡分出來，72）；手機有「估計」括線與股利記號那兩列時加高到 114，畫圖的範圍和 main 一樣 66——看帳本，換區間不跳", async () => {
+    asDesktop()
+    renderApp("/")
+    const desk = await trend()
+    expect(img(desk).getAttribute("height")).toBe("120")
+    expect(plotHeight(desk)).toBe("72")
+    cleanup()
+    vi.restoreAllMocks()
+    act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
+    renderApp("/")
+    const phone = await trend()
+    expect(img(phone).getAttribute("height")).toBe("114")
+    expect(plotHeight(phone)).toBe("66")
+    expect(phone.querySelector("[data-bracket]")).not.toBeNull()
+    // 5 日碰不到估計的那一段（沒有括線）：照樣 114（圖不跳）
+    fireEvent.click(within(phone).getByRole("radio", { name: "5日" }))
+    await waitFor(() => expect(phone.querySelector("[data-bracket]")).toBeNull(), T)
+    expect(img(phone).getAttribute("height")).toBe("114")
+    expect(plotHeight(phone)).toBe("66")
+  })
+
+  it("手機沒有那兩列（沒有估計的那一段、沒領過股利）：照 main 96，畫圖的範圍 66；只有一列時加那一列", async () => {
+    await withComposition(comp0)
+    renderApp("/")
+    const none = await trend()
+    expect(img(none).getAttribute("height")).toBe("96")
+    expect(plotHeight(none)).toBe("66")
+    cleanup()
+    vi.restoreAllMocks()
+    await withComposition({ ...comp0, estimated: [{ from: "2026-11-02", until: "2026-11-04" }], months_estimated: 0 })
+    renderApp("/")
+    const estOnly = await trend()
+    expect(img(estOnly).getAttribute("height")).toBe("106")
+    expect(plotHeight(estOnly)).toBe("66")
+    cleanup()
+    vi.restoreAllMocks()
+    await withComposition({ ...comp0, dividends: [{ t: "2026-11-05", amount: 3_000 }] })
+    renderApp("/")
+    const divOnly = await trend()
+    expect(img(divOnly).getAttribute("height")).toBe("104")
+    expect(plotHeight(divOnly)).toBe("66")
   })
 })
 

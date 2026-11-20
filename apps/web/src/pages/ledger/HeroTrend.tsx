@@ -51,7 +51,7 @@ import { useTrendRange } from "./use-trend-range"
 
 /**
  * 總資產走勢（產品負責人 2026-11-17 選方案 B）：主數字正下方、和主欄一樣寬，手機與桌面同一個元件。
- * 由上到下：讀數（固定兩行）→ 圖（桌面 120px、手機 96px）→ 區間（靠左）→ 歷史短（2～6 個收盤）時的一行說明。
+ * 由上到下：讀數（固定兩行）→ 圖（桌面 120px、手機 96px；資產組成的「估計」括線、股利記號那兩列在手機上另外加高，最多 114px）→ 區間（靠左）→ 歷史短（2～6 個收盤）時的一行說明。
  * 桌面的區間按鈕在讀數那一列的右邊（2026-11-19 選 B，首屏給持倉；DOM 順序照舊，只是格線換位置）。
  * - 資料：一次 `usePerformance("ALL")`（不帶基準），區間在前端切（`lib/trend-range.ts`），換區間不再問伺服器。
  *   存檔（2026/11/12 起）以後是官方收盤價；以前的日子用 Yahoo 回補換算成當時成交價（產品負責人 2026-11-18），
@@ -65,8 +65,9 @@ import { useTrendRange } from "./use-trend-range"
  *   「近 3 個月」，第二行寫「只有 11/12 – 11/17 的資料」（`rangeExceedsData`），不讓人以為那是三個月的報酬。
  * - 資產組成 v2（原型，`docs/proposals/asset-composition.md` 附錄 A；後端給 `composition`、看自己的資產時才有，沒有時和上面一模一樣）：
  *   一張圖，沒有下面那一格、也沒有圖下面那一句（使用者 2026-11-19：只要圖）。
- *   - 高度和 main 一樣（桌面 120、手機 96）。帳本裡有估計的那一段時，圖的上面留一列給「估計」括線；領過股利時，
- *     橫軸上面留一列給股利記號——兩列都從畫圖的範圍裡分出來，整張圖的高度不變（看這個帳本有沒有，不看區間：換區間時圖不跳）。
+ *   - 高度：帳本裡有估計的那一段時，圖的上面留一列給「估計」括線；領過股利時，橫軸上面留一列給股利記號（看這個帳本有沒有，
+ *     不看區間：換區間時圖不跳）。桌面照 main 是 120，兩列從畫圖的範圍裡分出來（畫圖的範圍 90 → 72）；手機（產品負責人
+ *     2026-11-21 照提案的建議）圖加高那兩列的高度，畫圖的範圍和 main 一樣是 66（兩列都有時 114，沒有時照 main 96）。
  *   - 讀數下面一列圖例（金額跟著滑過的那一天；手機兩行兩欄）：讀數、圖例都在圖的上面，手指按著圖時擋不到數字。
  *     桌面的區間按鈕照 main 在讀數那一列的右邊，圖例那一列橫跨兩欄。
  *   - 「本金」開關（`ledger-prefs` 的 `showInvested`，預設開；和個股走勢圖的「重要時刻」同一種：字＋小號 `Switch`）：
@@ -157,7 +158,7 @@ export function HeroTrend({ view }: { view: LedgerView }) {
     few: state === "short",
     shortNote,
   }
-  // 有和沒有資產組成時都是 main 的高度（桌面 120、手機 96）：「估計」括線與股利記號那兩列從畫圖的範圍裡分出來
+  // main 的高度（桌面 120、手機 96）；手機有「估計」括線、股利記號那兩列時加高（`TrendBand` 看這個帳本有沒有那兩列）
   return <TrendBand {...props} height={desktop ? 120 : 96} />
 }
 
@@ -172,7 +173,7 @@ function TrendBand({
   referenceUntil,
   range,
   onRange,
-  height,
+  height: baseHeight,
   desktop,
   few,
   shortNote,
@@ -185,6 +186,7 @@ function TrendBand({
   composition?: PerformanceComposition
   range: TrendRange
   onRange: (r: TrendRange) => void
+  /** main 的高度（桌面 120、手機 96）；手機有「估計」括線、股利記號那兩列時再加高 */
   height: number
   desktop: boolean
   /** 2～6 個收盤：每一點一個圓點 */
@@ -241,6 +243,8 @@ function TrendBand({
   // 「估計」括線那一列、股利記號那一列：這個帳本有估計的那一段、領過股利才留（看整個帳本，不看區間：換區間時圖不跳）
   const bracketRow = !!comp?.estimated.length
   const dividendRow = snapped.length > 0
+  // 手機（96px）：那兩列吃掉畫圖的範圍（66 → 48px），所以加高那兩列的高度，畫圖的範圍和 main 一樣（最多 114px）。桌面 120 不變
+  const height = desktop ? baseHeight : baseHeight + (bracketRow ? COMP_TOP - TOP : 0) + (dividendRow ? COMP_TICKS : 0)
   // 窄的時候（手機）圖例排成兩行兩欄、本金開關在讀數第二行的右邊；本金開關關掉時高度照留（圖不會跳）
   const stacked = !!comp && width < STACK_BELOW
 
