@@ -80,7 +80,7 @@ describe("個股頁：美股收盤價補上之前與之後", () => {
     renderApp("/stock/MSFT")
     expect(await screen.findByText("還沒有收盤價", undefined, T)).toBeInTheDocument()
     expect(await screen.findByText("收盤價約 10 分鐘內補上，從 2024/07/01 起。", undefined, T)).toBeInTheDocument()
-    const position = await screen.findByRole("region", { name: /的部位$/ }, T)
+    const position = await screen.findByRole("region", { name: /的持有$/ }, T)
     expect(within(position).queryByText("未實現")).toBeNull()
 
     // 第一次再問：還是 404。再問的時候整頁不閃成「—」或以成本算的未實現
@@ -88,7 +88,7 @@ describe("個股頁：美股收盤價補上之前與之後", () => {
     await tick()
     await waitFor(() => expect(quoteCalls()).toBe(before + 1))
     expect(screen.getByText("還沒有收盤價")).toBeInTheDocument()
-    expect(within(screen.getByRole("region", { name: /的部位$/ })).queryByText("未實現")).toBeNull()
+    expect(within(screen.getByRole("region", { name: /的持有$/ })).queryByText("未實現")).toBeNull()
 
     // 第二次再問：有價格了
     backfilled = true
@@ -96,11 +96,11 @@ describe("個股頁：美股收盤價補上之前與之後", () => {
     await screen.findByText("11/11 收盤（美東）", undefined, T)
     // 報價補上了：部位跟著重抓；重抓完成前不顯示以成本算的「未實現 NT$0」「11/11 NT$0」
     await waitFor(() => expect(positionAfter).toBeGreaterThan(0))
-    expect(within(screen.getByRole("region", { name: /的部位$/ })).queryByText("未實現")).toBeNull()
+    expect(within(screen.getByRole("region", { name: /的持有$/ })).queryByText("未實現")).toBeNull()
     expect(screen.queryByText("還沒有收盤價")).toBeNull()
 
     await act(async () => release(priced))
-    const block = screen.getByRole("region", { name: /的部位$/ })
+    const block = screen.getByRole("region", { name: /的持有$/ })
     await waitFor(() => expect(within(block).getByText("未實現")).toBeInTheDocument())
     expect(block.textContent).toContain("+NT$6,400")
     expect(block.textContent).toContain("+NT$3,200")

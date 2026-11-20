@@ -73,7 +73,12 @@ export function AboutCompany({ inst, extra }: { inst: InstrumentDetail; extra?: 
   const company = useCompany(inst.symbol)
   const c = company.data
   useSourceNote(sourceNotes(c?.sources.length ? c.sources : inst.data_sources))
-  if (company.isLoading) return <Skeleton className="h-48 w-full rounded-sm" />
+  if (company.isLoading)
+    return (
+      <QuietSection title="關於">
+        <Skeleton className="h-48 w-full rounded-sm" />
+      </QuietSection>
+    )
   const name = c?.short_name || inst.name
   const rows = aboutRows(c, inst, extra)
   const d = c?.description ?? null
@@ -81,9 +86,9 @@ export function AboutCompany({ inst, extra }: { inst: InstrumentDetail; extra?: 
   const summary = d ? null : inst.summary
   if (!c && !summary) return null
   return (
-    <QuietSection title={`關於「${name}」`} titleId="ov-company">
+    <QuietSection title={`關於「${name}」`}>
       {d && (
-        <div className="max-w-prose pt-2">
+        <div className="max-w-prose">
           {d.kind === "ai" ? (
             // 模型寫的簡介：和對話裡的回答同一套排版（17px／手機 18px、行高 1.8、`KaiText`）
             <p className={cn("ai-voice", kaiSize.page)}>
@@ -111,7 +116,7 @@ export function AboutCompany({ inst, extra }: { inst: InstrumentDetail; extra?: 
           {d.kind === "ai" && <Disclaimer kind="ai" className="mt-1" />}
         </div>
       )}
-      {summary && <p className="max-w-prose pt-2 text-base">{summary}</p>}
+      {summary && <p className="max-w-prose text-base">{summary}</p>}
       {rows.length > 0 && (
         // 兩欄（手機一欄）；單數格時最後一格撐滿兩欄，最後一列不留孤格、格線連成一條
         <dl className={cn("grid gap-x-8 sm:grid-cols-2", (d || summary) && "mt-4 border-t border-rule")}>

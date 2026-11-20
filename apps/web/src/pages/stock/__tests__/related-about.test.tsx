@@ -49,12 +49,14 @@ describe("「關於」的格式", () => {
 })
 
 describe("總覽的「相關股票」", () => {
-  it("一列 4 格：代號、名稱、收盤、漲跌（▲▼）與挑選理由，連到個股頁；不畫小走勢；基準不寫「持有本股」；來源在頁尾", async () => {
+  it("一盤 4 檔、一檔一列：名稱、代號、收盤、漲跌（▲▼）與挑選理由，連到個股頁；名稱不截斷；不畫小走勢；基準不寫「持有本股」；來源在頁尾", async () => {
     const tsmc = await api.getInstrument("2330.TW")
     withSourcesFooter(<RelatedStocks inst={tsmc} />)
+    // 載入中是同一盤（標題已經在，裡面是骨架）：等清單出來
     const section = await screen.findByRole("region", { name: "相關股票" }, { timeout: 3000 })
-    const items = within(section).getAllByRole("listitem")
+    const items = await within(section).findAllByRole("listitem", undefined, { timeout: 3000 })
     expect(items).toHaveLength(4)
+    expect(section.querySelector(".truncate, .line-clamp-2")).toBeNull()
     const first = within(items[0]!).getByRole("link")
     expect(first).toHaveAttribute("href", "/stock/0050.TW")
     expect(first.textContent).toContain("元大台灣50")

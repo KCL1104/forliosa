@@ -7,6 +7,7 @@ import type { AnalystView, AnalystViews, InstrumentDetail } from "@/api/types"
 import { aiKeys, useAiUsage } from "@/ai/remote-hooks"
 import { DataNotes } from "@/components/data-notes"
 import { Disclaimer } from "@/components/disclaimer"
+import { Tray } from "@/components/tray"
 import { SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
@@ -90,22 +91,29 @@ export function AnalystViewsCard({ inst }: { inst: InstrumentDetail }) {
   }
   const busy = state.phase === "loading" || state.phase === "searching"
   return (
-    <section aria-labelledby="ov-analyst-title">
-      <h2 id="ov-analyst-title" className="m-0">
+    // 托盤（分頁托盤的兄弟）：標題「法人觀點」、meta「第三方意見」，展開鈕在標題列右邊；收著的時候托盤只有標題列
+    <Tray
+      title="法人觀點"
+      meta="第三方意見"
+      className="@4xl:col-span-12"
+      bodyClassName={open ? undefined : "mt-0"}
+      action={
         <button
           type="button"
           aria-expanded={open}
           aria-controls="ov-analyst-body"
           onClick={toggle}
-          className="group flex min-h-10 w-full items-end gap-x-3 border-b border-rule pb-2 text-left pointer-coarse:min-h-11"
+          className="press inline-flex h-9 items-center gap-0.5 rounded-sm px-1 text-sm text-ink hover:bg-hov -my-1 pointer-coarse:-my-2 pointer-coarse:h-11"
         >
-          <span className="text-lg font-bold">法人觀點</span>
-          <span className="pb-px text-sm font-normal text-ink-2">第三方意見</span>
-          <ChevronDownIcon aria-hidden className={cn("mb-0.5 ml-auto size-[18px] shrink-0 text-ink-2 transition-transform duration-200 group-hover:text-ink", open && "rotate-180")} />
+          {open ? "收起" : "展開"}
+          {/* 按鈕的名字是「展開法人觀點」：螢幕閱讀器在分頁列裡跳到這個按鈕時知道展開的是什麼 */}
+          <span className="sr-only">法人觀點</span>
+          <ChevronDownIcon aria-hidden className={cn("size-4 text-ink-2 transition-transform duration-200", open && "rotate-180")} />
         </button>
-      </h2>
+      }
+    >
       {open && (
-        <div id="ov-analyst-body" className="note-in pt-3" aria-busy={busy}>
+        <div id="ov-analyst-body" className="note-in" aria-busy={busy}>
           {state.phase === "loading" || state.phase === "idle" ? (
             <SkeletonLines rows={3} className="py-2" />
           ) : (
@@ -122,7 +130,7 @@ export function AnalystViewsCard({ inst }: { inst: InstrumentDetail }) {
           )}
         </div>
       )}
-    </section>
+    </Tray>
   )
 }
 

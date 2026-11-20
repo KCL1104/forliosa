@@ -11,7 +11,7 @@ import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 import { formatDateShort, formatMoney, formatPercent, formatPerShare } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
 import { twOpenApi, useDatasetSources } from "../text"
-import { Fig, KeyGrid, NotYet, TabLead } from "./kit"
+import { Fig, KeyGrid, NotYet } from "./kit"
 
 /** 股利：我的（已領、下次可領、二代健保；查看模式是「爸爸的股利」）＋歷年配息 */
 export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
@@ -52,17 +52,8 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
   return (
     <div className="flex flex-col gap-12">
       <div>
-        <TabLead>
-          {next ? (
-            <>
-              {formatDateShort(next.ex_dividend_date!)} 除息，每股 <Fig>{perShare(next.cash_dividend)}</Fig>。
-            </>
-          ) : ttm > 0 ? (
-            <>
-              過去一年每股共配 <Fig>{perShare(Math.round(ttm * 1000) / 1000)}</Fig>。
-            </>
-          ) : null}
-        </TabLead>
+        {/* 沒有第一行的句子（產品負責人 2026-11-21：頁面只放標籤和數字）：「12/11 除息，每股 5 元」「過去一年每股共配 9.5 元」
+            就是下面「下次除息」「最近一期」「近一年現金股利」那幾格 */}
         <KeyGrid
           items={[
             { label: "近一年現金股利", value: ttm > 0 ? perShare(Math.round(ttm * 1000) / 1000) : "—" },

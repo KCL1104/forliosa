@@ -334,8 +334,10 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
 
   it("預設（最新的收盤價已經進來）：只標「收盤價・11/12（四）」，沒有說明；帳本寫「11/12 收盤」與「今日」", async () => {
     renderApp("/stock/2330.TW")
-    await screen.findByText("參考價", undefined, T)
-    expect(await screen.findByText(/^收盤價$/, undefined, T)).toBeInTheDocument()
+    // 參考價在價格那一行，也在漲跌停軌道的中間（2026-11-21）
+    expect(await screen.findAllByText("參考價", undefined, T)).toHaveLength(2)
+    // 「收盤價」墨色的那個字（托盤的標題「收盤價」只給螢幕閱讀器）
+    expect(await screen.findByText(/^收盤價$/, { selector: "span" }, T)).toBeInTheDocument()
     expect(document.getElementById("main")!.textContent).toContain("收盤價・11/12（四）")
     expect(screen.queryByText(/盤中不更新|還沒公布/)).toBeNull()
     expect(screen.queryByRole("link", { name: /到證交所看即時報價/ })).toBeNull()
@@ -500,7 +502,8 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     withUsClose()
     renderApp("/stock/AAPL")
     const label = await screen.findByText("11/13 收盤（美東）", undefined, T)
-    const header = label.closest("header")!
+    // 收盤價那一盤（2026-11-21 起價格在托盤裡，不在 <header>）
+    const header = label.closest("section")!
     expect(header.textContent).toContain("US$")
     // 美股沒有參考價（台股的平盤價）：寫前一個交易日的收盤
     expect(header.textContent).toContain("昨收 US$350.00")
@@ -518,7 +521,7 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     await screen.findByText("11/13 收盤（美東）", undefined, T)
     await user.click(await screen.findByRole("radio", { name: "1日" }, T))
     await screen.findByText("沒有盤中走勢：價格是收盤後公布的收盤價", undefined, T)
-    const chart = screen.getByRole("region", { name: "走勢圖" })
+    const chart = screen.getByRole("region", { name: "收盤價走勢" })
     expect(chart.textContent).toContain("11/13 收盤（美東）US$356.27")
     expect(chart.textContent).not.toMatch(/11\/14|美股沒有走勢/)
   })
@@ -528,7 +531,7 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     renderApp("/stock/0050.TW")
     await user.click(await screen.findByRole("radio", { name: "1日" }, T))
     expect(await screen.findByText("沒有盤中走勢：價格是收盤後公布的收盤價", undefined, T)).toBeInTheDocument()
-    const chart = screen.getByRole("region", { name: "走勢圖" })
+    const chart = screen.getByRole("region", { name: "收盤價走勢" })
     expect(chart.textContent).toContain("收盤價・11/12（四）")
     expect(chart.textContent).not.toMatch(/每分鐘|加入觀察後/)
     expect(within(chart).getByRole("button", { name: "看 5 日走勢" })).toBeInTheDocument()
