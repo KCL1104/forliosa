@@ -68,6 +68,8 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   at 07:30 of the next trading day (inside the 盤前重點 message, or alone when there is none; 2026-11-18).
 * ``sharing_retention`` — every day 04:35: finished push rows after 30 days, Telegram link codes a day after they
   expired, digests 26 weeks after their week, daily reports after 30 days.
+* ``db_backup`` — every day 04:00, only with ``BACKUP_S3_*`` and PostgreSQL: ``pg_dump`` of the whole database to the
+  backup bucket (``forliosa.backup``; one file per day of the month, so about a month is kept). Its own loop.
 * ``session_purge`` — every day 04:50: deletes login sessions that have expired (``api.deps.purge_expired_sessions``).
   Requests already refuse an expired session; nothing else removes its row.
 * ``news_refresh`` — every ``NEWS_REFRESH_MINUTES`` (45): media headlines for the tracked symbols (held,
@@ -133,7 +135,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from forliosa import closes, logredact
+from forliosa import backup, closes, logredact
 from forliosa.archive import (
     CLOSE_DATASETS,
     CLOSE_WATCH_SECONDS,
@@ -386,6 +388,10 @@ class Worker:
         if settings.market_reports_enabled:
             self.jobs.append(Job("market_reports", every(60), self.market_reports, background=True))
         self.jobs.append(Job("market_report_retention", daily_at(time(4, 40)), self.market_report_retention))
+        # Nightly database backup (forliosa.backup; only with the BACKUP_S3_* bucket and PostgreSQL): its own loop, a
+        # dump of the whole database must not hold up the minute jobs.
+        if backup.configured(settings):
+            self.jobs.append(Job("db_backup", daily_at(time(4, 0)), self.db_backup, background=True))
         # Same-day closes (forliosa.closes): the job is due every minute in its window; how often TWSE is actually asked
         # (at most every 10 minutes) is decided from dataset_status, so a restart cannot ask sooner.
         if settings.twse_opendata_close:
@@ -655,6 +661,9 @@ class Worker:
         n = await asyncio.to_thread(run)
         if n:
             log.info("market reports: %d editions past retention deleted", n)
+
+    async def db_backup(self) -> None:
+        await asyncio.to_thread(backup.run)
 
     async def session_purge(self) -> None:
         from forliosa.api.deps import purge_expired_sessions
