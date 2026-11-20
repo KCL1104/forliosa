@@ -180,6 +180,17 @@ export interface History {
   sources?: string[]
   /** 商用模式存檔不足時的說明，例如「資料累積中：自 2026-11-11 起存檔」 */
   notes?: string[]
+  /**
+   * 選買入日（資產組成原型，`prices=as_traded` 才有）：匯入的買進最早可以是哪一天——匯入那天（`until`）以前最近一次股票分割、
+   * 減資或配股的那一天（那天本身可以：那天的股價已經是改過股數以後的）。沒有分割、減資、配股是 null；舊版後端沒有
+   */
+  pick_from?: PickFrom | null
+}
+
+/** 匯入的買進最早可以是哪一天、為什麼（`split` 股票分割｜`reduction` 減資｜`stock_dividend` 配股） */
+export interface PickFrom {
+  date: string
+  reason: "split" | "reduction" | "stock_dividend"
 }
 
 export interface ValuationPoint {
@@ -266,7 +277,21 @@ export interface Transaction {
   created_at: string
   /** 匯入對帳單時同一次簽名寫進去的那一批（`DELETE /transactions/batches/{id}` 整批復原）；其他來源是 null 或沒有 */
   import_batch_id?: string | null
+  /**
+   * 買進日期是怎麼來的（資產組成原型，`docs/proposals/asset-composition.md` 附錄 B；舊版後端沒有這個欄位）：
+   * `estimated` 匯入庫存時套用了照股價估的日子、`picked` 使用者自己選的（匯入時或在走勢圖上）、`import_day` 用匯入那天
+   * （估不到，或估計只是建議、匯入時沒有套用；產品負責人 2026-11-21）。
+   * 一般記的買賣沒有（null 或沒有）。
+   */
+  date_basis?: BuyDateBasis | null
+  /** 自動估的那一天（使用者自己選過之後也留著，選日期的畫面標出來）；`import_day` 時是 null */
+  estimated_date?: string | null
+  /** 匯入那天：估計是從這天往回找的，自己選也不能晚於這天 */
+  imported_on?: string | null
 }
+
+/** 買進日期是怎麼來的（資產組成原型）：套用的估計、自己選的、用匯入那天（估不到或沒套用） */
+export type BuyDateBasis = "estimated" | "picked" | "import_day"
 
 /**
  * 交易來源：
@@ -296,6 +321,11 @@ export interface TransactionInput {
   note?: string
   /** 自動入帳（`auto`、`auto_edited`）只由後端產生，後端的 POST／PATCH 會拒絕 */
   source?: Exclude<TransactionSource, "import" | "auto" | "auto_edited">
+  /**
+   * 在走勢圖上自己選了買入日（資產組成原型；PATCH 只送 `picked`，舊版後端忽略）。
+   * 型別和 `Transaction` 一樣寬：表單把整筆交易展開回來送時不用另外拿掉
+   */
+  date_basis?: BuyDateBasis | null
 }
 
 export interface TransactionQuery {
@@ -360,6 +390,9 @@ export type ImportFlagCode =
   // 寫入前的檢查（`check_batch`）
   | "bad_date"
   | "validation_error"
+  // 資產組成原型（匯入庫存的買入日）：日期早於匯入以前最近一次分割、減資、配股；送來的估計不是估得到的日子
+  | "before_share_change"
+  | "bad_estimated_date"
 
 export interface ImportFlag {
   /** 新版伺服器可能多出前端還不認得的代碼：照樣顯示訊息 */
@@ -575,6 +608,11 @@ export interface PositionRow {
   /** 預設要不要匯入（已在帳本、找不到股票、沒讀清楚、融券…是 false） */
   include: boolean
   in_ledger: LedgerHolding | null
+  /**
+   * 估計的買入日（資產組成原型；確認表只當建議，按「套用」才用）：從今天往回，股價最近一次經過成本價的那一天。
+   * null：五年內都沒有經過（買入日用整批的日期，原因在 `no_crossing` 旗標）；沒有這個欄位：舊版後端，照舊整批一個日期
+   */
+  estimated_date?: string | null
 }
 
 export interface PositionsImportInput {
@@ -615,6 +653,10 @@ export interface PositionsCommitRow {
   currency?: Currency
   /** 以券商為準：先刪掉這個帳戶裡這一檔的所有紀錄 */
   replace?: boolean
+  /** 這一列的日期是怎麼來的（資產組成原型；舊版後端忽略）：套用的估計、自己改過、跟著整批的日期而且整批是匯入那天（`toCommitRow`） */
+  date_basis?: BuyDateBasis
+  /** 自動估的那一天（沒套用也照樣送；帳本留著，之後在走勢圖上選日期時標出來）；估不到或改過股票、成本是 null */
+  estimated_date?: string | null
 }
 
 export interface PositionsCommitInput {
@@ -834,6 +876,71 @@ export interface Performance {
    * 都是官方收盤時為 null（產品負責人 2026-11-18）。舊版後端沒有這個欄位
    */
   reference_until?: string | null
+  /** 資產組成（原型，`docs/proposals/asset-composition.md` 附錄 B）：舊版後端沒有，畫面照舊 */
+  composition?: PerformanceComposition
+  /** 今年贏過幾成的台股基金（原型）：沒有資料時 null 或沒有，畫面不放那一行 */
+  fund_rank?: FundRank | null
+}
+
+/**
+ * 資產組成（原型）：本金＋賺的（或－虧的）＝總資產，股利另外列。畫面上的說法：本金＝`net_invested`，
+ * 賺的／虧的＝`market_value − net_invested`（不含股利），前端從序列算，不另外給。
+ */
+export interface PerformanceComposition {
+  /** 這段期間每一天領到的現金股利（新台幣，扣掉預扣稅與二代健保），由舊到新；沒領的日子不列 */
+  dividends: { t: string; amount: number }[]
+  /**
+   * 照估計的買入日畫的那幾段（頭尾都含），由舊到新：每一次匯入一段——那一次匯入最早一筆還是估計的買進那天，到那次匯入那天的前一個交易日；
+   * 重疊或連在一起的併成一段。沒有估計的買進、或都已經自己選過日期時是空的。不裁到這個區間（前端自己算重疊）
+   */
+  estimated: { from: string; until: string }[]
+  /** 每個月的拆解，由新到舊：只列真實紀錄的月份（估計那一段不列） */
+  months: PerformanceMonth[]
+  /** 整個月都在估計那一段、沒有列出來的月份數 */
+  months_estimated: number
+  /**
+   * 暫定（產品負責人還沒決定）：有一筆匯入時找不到買入日、用匯入那天記的買進的月份——成本到那天收盤的漲跌全部算在那一天，
+   * 那個月不列。這種月份有幾個；沒有這個欄位時當成 0
+   */
+  months_import_day?: number
+}
+
+/** 一個月（或區間頭尾不完整的一個月）的拆解 */
+export interface PerformanceMonth {
+  /** 「2026-10」 */
+  month: string
+  /** 這一列算的第一個、最後一個收盤 */
+  from: string
+  to: string
+  /** 整個月都算進來了（不是區間的頭尾、也沒有被估計那一段切掉） */
+  whole: boolean
+  /** 本金增減（正：本金多了，買進；負：本金少了，賣出）：`net_invested` 的變化 */
+  flows: number
+  /** 這個月的損益：賺的（`market_value − net_invested`）的變化，不含股利 */
+  pnl: number
+  /** 報酬率（時間加權） */
+  twr: number | null
+  /** 同期比較基準的報酬率；基準那段沒有資料時 null */
+  benchmark_twr: number | null
+}
+
+/** 和台股基金比（原型；金管會開放資料的境內基金每日淨值） */
+export interface FundRank {
+  /** 比較的期間：今年第一個交易日起（今年有估計的那一段時，從真實紀錄的第一天起） */
+  start: string
+  end: string
+  /** 時間加權報酬贏過幾成的基金：0.73 */
+  beat: number
+  /** 比了幾檔 */
+  funds: number
+  /** 比的是哪些基金：「境內台股基金」 */
+  universe: string
+  /** 頁尾資料來源的顯名聲明 */
+  source: string
+  /** 後端的說明（「基金淨值不含配息」…），照原文 */
+  notes?: string[]
+  /** 示範資料（mock 編的數字）：畫面標「示範資料」，來源不登記到頁尾 */
+  is_demo?: boolean
 }
 
 
@@ -2652,7 +2759,11 @@ export interface ForliosaApi {
   getInstrument(symbol: string): Promise<InstrumentDetail>
   getQuote(symbol: string): Promise<Quote>
   getQuotes(symbols: string[]): Promise<Quote[]>
-  getHistory(symbol: string, range: HistoryRange): Promise<History>
+  /**
+   * `asTraded`（資產組成原型）：存檔開始以前的 Yahoo 日線換算回當時的成交價（不照分割還原），選買入日時和券商的成本比；
+   * `until`（和 `asTraded` 一起）：匯入那天，`pick_from` 照這天算。舊版後端忽略這兩個參數
+   */
+  getHistory(symbol: string, range: HistoryRange, opts?: { asTraded?: boolean; until?: string }): Promise<History>
   /** 某一天的收盤價（記一筆的「那天收盤」）：官方收盤；存檔以前的日子是 Yahoo 回補的參考價（`reference`），都沒有時 `close` 是 null */
   getDailyClose(symbol: string, date: string): Promise<DailyClose>
   getValuation(symbol: string, range?: "5Y" | "MAX"): Promise<Valuation>

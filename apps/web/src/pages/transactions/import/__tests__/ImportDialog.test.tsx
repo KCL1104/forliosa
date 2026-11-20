@@ -82,7 +82,8 @@ function renderApp() {
 
 async function openImport() {
   renderApp()
-  await screen.findByText("總資產", {}, T)
+  // 帳本出來了（主數字的標籤與走勢的圖例都寫「總資產」）
+  await screen.findAllByText("總資產", {}, T)
   act(() => useUi.getState().openImport("statement"))
   return screen.findByRole("dialog", { name: "匯入對帳單" }, T)
 }

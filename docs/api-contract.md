@@ -2164,6 +2164,15 @@ token 遠超過上限、字數限制沒有生效，今天停用）與各分級�
   - 例：`{"symbol": "0050.TW", "date": "2024-03-01", "close": 142.75, "currency": "TWD", "reference": true, "note": "來自 Yahoo Finance，不是官方資料"}`
 - **`POST /imports/statement` 的 `price_far_from_close`**：往前 15 天都沒有官方收盤（存檔開始以前的交易）時，改拿回補的收盤（同樣乘回已知分割）比，門檻不變；訊息寫「那天參考收盤 1,030（非官方資料），這裡是 103。」，那天沒有時「前一個交易日參考收盤 1,020（非官方資料），這裡是 103。」。代碼不變。存檔裡有官方收盤時照舊只用官方的。前一個交易日和交易那天之間有已知分割時，先換算到交易那天的基準再比（0050 在 2025-06-18 以 47.25 買進不會被標）；訊息裡的數字是各自那天的成交價；交易那天沒有參考價又隔著分割時不比。
 
+## 資產組成（2026-11-21）
+
+負責人同意的 PR #1（`docs/proposals/asset-composition.md`；欄位的完整說明與範例在附錄 B）。都是加欄位，舊的前端照舊能用。
+- `GET /portfolio/performance`：多 `composition`（只有看自己的資產時有）——每天的股利、估計的那幾段 `estimated`、每月報酬 `months`（本金增減、損益、報酬率、和基準差幾個百分點；用估計日期算的月份不列）。
+- `GET /instruments/{symbol}/history?prices=as_traded[&until=YYYY-MM-DD]`：當時的成交價（Yahoo 回補換算回去，標明非官方），加上最早可以選的日子 `pick_from`（最近一次分割、減資、配股）。給「選買入日」用。
+- 交易（`Transaction`）多三個可以是空的欄位：`date_basis`（`estimated`／`picked`／`import_day`）、`estimated_date`、`imported_on`。只有匯入庫存寫的買進才有；`PATCH /transactions/{id}` 改這種買進的日期會變成 `picked`，早於分割等的日子回 422 `before_share_change`。
+- `POST /imports/positions`：每一列多 `estimated_date`（估不到是 `null` 加一個 `no_crossing` 提醒）。估計不早於這個帳戶這一檔的最後一筆紀錄。
+- `POST /imports/positions/commit`：每一列可以帶 `date_basis` 與 `estimated_date`；擋 `bad_estimated_date`（估不出來的日子）、`before_share_change`、`before_earlier_records`（估計日比這個帳戶這一檔的最後一筆紀錄早；自己選的日期與「以券商為準」不擋）。
+
 ## 存檔開始以前的績效與報酬（2026-11-18）
 
 產品負責人決定（選 A）：群組排行的本月、今年都寫「11/12 收盤 → 11/17 收盤」、底下「資料從 2026/11/12 開始」——存檔開始以前沒有東西能估帳本。現在**存檔開始以前的日子**用 Yahoo 回補（`yahoo-history`）的收盤，換算回當時的成交價（和上一節的參考收盤同一套：已知的分割與減資只在回補真的照它換算過時乘回去）；**存檔開始（含）以後一律是官方收盤，和以前一模一樣**。持股的市值、損益、股利、定期定額草稿照舊只用官方收盤。

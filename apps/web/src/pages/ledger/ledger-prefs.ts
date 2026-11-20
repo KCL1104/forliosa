@@ -51,6 +51,33 @@ export function migrateLedgerPrefs(persisted: unknown, version: number): unknown
   return persisted
 }
 
+/**
+ * 存設定的地方：瀏覽器不給用 localStorage（無痕、封鎖網站資料、讀寫丟錯）時照樣能用，設定只在這次開著的頁面裡有效、不會壞掉
+ */
+export const safeLocalStorage = {
+  getItem: (key: string) => {
+    try {
+      return localStorage.getItem(key)
+    } catch {
+      return null
+    }
+  },
+  setItem: (key: string, value: string) => {
+    try {
+      localStorage.setItem(key, value)
+    } catch {
+      // 存不了就算了：設定留在記憶體裡
+    }
+  },
+  removeItem: (key: string) => {
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      // 同上
+    }
+  },
+}
+
 interface LedgerPrefs {
   columns: HoldingColumn[]
   showTrend: boolean
@@ -63,6 +90,12 @@ interface LedgerPrefs {
   /** 總資產走勢（和績效分段共用）上次選的區間 */
   trendRange: TrendRange
   setTrendRange: (r: TrendRange) => void
+  /**
+   * 資產組成（原型）：總資產走勢畫不畫本金（本金線＋賺虧的塗色）。預設畫；關掉時只有總資產一條線。
+   * 只在有資產組成的資料、看自己的資產時才有這個開關
+   */
+  showInvested: boolean
+  setShowInvested: (v: boolean) => void
   setShowClosed: (v: boolean) => void
   setColumns: (c: HoldingColumn[]) => void
   toggleColumn: (c: HoldingColumn) => void
@@ -81,6 +114,8 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
       phoneLine: "day",
       trendRange: DEFAULT_TREND_RANGE,
       setTrendRange: (trendRange) => set({ trendRange }),
+      showInvested: true,
+      setShowInvested: (showInvested) => set({ showInvested }),
       setShowClosed: (showClosed) => set({ showClosed }),
       // 存的值不認得時（手改過、以後的版本）當成今日漲跌，按一下換成報酬率
       togglePhoneLine: () => set((s) => ({ phoneLine: s.phoneLine === "pnl" ? "day" : "pnl" })),
@@ -99,18 +134,20 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
     {
       name: "forliosa:ledger",
       // 第 2 版（2026-11-16）：預設欄位多了「損益」。
-      // 之後加的 phoneLine、trendRange（2026-11-17）不用升版：存的設定裡沒有這兩項時，讀回來用預設（persist 把存的值蓋在預設上），其他設定照舊
+      // 之後加的 phoneLine、trendRange（2026-11-17）、showInvested（資產組成原型）不用升版：存的設定裡沒有這幾項時，
+      // 讀回來用預設（persist 把存的值蓋在預設上），其他設定照舊
       version: 2,
       migrate: migrateLedgerPrefs as (persisted: unknown, version: number) => LedgerPrefs,
-      partialize: ({ columns, showTrend, pinned, showClosed, phoneLine, trendRange }) => ({
+      partialize: ({ columns, showTrend, pinned, showClosed, phoneLine, trendRange, showInvested }) => ({
         columns,
         showTrend,
         pinned,
         showClosed,
         phoneLine,
         trendRange,
+        showInvested,
       }),
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => safeLocalStorage),
     },
   ),
 )

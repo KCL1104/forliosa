@@ -35,7 +35,11 @@ describe("mock：讀庫存", () => {
     expect(by("鴻海").flags.find((f) => f.code === "in_ledger")!.message).toBe("帳本裡已經有，股數和均價都一樣。")
     // 中華電：只有總成本、1.5 張
     expect(by("中華電")).toMatchObject({ quantity: 1500, price: 120, price_basis: "total_cost", total_cost: 180000, include: true })
-    expect(by("中華電").flags.map((f) => f.code)).toEqual(["not_whole_lots"])
+    // 資產組成原型：均價 120 五年內都沒有經過（最低 130.5），沒辦法估買入日——多一句原因（照樣勾著）
+    expect(by("中華電").flags.map((f) => f.code)).toEqual(["not_whole_lots", "no_crossing"])
+    expect(by("中華電").estimated_date).toBeNull()
+    // 其他列有估計的買入日（從今天往回，股價最近一次經過均價的那一天）
+    expect(by("台積電").estimated_date).toBe("2023-05-08")
     // 富邦金：融資，照樣勾著
     expect(by("富邦金")).toMatchObject({ quantity: 2000, include: true })
     expect(by("富邦金").flags.map((f) => f.code)).toEqual(["margin"])

@@ -28,6 +28,7 @@ from forliosa.marketdata.base import InstrumentInfo, QuoteData, code_of_symbol, 
 from forliosa.marketdata.indices import is_index
 from forliosa.marketdata.service import MarketData
 from forliosa.models import User
+from forliosa.services import composition as comp
 from forliosa.services.allocation import summary_parts
 from forliosa.services.coverage import ymd
 from forliosa.services.ledger_io import FxBook, FxLoader, LedgerInput, load_ledger_input, preferences_of
@@ -332,12 +333,18 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         raise not_found("找不到帳戶")
     inception = inp.first_date
     today = today_taipei()
+    # 資產組成原型 (docs/proposals/asset-composition.md 附錄 B): the spans drawn with estimated buy dates, one per
+    # import
+    spans = comp.estimated_spans(inp.transactions, today)
     empty = {
         "range": range_, "start_date": None, "end_date": None, "twr": None, "xirr": None, "max_drawdown": None,
         "volatility": None,
         "benchmark": {"symbol": bench_symbol, "name": bench_name, "twr": None},
         "series": [], "dividends_by_month": [], "realized_by_year": [], "is_demo": False, "notes": [],
         "reference_until": None,
+        "composition": {"dividends": [], "estimated": [s.out() for s in spans], "months": [],
+                        "months_estimated": 0, "months_import_day": 0},
+        "fund_rank": None,
     }
     if inception is None or inception > today:
         return empty
@@ -504,9 +511,12 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         if p.realized:
             by_year[p.t.year] += p.realized
 
+    composition = _composition(series, window, points, si, based, first_active, bool(b_index) and b_from == 0, spans,
+                               inp)
     # Annualizing one to five days of cash flows is meaningless: no XIRR for the short ranges. A clipped
-    # window opens with the base day's market value as the initial investment.
-    if days is not None:
+    # window opens with the base day's market value as the initial investment. A window touching any of the days
+    # drawn with estimated buy dates is not annualized either (資產組成原型: those days are estimates)
+    if days is not None or any(s.overlaps(window[0].t, window[-1].t) for s in spans):
         rate = None
     elif clipped or (range_ == "MTD" and based):
         rate = xirr(xirr_flows(points, si + 1, ei)) if si < ei else None
@@ -535,6 +545,41 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         "is_demo": is_demo,
         "notes": notes,
         "reference_until": ref_until,
+        "composition": composition,
+        "fund_rank": None,
+    }
+
+
+def _composition(series: list[dict[str, Any]], window: list[Any], points: list[Any], si: int, based: bool,
+                 first_active: int, bench_from_base: bool, spans: list[comp.Span],
+                 inp: LedgerInput) -> dict[str, Any]:
+    """資產組成原型 (``services.composition``; 附錄 B): the window's dividends by day, the estimated spans and the
+    months.
+
+    The months are computed from the series as served (the front end's ``monthlyBreakdown`` on the same numbers gives
+    the same answer). Their base: the base close (1D/5D/MTD, a clipped window: the series' first point); for the
+    other ranges the close before the window (index 1.0, its own return counted in the window's first point), except
+    a window starting at the first money (``first_active``): counted from zero, its first month not compared with the
+    benchmark."""
+    pts = [comp.MonthPoint(p["t"], p["market_value"], p["net_invested"], p["twr_index"], p["benchmark_index"])
+           for p in series]
+    if based:
+        base: comp.MonthPoint | None = pts[0]
+        pts = pts[1:]
+    elif si <= first_active or si == 0:
+        base = None
+    else:
+        prev = points[si - 1]
+        base = comp.MonthPoint(prev.t, ser.money(prev.value), ser.money(prev.net_invested), 1.0,
+                               1.0 if bench_from_base else None)
+    months = comp.monthly_breakdown(pts, base, spans, comp.import_days(inp.transactions))
+    return {
+        "dividends": [{"t": p.t, "amount": ser.money(p.dividends)} for p in (window[1:] if based else window)
+                      if p.dividends > 0],
+        "estimated": [s.out() for s in spans],
+        "months": months.months,
+        "months_estimated": months.skipped,
+        "months_import_day": months.skipped_import,
     }
 
 

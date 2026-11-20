@@ -317,8 +317,59 @@ def create(db: Session, user: User, data: dict[str, Any], md: MarketData) -> Tra
     return txn
 
 
+PICKED = "picked"
+_BASIS_FIELDS = ("date_basis", "estimated_date", "imported_on")
+
+
+def _picked_patch(txn: Transaction, patch: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    """資產組成原型 (``docs/proposals/asset-composition.md`` 附錄 B): ``patch`` without ``date_basis``, and whether the
+    user hinted ``picked``. A date-only change of a 匯入庫存 buy (``date_basis`` not null) keeps the row's fee and tax
+    as they are (the other fields are untouched; a normal row's date change still re-derives them when not sent, as
+    before). What the change does to the basis is :func:`_basis_after`'s, once the row is computed."""
+    hint = patch.get("date_basis")
+    patch = {k: v for k, v in patch.items() if k != "date_basis"}
+    if txn.date_basis is None:
+        return patch, False
+    new_date = patch.get("trade_date", txn.trade_date)
+    if set(patch) <= {"trade_date"} and new_date != txn.trade_date:
+        patch = {"fee": txn.fee, "tax": txn.tax, "health_insurance": txn.health_insurance, **patch}
+    return patch, hint == PICKED
+
+
+def _basis_after(txn: Transaction, values: dict[str, Any], date_sent: bool, hinted: bool,
+                 md: MarketData) -> dict[str, Any]:
+    """資產組成原型: the basis columns a 匯入庫存 buy (``date_basis`` not null) gets from an edit computed as
+    ``values``.
+
+    * No longer a buy, or another stock: an ordinary row (the three columns cleared) — its estimate and import day
+      were the old stock's buy's, and a sell must not be held to an import day.
+    * Still that buy: a date later than ``imported_on`` is refused (422 ``after_import_day``); a changed date earlier
+      than the share-count limit — the latest split, capital reduction or stock dividend on or before the import day
+      (``services.buy_date.share_changes``) — too (422 ``before_share_change``: the broker's shares already include
+      it, the ledger would book it again). Any change of the date, or ``date_basis: "picked"``, makes it ``picked``.
+      Price and quantity edits leave the basis alone.
+    A normal row: nothing."""
+    if txn.date_basis is None:
+        return {}
+    if values["type"] != TxnType.BUY.value or values["symbol"] != txn.symbol:
+        return dict.fromkeys(_BASIS_FIELDS)
+    new_date: date = values["trade_date"]
+    if date_sent and txn.imported_on is not None and new_date > txn.imported_on:
+        raise unprocessable(f"買進日期不能晚於匯入那天（{txn.imported_on.strftime('%Y/%m/%d')}）",
+                            code="after_import_day")
+    if new_date != txn.trade_date and txn.symbol:
+        from forliosa.services import buy_date
+
+        limit = buy_date.share_changes(md, [txn.symbol], txn.imported_on or today_taipei()).get(txn.symbol)
+        if limit is not None and new_date < limit.date:
+            raise unprocessable(buy_date.before_change_message(limit), code=buy_date.BEFORE_SHARE_CHANGE)
+    return {"date_basis": PICKED} if new_date != txn.trade_date or hinted else {}
+
+
 @auto_dividends.shared_events
 def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md: MarketData) -> Transaction:
+    patch, hinted = _picked_patch(txn, patch)
+    date_sent = "trade_date" in patch
     data = {f: getattr(txn, f) for f in FIELDS}
     old_scope = _dividend_scope(txn)
     old_feed_keys = sharing.trade_keys([txn])
@@ -341,6 +392,7 @@ def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md:
             data["amount"] = None
     data.update(patch)
     comp = compute(db, user, data, md, exclude_txn_id=txn.id)
+    basis = _basis_after(txn, comp.values, date_sent, hinted, md)
     old_account = _get_account(db, user, txn.account_id)
     new_account = _get_account(db, user, comp.values["account_id"])
     auto_dividends.lock_accounts(db, [old_account.id, new_account.id])
@@ -348,7 +400,7 @@ def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md:
     validate_ledger(db, user, new_account, candidate, remove_id=txn.id, md=md, skip=edited_auto)
     if old_account.id != new_account.id:
         validate_ledger(db, user, old_account, None, remove_id=txn.id, md=md, skip=edited_auto)
-    for k, v in comp.values.items():
+    for k, v in {**comp.values, **basis}.items():
         setattr(txn, k, v)
     txn.updated_at = now_utc()
     if edited_auto is not None:

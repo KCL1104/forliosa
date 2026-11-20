@@ -41,10 +41,23 @@ export interface DraftPosition {
   edited: ReadonlySet<PositionField>
   /** 使用者自己勾過或取消過（之後的檢查不再替他改勾選） */
   includeSet: boolean
+  /**
+   * 估計的買入日（資產組成原型；伺服器的 `estimated_date`）：**只是建議**（產品負責人 2026-11-21）。這一列的日期照舊跟著整批
+   * （預設匯入那天），日期旁邊寫「估計 2024/8/14」＋「套用」，按了才改成那天（`applyEstimate`）。
+   * 估計是伺服器照讀到的股票與成本算的：改了股票、股數、均價或總成本就拿掉（變成 null，`editPosition`）。
+   * null：估不到（五年內股價都沒有經過均價，原因在 `no_crossing` 旗標）或改過股票、成本；undefined：舊版伺服器，照舊整批一個日期
+   */
+  estimate?: string | null
+  /** 按過「套用」（改了股票或成本、估計拿掉時清掉）：日期還是估計的那天時，送出去是 `estimated` */
+  applied: boolean
 }
 
 /** 重新檢查（dry_run）會再算一次的：每次換成新的 */
-const CHECK_CODES: ReadonlySet<string> = new Set(["unknown_symbol", "bad_date", "validation_error", "invalid_row", "account_mismatch", "unsupported_type", "oversell", "duplicate", "possible_duplicate", "ledger_inconsistent"])
+const CHECK_CODES: ReadonlySet<string> = new Set([
+  "unknown_symbol", "bad_date", "validation_error", "invalid_row", "account_mismatch", "unsupported_type", "oversell", "duplicate", "possible_duplicate", "ledger_inconsistent",
+  // 資產組成原型：日期早於匯入以前最近一次分割、減資、配股；估計不是估得到的日子
+  "before_share_change", "bad_estimated_date",
+])
 /** 讀的時候才算得出來的旗標：改了哪幾格就算處理過，直接拿掉 */
 const RESOLVED_BY: Readonly<Record<string, readonly PositionField[]>> = {
   unreadable: ["symbol", "qty", "price", "total"],
@@ -58,11 +71,16 @@ const RESOLVED_BY: Readonly<Record<string, readonly PositionField[]>> = {
   same_symbol_twice: ["symbol"],
   in_other_account: ["symbol"],
   bad_date: ["date"],
+  before_share_change: ["date"],
+  // 「沒辦法估買入日」是照讀到的股票與成本說的
+  no_crossing: ["symbol", "qty", "price", "total"],
 }
+/** 估計的買入日是照這幾格算的（伺服器讀的時候）：改了就不算數 */
+const ESTIMATE_INPUTS: readonly PositionField[] = ["symbol", "qty", "price", "total"]
 /** 和後端的 EXCLUDED 相同：預設不勾（任何 error 也不勾） */
 const EXCLUDED_CODES: ReadonlySet<string> = new Set(["unknown_symbol", "ambiguous_symbol", "unreadable", "fractional_tw_qty", "currency_mismatch", "short_sale", "in_ledger"])
 /** 標籤（不是要處理的問題）：小一號淡墨 */
-export const POSITION_NOTE_CODES: ReadonlySet<string> = new Set(["margin", "in_other_account"])
+export const POSITION_NOTE_CODES: ReadonlySet<string> = new Set(["margin", "in_other_account", "no_crossing"])
 
 export const isShortSale = (row: PositionRow) => row.flags.some((f) => f.code === "short_sale")
 
@@ -80,13 +98,30 @@ export function toDraftPosition(row: PositionRow): DraftPosition {
     price: byTotal ? "" : numText(row.price),
     total: byTotal ? numText(row.total_cost) : "",
     basis: byTotal ? "total" : "price",
+    // 估計的買入日只是建議：日期照舊跟著整批，按「套用」才改
     date: "",
     replace: false,
     inLedger: row.in_ledger,
     flags: row.flags.filter((f) => f.code !== "in_ledger"),
     edited: new Set(),
     includeSet: false,
+    ...(row.estimated_date !== undefined ? { estimate: row.estimated_date } : {}),
+    applied: false,
   }
+}
+
+/** 這一列的日期是套用的估計（畫面寫「估計 2024/8/14」）：按過「套用」、日期還是那天、估計還在（沒改過股票或成本） */
+export const isEstimatedDate = (d: Pick<DraftPosition, "estimate" | "date" | "applied">) => d.applied && typeof d.estimate === "string" && d.date === d.estimate
+
+/** 日期旁邊要建議的估計買入日：有估計、而且這一列現在的日期（空的就是整批的）不是那天；不用建議是 null */
+export function suggestedDate(d: Pick<DraftPosition, "estimate" | "date">, batchDate: string): string | null {
+  return typeof d.estimate === "string" && (d.date || batchDate) !== d.estimate ? d.estimate : null
+}
+
+/** 套用估計的買入日：這一列的日期改成那天（和自己改日期一樣，日期的問題拿掉）；沒有估計時不動 */
+export function applyEstimate(d: DraftPosition): DraftPosition {
+  if (typeof d.estimate !== "string") return d
+  return { ...editPosition(d, { date: d.estimate }), applied: true }
 }
 
 export const currencyOf = (d: Pick<DraftPosition, "symbol">): Currency => (d.symbol?.market === "US" ? "USD" : "TWD")
@@ -125,6 +160,13 @@ export function editPosition(d: DraftPosition, patch: Partial<Pick<DraftPosition
     // 換了一檔：帳本裡有沒有要重新檢查，以券商為準先拿掉
     next.inLedger = null
     next.replace = false
+  }
+  // 估計的買入日是照原本的股票與成本算的：改了就拿掉（不再建議、不會送成估計的）；套用過的日期回到整批的日期
+  const changed = (k: PositionField) => (k === "symbol" ? patch.symbol?.symbol !== d.symbol?.symbol : patch[k] !== d[k])
+  if (typeof d.estimate === "string" && ESTIMATE_INPUTS.some((k) => k in patch && changed(k))) {
+    next.estimate = null
+    next.applied = false
+    if (isEstimatedDate(d) && !("date" in patch)) next.date = ""
   }
   return next
 }
@@ -201,14 +243,38 @@ export function checkable(d: DraftPosition): boolean {
   return !!d.symbol && q !== null && q > 0 && c !== null && c > 0
 }
 
-/** 送出去的一列：給的是總成本就送總成本（帳本的總成本和券商一樣），日期和整批不同才送 */
-export function toCommitRow(d: DraftPosition, batchDate: string): PositionsCommitRow {
+/**
+ * 送出去的一列：給的是總成本就送總成本（帳本的總成本和券商一樣），日期和整批不同才送。
+ * 日期怎麼來的（伺服器給過 `estimated_date` 的列才送；舊版伺服器不送）：
+ * - `estimated`：按過「套用」、日期還是估計的那天、之後沒改過股票或成本；
+ * - `import_day`：跟著整批的日期，而且整批的日期是匯入那天（`importDay`，伺服器給的預設日期）——有沒有估計都一樣；
+ * - 其他都是 `picked`（自己改過這一列的日期，或把整批改成別天）。
+ * 有估計時照樣送 `estimated_date`（估計拿掉了是 null）。
+ */
+export function toCommitRow(d: DraftPosition, batchDate: string, importDay: string = batchDate): PositionsCommitRow {
   const row: PositionsCommitRow = { symbol: d.symbol!.symbol, quantity: parseNumber(d.qty)!, currency: currencyOf(d) }
   if (d.basis === "total") row.total_cost = parseNumber(d.total)!
   else row.price = parseNumber(d.price)!
   if (d.date && d.date !== batchDate) row.trade_date = d.date
   if (d.replace) row.replace = true
+  // 資產組成原型：日期怎麼來的，帳本之後可以在走勢圖上改
+  if (d.estimate !== undefined) {
+    row.date_basis = isEstimatedDate(d) ? "estimated" : !d.date && batchDate === importDay ? "import_day" : "picked"
+    row.estimated_date = d.estimate
+  }
   return row
+}
+
+/** 整批日期下面那一句（照實說：每一檔是一筆普通買進，均價到那天收盤的漲跌全部算在那一天） */
+export const BATCH_DATE_HINT = "損益照券商均價算；均價到這天收盤的漲跌會算進這天的報酬，這天之前沒有走勢。每一檔也可以改日期。"
+
+/**
+ * 整批日期下面那一句：有估計的買入日可以套用時多說估計是什麼、要按「套用」才會用（估計是從今天往回找「最近一次」
+ * 經過均價的那一天）。舊版伺服器、估不到的、改過股票或成本的都沒有建議，只有原本那一句。
+ */
+export function dateHint(rows: readonly Pick<DraftPosition, "estimate">[]): string {
+  const suggests = rows.some((d) => typeof d.estimate === "string")
+  return suggests ? `${BATCH_DATE_HINT}估計買入日是從今天往回，股價最近一次經過均價的那一天；按「套用」才會改成那一天。` : BATCH_DATE_HINT
 }
 
 /**

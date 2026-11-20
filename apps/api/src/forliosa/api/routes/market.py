@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import date
+from typing import Literal
 
 from fastapi import Depends, Query, Request
 from fastapi.responses import StreamingResponse
@@ -80,7 +81,14 @@ def batch_quotes(symbols: str = Query(max_length=2000), _user: User = Depends(cu
 
 
 @router.get("/instruments/{symbol}/history", response_model=History)
-def instrument_history(symbol: str, range: str = Query("1M"), _user: User = Depends(current_user)):
+def instrument_history(symbol: str, range: str = Query("1M"),
+                       prices: Literal["as_traded"] | None = Query(
+                           None, description="as_traded（資產組成原型，選買入日）：當時真正的成交價，不照分割換算"),
+                       until: date | None = Query(
+                           None, description="as_traded：匯入那天。pick_from 是這天（含）以前最近一次分割、減資或配股"),
+                       _user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if prices == "as_traded":
+        return svc.traded_history_out(db, get_market_data(), symbol, range.upper(), until)
     return svc.history(get_market_data(), symbol, range.upper())
 
 

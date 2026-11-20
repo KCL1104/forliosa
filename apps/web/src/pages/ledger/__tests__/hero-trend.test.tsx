@@ -30,7 +30,7 @@ beforeAll(() => {
 })
 const resetPrefs = () => {
   localStorage.removeItem("forliosa:ledger")
-  useLedgerPrefs.setState({ columns: DEFAULT_COLUMNS, showTrend: true, pinned: [], showClosed: false, trendRange: "1M" })
+  useLedgerPrefs.setState({ columns: DEFAULT_COLUMNS, showTrend: true, pinned: [], showClosed: false, trendRange: "1M", showInvested: true })
   usePrefs.setState({ privacyMode: false })
 }
 beforeEach(() => act(resetPrefs))
@@ -56,6 +56,20 @@ const ALL_CHIPS = ["5日", "1月", "3月", "6月", "今年", "1年", "全部"]
 const chipLabels = (group: HTMLElement) => within(group).getAllByRole("radio").map((r) => r.textContent)
 /** 讀數第一行的報酬（「報酬 ▲1.23%上漲」） */
 const headlineReturn = (region: HTMLElement) => within(region).getByText(/^報酬/, { selector: "span" }).textContent
+/** 圖上方固定兩行的讀數 */
+const readout = (region: HTMLElement) => region.querySelector<HTMLElement>("[data-readout]")!
+
+/**
+ * 舊版後端（績效沒有 composition）：走勢和資產組成以前一模一樣（讀數寫投入本金、縱軸只看總資產）。
+ * 示範帳本預設有資產組成（v2：本金線＋賺虧塗色，見 asset-composition-v2.test.tsx），測以前的畫法時用這個
+ */
+async function withoutComposition() {
+  const real = api.getPerformance.bind(api)
+  return vi.spyOn(api, "getPerformance").mockImplementation(async (q) => {
+    const { composition: _c, fund_rank: _f, ...rest } = await real(q)
+    return rest
+  })
+}
 
 /** 「全部」的序列只留最後 n 個收盤（和正式環境存檔剛開始時一樣） */
 async function withHistory(n: number) {
@@ -128,6 +142,7 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
   })
 
   it("鍵盤：End 到最後一個收盤、← 前一天、Esc 收起；讀數寫那一天的總資產、投入本金、報酬；大數字不變", async () => {
+    await withoutComposition()
     renderApp("/")
     const region = await trend()
     const g = chart(region)
@@ -138,7 +153,8 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
     expect(within(region).getByText(/^投入本金 NT\$[\d,]+$/)).toBeInTheDocument()
     // 窄螢幕放不下時截斷的是日期（「上市 11/17・上櫃 11/14 收盤」），金額一定完整
     expect(within(region).getByText(/^11\/12（四）收盤$/)).toHaveClass("min-w-0", "truncate")
-    expect(within(region).getByText(/^NT\$[\d,]+$/)).toHaveClass("shrink-0")
+    // 讀數裡的金額（只看讀數那兩行）
+    expect(within(readout(region)).getByText(/^NT\$[\d,]+$/)).toHaveClass("shrink-0")
     expect(region.querySelector('[aria-live="polite"]')!.textContent).toMatch(/^11\/12（四）收盤，總資產 NT\$[\d,]+，投入本金 NT\$[\d,]+，報酬/)
     fireEvent.keyDown(g, { key: "ArrowLeft" })
     expect(within(region).getByText(/^11\/11（三）收盤$/)).toBeInTheDocument()
@@ -160,6 +176,7 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
   })
 
   it("投入本金離總資產太遠（縱軸只看總資產）：那條線不畫、沒有圖例；讀數照樣寫投入本金", async () => {
+    await withoutComposition()
     renderApp("/")
     const region = await trend()
     expect(region.querySelector('[data-series="total"]')).not.toBeNull()
@@ -170,13 +187,16 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
   it("投入本金在範圍裡：畫鉛筆灰階梯線＋一個圖例", async () => {
     const days = ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12"]
     const series: PerformancePoint[] = days.map((t, i) => ({ t, market_value: 50_000 + i * 60, net_invested: i < 5 ? 49_000 : 49_500, twr_index: 1 + i * 0.001, benchmark_index: null }))
-    const perf = { ...(await api.getPerformance({ range: "ALL" })), series, notes: [] } satisfies Performance
+    // 舊版後端（沒有 composition）：資產組成時本金線一律畫，圖例也不一樣
+    const { composition: _c, ...real } = await api.getPerformance({ range: "ALL" })
+    const perf = { ...real, series, notes: [] } satisfies Performance
     vi.spyOn(api, "getPerformance").mockResolvedValue(perf)
     act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
     renderApp("/")
     const region = await trend()
     expect(region.querySelector('[data-series="invested"]')).not.toBeNull()
-    expect(within(region).getByText("投入本金")).toBeInTheDocument()
+    // 圖例在讀數第二行
+    expect(within(readout(region)).getByText("投入本金")).toBeInTheDocument()
   })
 
   it("隱私模式：照樣畫線，但不標金額刻度；讀數遮金額、日期與 % 照常；圖的說明不念金額", async () => {
@@ -186,8 +206,9 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
     const img = within(region).getByRole("img", { name: /^近 1 個月，總資產報酬/ })
     expect(img.getAttribute("aria-label")).not.toMatch(/NT\$/)
     expect(region.querySelector('[data-series="total"]')).not.toBeNull()
-    // 只剩橫軸的日期
-    expect([...img.querySelectorAll("text")].map((t) => t.textContent).every((s) => /^\d+\/\d+$/.test(s ?? ""))).toBe(true)
+    // 只剩橫軸的日期（資產組成：1 月的本金在圖外，圖裡那一行不寫金額）
+    expect([...img.querySelectorAll("text:not([data-off-chart])")].map((t) => t.textContent).every((s) => /^\d+\/\d+$/.test(s ?? ""))).toBe(true)
+    expect(img.querySelector("[data-off-chart]")!.textContent).toBe("本金在圖的下方")
     const g = chart(region)
     act(() => g.focus())
     fireEvent.keyDown(g, { key: "End" })

@@ -1,8 +1,10 @@
 import type {
   Account,
   AllocationLimits,
+  FundRank,
   Holding,
   Performance,
+  PerformanceComposition,
   PerformancePoint,
   PerformanceRange,
   PortfolioAllocation,
@@ -11,9 +13,11 @@ import type {
 } from "../types"
 import { allocationOf, summaryAllocation } from "./allocation"
 import { syncAutoDividends } from "./auto-dividends"
-import { hasUsCloses, US_AS_OF, US_SESSION } from "./commercial"
+import { BACKFILL_START, hasUsCloses, US_ARCHIVE_START, US_AS_OF, US_SESSION, usCandles } from "./commercial"
 import { computePreview } from "./fees"
 import { minusMonths } from "@/lib/trend-range"
+import { inSpans, monthlyBreakdown, type MonthPoint, type Span } from "@/lib/asset-composition"
+import { estimateBuyDate } from "@/lib/buy-date"
 import { findInstrument, type MockInstrumentSpec } from "./instruments"
 import {
   addDays,
@@ -24,6 +28,7 @@ import {
   MOCK_AS_OF,
   MOCK_TODAY,
   parseDay,
+  rng,
   tradingDays,
   usdTwd,
 } from "./market"
@@ -83,8 +88,93 @@ function cash(type: Transaction["type"], account: Account, day: string, amount: 
  */
 export const AUTO_BOOKING_FROM = "2026-09-01"
 
-/** 產生示範交易紀錄（由舊到新），含自動入帳的股利 */
-export function seedTransactions(): Transaction[] {
+/**
+ * 資產組成原型（`docs/proposals/asset-composition.md`）：示範使用者 2025/11/29（星期六）匯入過一次庫存截圖，
+ * 其中四檔沒有買進日期，買入日照股價估（從匯入那天往回，股價最近一次經過成本價的那天；`lib/buy-date.ts`）：
+ * - VOO：估計 2024/7/29（美股的歷史只從 2024/7/1 開始；離匯入約 16 個月）
+ * - 環球晶：估計 2025/7/2（離匯入約 5 個月）
+ * - 聯發科：成本 488，五年內股價都沒有經過（最低 516）：買入日用匯入那天（星期六，沒有收盤：漲跌算在下一個收盤日 12/1）
+ * - 鴻海 2024/3/11 那一筆：估計是 2025/9/4，使用者在走勢圖上自己改回 2024/3/11（自己選的日期）
+ * 和規格一樣：成本價、股數和券商一樣，手續費 0，只有日期是估計的。估計的那一段是 2024/7/29 到匯入前一個交易日（2025/11/28）；
+ * 分好幾次匯入時每一次各一段（`estimatedSpans`）。
+ * `?composition=off`（模擬舊版後端）時不套用：和現在的示範帳本一模一樣（`seedTransactions({ importedLots: false })`）。
+ */
+export const IMPORT_DAY = "2025-11-29"
+const IMPORT_BATCH = "imp_demo_20251129"
+
+/** 美股的估計只能用 2024/7/1 以後的收盤（Databento）；台股用 Yahoo 回補的五年 */
+function tradedCandles(spec: MockInstrumentSpec) {
+  return spec.market === "US" ? usCandles(spec).filter((c) => c.t >= US_ARCHIVE_START) : dailyCandles(spec).filter((c) => c.t >= BACKFILL_START)
+}
+
+function importedLots(t: Transaction[]) {
+  const lot = (symbol: string, day: string) => t.find((x) => x.type === "buy" && x.symbol === symbol && x.trade_date === nextWeekday(day))
+  const mark = (x: Transaction | undefined, patch: Partial<Transaction>) => {
+    if (!x) return
+    // 匯入庫存的買進：價格是券商的均價、手續費 0（券商的均價多半已含手續費）
+    Object.assign(x, { source: "import", import_batch_id: IMPORT_BATCH, created_at: `${IMPORT_DAY}T10:00:00+08:00`, imported_on: IMPORT_DAY, fee: 0, ...patch })
+  }
+  for (const [symbol, day] of [["VOO", "2024-02-01"], ["6488.TWO", "2024-05-20"]] as const) {
+    const x = lot(symbol, day)
+    const est = x ? estimateBuyDate(tradedCandles(findInstrument(symbol)!), x.price!, IMPORT_DAY) : null
+    if (x && est) mark(x, { trade_date: est, date_basis: "estimated", estimated_date: est })
+  }
+  // 聯發科：成本比五年來的最低價還低（很早以前買的），找不到：用匯入那天
+  const mtk = lot("2454.TW", "2024-10-21")
+  if (mtk) mark(mtk, { trade_date: IMPORT_DAY, price: 488, amount: 488 * (mtk.quantity ?? 0), date_basis: "import_day", estimated_date: null, note: "" })
+  // 鴻海 2024/3/11 那一筆：自動估的是 2025/9/4，使用者自己選回 2024/3/11
+  const honHai = lot("2317.TW", "2024-03-11")
+  if (honHai) mark(honHai, { date_basis: "picked", estimated_date: estimateBuyDate(tradedCandles(findInstrument("2317.TW")!), honHai.price!, IMPORT_DAY) })
+}
+
+/** 前一個平日（mock 的行事曆沒有國定假日） */
+function weekdayBefore(day: string): string {
+  let d = addDays(day, -1)
+  while ([0, 6].includes(parseDay(d).getUTCDay())) d = addDays(d, -1)
+  return d
+}
+
+/**
+ * 估計的那幾段（頭尾都含），由舊到新：每一次匯入（`imported_on`）一段——那一次匯入最早一筆還是「估計」的買進，到那次匯入前一個平日；
+ * 重疊或連在一起（中間沒有平日）的併成一段。都自己選過了就是空的（和後端 `services/composition.estimated_spans` 一樣）。
+ */
+export function estimatedSpans(txns: Transaction[], accountId?: string): Span[] {
+  const byImport = new Map<string, string>()
+  for (const x of txns) {
+    if (x.type !== "buy" || x.date_basis !== "estimated" || (accountId && x.account_id !== accountId)) continue
+    const day = x.imported_on ?? MOCK_TODAY
+    const cur = byImport.get(day)
+    if (!cur || x.trade_date < cur) byImport.set(day, x.trade_date)
+  }
+  const spans = [...byImport]
+    .map(([imported, from]) => ({ from, until: weekdayBefore(imported) }))
+    .filter((sp) => sp.until >= sp.from)
+    .sort((a, b) => (a.from === b.from ? a.until.localeCompare(b.until) : a.from.localeCompare(b.from)))
+  const out: Span[] = []
+  for (const sp of spans) {
+    const prev = out.at(-1)
+    // 連在一起：下一段的第一天不晚於前一段結束後的下一個平日
+    if (prev && weekdayBefore(sp.from) <= prev.until) out[out.length - 1] = { from: prev.from, until: sp.until > prev.until ? sp.until : prev.until }
+    else out.push(sp)
+  }
+  return out
+}
+
+/** 匯入時找不到買入日、用匯入那天記的買進（`import_day`）的日期：「每月報酬率」暫時不列這些月份（見 `monthlyBreakdown`） */
+export function importDays(txns: Transaction[], accountId?: string): string[] {
+  return txns.filter((x) => x.type === "buy" && x.date_basis === "import_day" && (!accountId || x.account_id === accountId)).map((x) => x.trade_date)
+}
+
+/**
+ * 產生示範交易紀錄（由舊到新），含自動入帳的股利。
+ * - `importedLots`（預設 true）：資產組成原型的匯入庫存（估計的買入日）；false 和原本的示範帳本一樣。
+ * - `extra`：資產組成原型的示範情境（網址 `?mock=…`，見 adapter 的 `MockScenario`），在示範帳本上多幾筆：
+ *   - `cashout`：2023 年買、2026/10 整批賣掉的台積電 10 張——賣股票收到的錢比買股票花的多，本金是負的。
+ *   - `loss`（一直虧）：2023/3 在高點買的長榮 5 張（690 元），之後一路跌到 200 元上下——從第一天起總資產都在本金下面。
+ *   - `cross`（賺轉虧）：2023/3 買的中美晶 10 張（327 元），2024 年漲到 440 元上下、之後跌到 120 元上下——先賺、後來轉虧。
+ *   - `lastday`（最後一天轉虧）：換成一個小帳本（見 `lastDayTrades`）——前一天整體還賺一點，最後一天在高點買進台積電，收盤變成虧的。
+ */
+export function seedTransactions(opts: { importedLots?: boolean; extra?: "cashout" | "loss" | "cross" | "lastday" } = {}): Transaction[] {
   seq = 0
   const t: Transaction[] = []
   t.push(cash("deposit", TW, "2023-03-01", 1_500_000, "初始資金"))
@@ -132,6 +222,14 @@ export function seedTransactions(): Transaction[] {
     }
   }
 
+  if (opts.extra === "cashout") {
+    t.push(trade("buy", TW, "2330.TW", "2023-03-15", 10_000, undefined, "整批買進"))
+    t.push(trade("sell", TW, "2330.TW", "2026-10-20", 10_000, undefined, "整批賣出"))
+  }
+  if (opts.extra === "loss") t.push(trade("buy", TW, "2603.TW", "2023-03-15", 5_000, undefined, "高點買進"))
+  if (opts.extra === "cross") t.push(trade("buy", TW, "5483.TWO", "2023-03-15", 10_000))
+  if (opts.extra === "lastday") t.splice(0, t.length, ...lastDayTrades())
+  if (opts.importedLots ?? true) importedLots(t)
   t.sort((a, b) => (a.trade_date === b.trade_date ? a.id.localeCompare(b.id) : a.trade_date.localeCompare(b.trade_date)))
 
   // 現金股利：使用者自己記的（發放日入帳、manual）。台股從 AUTO_BOOKING_FROM 起改由股利自動入帳記在除息日（source: auto），
@@ -154,6 +252,40 @@ export function seedTransactions(): Transaction[] {
     }
   }
   return syncAutoDividends([...t, ...dividends], { accounts: ACCOUNTS, skips: new Set(), today: MOCK_TODAY })
+}
+
+/**
+ * `?mock=lastday`（資產組成原型，總資產走勢 v2 的截圖用）：最後一天的買進讓整體從賺變虧。
+ * 帳本只有兩筆：元大台灣50 2 萬股（買在收盤價比 11/11 低一點的那一天：11/11 收盤時整體賺 1.5 萬上下），
+ * 和 11/12 在高點買的台積電 460 股（約 50 萬）——買進價照收盤推回去，讓 11/12 收盤時整體虧 1.5 萬上下。
+ * 價格都從 mock 的收盤算，每次一樣。
+ */
+function lastDayTrades(): Transaction[] {
+  const etf = findInstrument("0050.TW")!
+  const tsmc = findInstrument("2330.TW")!
+  const prev = "2026-11-11"
+  const qty = 20_000
+  const before = closeOn(etf, prev)
+  // 收盤價最接近「11/11 收盤 − 0.75 元」的那一天買（賺 1.5 萬上下）
+  let buyDay = "2025-01-02"
+  let best = Infinity
+  for (let d = "2025-01-02"; d < "2026-10-31"; d = addDays(d, 1)) {
+    if ([0, 6].includes(parseDay(d).getUTCDay())) continue
+    const diff = Math.abs(closeOn(etf, d) - (before - 0.75))
+    if (diff < best) {
+      best = diff
+      buyDay = d
+    }
+  }
+  const buy = trade("buy", TW, "0050.TW", buyDay, qty)
+  const gainBefore = qty * before - buy.amount! - buy.fee
+  const last = MOCK_TODAY
+  const close = closeOn(tsmc, last)
+  // 11/12 收盤時整體虧 1.5 萬：台積電要賠掉「前一天賺的＋元大台灣50 這一天的漲跌＋1.5 萬」（手續費約 0.1425%，先估進去）
+  const shares = 460
+  const loss = gainBefore + qty * (closeOn(etf, last) - before) + 15_000
+  const price = Math.round(((close * shares + loss) / shares / 1.001425) * 2) / 2
+  return [cash("deposit", TW, addDays(buyDay, -3), 2_000_000, "初始資金"), buy, trade("buy", TW, "2330.TW", last, shares, price, "零股（買在高點）")]
 }
 
 function quantityOn(txns: Transaction[], symbol: string, day: string): number {
@@ -420,6 +552,8 @@ interface DailyRow extends PerformancePoint {
   r: number
   inflow: number
   outflow: number
+  /** 這一天領到的現金股利（新台幣，扣掉預扣稅與二代健保） */
+  dividend: number
 }
 
 /**
@@ -438,7 +572,8 @@ export function mockBenchmark(symbol: string | undefined): { symbol: string; pro
   return { symbol: key, ...MOCK_BENCHMARKS[key]! }
 }
 
-function dailyRows(txns: Transaction[], accountId?: string, benchmark = "0050.TW"): DailyRow[] {
+/** `legacy`：`?composition=off` 時照原本的示範帳本（投入本金把現金股利當成拿回扣掉），畫面和現在的示範一模一樣 */
+function dailyRows(txns: Transaction[], accountId?: string, benchmark = "0050.TW", legacy = false): DailyRow[] {
   const relevant = txns.filter((x) => !accountId || x.account_id === accountId)
   const first = relevant.find((x) => x.symbol)?.trade_date
   if (!first) return []
@@ -454,6 +589,8 @@ function dailyRows(txns: Transaction[], accountId?: string, benchmark = "0050.TW
   for (const day of days) {
     let inflow = 0
     let outflow = 0
+    let sold = 0
+    let dividend = 0
     while (idx < relevant.length && relevant[idx]!.trade_date <= day) {
       const x = relevant[idx++]!
       if (!x.symbol) continue
@@ -465,10 +602,13 @@ function dailyRows(txns: Transaction[], accountId?: string, benchmark = "0050.TW
       } else if (x.type === "sell") {
         qty.set(x.symbol, q - (x.quantity ?? 0))
         outflow += (x.amount - x.fee - x.tax) * fx
+        sold += (x.amount - x.fee - x.tax) * fx
       } else if (x.type === "split") {
         qty.set(x.symbol, q * (x.quantity ?? 1))
       } else if (x.type === "cash_dividend") {
-        outflow += (x.amount - x.tax - x.health_insurance) * fx
+        const net = (x.amount - x.tax - x.health_insurance) * fx
+        outflow += net
+        dividend += net
       }
     }
     let v = 0
@@ -488,7 +628,8 @@ function dailyRows(txns: Transaction[], accountId?: string, benchmark = "0050.TW
     const denom = prevV + inflow
     const r = denom > 0 ? (v + outflow) / denom - 1 : 0
     twr *= 1 + r
-    invested += inflow - outflow
+    // 和後端相同（CONTRACT_NOTES：買進成本 − 賣出淨收入，現金股利不扣）：股利不算拿回本金，累積損益才不含股利
+    invested += legacy ? inflow - outflow : inflow - sold
     rows.push({
       t: day,
       market_value: r2(v),
@@ -498,6 +639,7 @@ function dailyRows(txns: Transaction[], accountId?: string, benchmark = "0050.TW
       r,
       inflow,
       outflow,
+      dividend,
     })
     prevV = v
   }
@@ -543,12 +685,47 @@ export interface PerformanceOptions {
   /** 商用模式：存檔從這天開始，區間更早時從這天收盤開始計算（當作基準收盤） */
   minStart?: string
   isDemo?: boolean
+  /** 資產組成的欄位（原型；`composition`、`fund_rank`）：false 模擬舊版後端（`?composition=off`），回應沒有這兩個欄位 */
+  composition?: boolean
+}
+
+/**
+ * 示範的「贏過幾成的台股基金」（原型）：今年第一個交易日到最新淨值那天（前一個交易日）的時間加權報酬，
+ * 和 812 檔境內台股基金的今年報酬（固定亂數，平均 12%）比。今年有估計的那一段時，從真實紀錄的第一天起。
+ */
+function fundRankOf(all: DailyRow[], estimated: readonly Span[]): FundRank | null {
+  const year = MOCK_TODAY.slice(0, 4)
+  const end = all.filter((x) => x.t < MOCK_TODAY).at(-1)
+  let startIdx = all.findIndex((x) => x.t >= `${year}-01-01`)
+  if (startIdx >= 0) {
+    while (startIdx < all.length && inSpans(all[startIdx]!.t, estimated)) startIdx++
+  }
+  const start = all[startIdx]
+  const base = all[startIdx - 1]
+  if (!end || !start || !base || start.t >= end.t || base.market_value <= 0) return null
+  const mine = end.twr_index / base.twr_index - 1
+  const r = rng(`funds-${year}`)
+  const funds = 812
+  let beaten = 0
+  // 示範：基金的報酬圍著示範帳本的報酬分布（平均低 3.5 個百分點、標準差 6 個百分點），畫面才是「贏過七成左右」的樣子
+  for (let i = 0; i < funds; i++) {
+    const u = Math.max(r(), 1e-9)
+    const fund = mine - 0.035 + 0.06 * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r())
+    if (mine > fund) beaten++
+  }
+  return {
+    start: start.t, end: end.t, beat: Math.round((beaten / funds) * 100) / 100, funds, universe: "境內台股基金",
+    source: "金融監督管理委員會證券期貨局〈境內基金每日淨值〉（2026），依政府資料開放授權條款第 1 版",
+    notes: ["基金淨值不含配息，配息的基金照公告的配息加回"],
+    // 示範：數字是編的，畫面標「示範資料」，來源不登記到頁尾
+    is_demo: true,
+  }
 }
 
 export function buildPerformance(txns: Transaction[], range: PerformanceRange, accountId?: string, benchmark?: string, opts: PerformanceOptions = {}): Performance {
   const isDemo = opts.isDemo ?? true
   const bench = mockBenchmark(benchmark)
-  const all = dailyRows(txns, accountId, bench.symbol)
+  const all = dailyRows(txns, accountId, bench.symbol, opts.composition === false)
   // 1D／5D：最後 N 個交易日的報酬，序列第一點是基準收盤（與後端相同）
   const days = range === "1D" ? 1 : range === "5D" ? 5 : null
   // MTD：上月最後一個收盤是基準點（與後端相同）
@@ -567,6 +744,7 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
       range, start_date: rows[0]?.t ?? MOCK_TODAY, end_date: MOCK_TODAY, twr: null, xirr: null, max_drawdown: null, volatility: null,
       benchmark: { symbol: benchSpec.symbol, name: benchSpec.name, twr: null }, series: rows.map(stripRow),
       dividends_by_month: [], realized_by_year: [], is_demo: isDemo,
+      ...(opts.composition === false ? {} : { composition: { dividends: [], estimated: estimatedSpans(txns, accountId), months: [], months_estimated: 0 }, fund_rank: null }),
     }
   }
   // 指數的 1.0：1D／5D、MTD 與從存檔起點開始算（minStart）時是第一點（基準收盤）；1M…1Y 和後端一樣，
@@ -619,6 +797,23 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
     dividends.set(m, (dividends.get(m) ?? 0) + (x.amount - x.tax - x.health_insurance) * fxFor(x.currency, x.trade_date))
   }
   const last = series[series.length - 1]!
+  // 資產組成（原型）：每天領到的股利、估計的那一段、每個月的拆解。區間的基準收盤：前一個收盤（prev）、
+  // 從第一筆開始時沒有（當成 0）、1D／5D／MTD 與從存檔起點開始算時是第一點
+  const estimated = estimatedSpans(txns, accountId)
+  const baseRow = prev ?? (fromInception ? null : rows[0]!)
+  const monthRows = prev || fromInception ? rows : rows.slice(1)
+  const toMonthPoint = (x: DailyRow): MonthPoint => ({ t: x.t, market_value: x.market_value, net_invested: x.net_invested, twr_index: x.twr_index, benchmark_index: x.benchmark_index })
+  // 暫定：用匯入那天記的買進（找不到買入日）所在的月份不列（`importDays`，產品負責人還沒決定）
+  const { months, skipped, skippedImport } = monthlyBreakdown(monthRows.map(toMonthPoint), { base: baseRow ? toMonthPoint(baseRow) : null, estimated, importDays: importDays(txns, accountId) })
+  const composition: PerformanceComposition = {
+    dividends: rows.filter((x) => x.dividend > 0 && x.t >= flowsFrom).map((x) => ({ t: x.t, amount: r2(x.dividend) })),
+    estimated,
+    months,
+    months_estimated: skipped,
+    months_import_day: skippedImport,
+  }
+  // 估計的那幾段不算年化報酬（區間碰到任何一段時 XIRR 是 null）
+  const touchesEstimate = estimated.some((sp) => sp.from <= MOCK_TODAY && sp.until >= startDate)
   return {
     range,
     start_date: startDate,
@@ -626,6 +821,7 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
     twr: r4(last.twr_index - 1),
     xirr: (() => {
       if (days !== null) return null // 一到五天的現金流年化沒有意義
+      if (touchesEstimate && opts.composition !== false) return null
       const v = xirr(flows)
       return v === null ? null : r4(v)
     })(),
@@ -636,6 +832,7 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
     dividends_by_month: [...dividends.entries()].sort().map(([month, amount]) => ({ month, amount: r2(amount) })),
     realized_by_year: [...realized.entries()].sort((a, b) => a[0] - b[0]).map(([year, amount]) => ({ year, amount: r2(amount) })),
     is_demo: isDemo,
+    ...(opts.composition === false ? {} : { composition, fund_rank: fundRankOf(all, estimated) }),
   }
 }
 

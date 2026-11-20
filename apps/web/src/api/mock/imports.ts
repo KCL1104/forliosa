@@ -18,9 +18,31 @@ import {
   type TransactionBatchInput,
   type TransactionBatchResult,
 } from "../types"
-import { findInstrument } from "./instruments"
-import { closeOn, parseDay } from "./market"
+import { beforeShareChangeMessage, shareChangeOn } from "./auto-dividends"
+import { US_ARCHIVE_START } from "./commercial"
+import { findInstrument, type MockInstrumentSpec } from "./instruments"
+import { addDays, closeOn, parseDay } from "./market"
 import { heldIn, holdingsFixture, parsePastedHoldings, readPositions } from "./positions"
+
+/**
+ * 資產組成原型：匯入庫存的一列送了 `date_basis` 時，為什麼不能寫（和後端 `positions_import.basis_errors` 一樣）——
+ * 估計的日子不是估得到的（五年前、美股 2024/7/1 以前，讀截圖在午夜以前時多寬一天；分割、減資、配股以前；晚於匯入那天），
+ * 或日期早於匯入以前最近一次分割、減資、配股（券商的股數已經算進去，帳本會多算一次）。
+ */
+function basisErrors(spec: MockInstrumentSpec, estimated: string | null, date: string, today: string): ImportFlag[] {
+  const out: ImportFlag[] = []
+  const change = shareChangeOn(spec.symbol, today)
+  const ymd = (t: string) => t.split("-").map(Number).join("/")
+  if (estimated) {
+    const back = addDays(today, -1)
+    const fiveYears = `${Number(back.slice(0, 4)) - 5}${back.slice(4)}`
+    let lo = spec.market === "US" && US_ARCHIVE_START > fiveYears ? US_ARCHIVE_START : fiveYears
+    if (change && change.date > lo) lo = change.date
+    if (estimated < lo || estimated > today) out.push(flag("bad_estimated_date", `估計的買入日 ${ymd(estimated)} 不在估得到的期間（${ymd(lo)} – ${ymd(today)}）。`, "error"))
+  }
+  if (change && date < change.date) out.push(flag("before_share_change", `${beforeShareChangeMessage(change)}。`, "error"))
+  return out
+}
 
 /**
  * 匯入對帳單的 mock（和後端 `services/imports.py`、`POST /transactions/batch` 同一套代碼與規則，只做示範用得到的部分）：
@@ -332,6 +354,8 @@ export function createImportStore(deps: {
         if (spec.market !== "US" && !Number.isInteger(r.quantity)) flags.push(flag("validation_error", "台股的股數要是整數。", "error"))
       }
       if (date > deps.today || date < "1990-01-01") flags.push(flag("bad_date", "日期要在 1990/1/1 到今天之間。", "error"))
+      // 資產組成原型（和後端 `basis_errors` 一樣）：估計的日子要是估得到的；日期不能早於匯入以前最近一次分割、減資、配股
+      if (spec && r.date_basis) flags.push(...basisErrors(spec, r.estimated_date ?? null, date, deps.today))
       return { index, flags, in_ledger: h }
     })
     const replaced = [...replacing].map((symbol) => ({ symbol, deleted: txns.filter((t) => t.account_id === account.id && t.symbol === symbol).length }))
@@ -377,6 +401,11 @@ export function createImportStore(deps: {
           id: `txn_${++nextTxn}`, account_id: account.id, symbol: spec.symbol, type: "buy", trade_date: r.trade_date ?? day,
           quantity: r.quantity, price, amount: r.total_cost ?? Math.round(r.quantity * price * 100) / 100, fee: 0, tax: 0, health_insurance: 0,
           currency: spec.currency, is_day_trade: false, note: "", source: "import", created_at: now, import_batch_id: batchId,
+          // 資產組成原型：買進日期的來由（估計的、自己改過的、找不到用整批日期的），帳本裡之後可以在走勢圖上改
+          ...(r.date_basis
+            ? // 和後端 `date_basis_of` 一樣：跟著匯入那天的列不留估計（沒按「套用」的估計只是建議）
+              { date_basis: r.date_basis, estimated_date: r.date_basis === "import_day" ? null : (r.estimated_date ?? null), imported_on: deps.today }
+            : {}),
         }
       })
       // 以券商為準：這個帳戶裡這一檔的所有紀錄（含自動入帳的股利）和略過紀錄先刪掉，和寫入同一次

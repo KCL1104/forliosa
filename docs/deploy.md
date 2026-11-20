@@ -98,6 +98,10 @@ worker 記錄有 `worker started: …` 與 `close watch: TPEX has published the 
   （值來自 `railway bucket credentials --bucket db-backups --json`；四個缺一個就不備份）。映像檔裝的是 PGDG 的
   `postgresql-client-18`，版本不能比 Postgres 伺服器舊。
 - 立刻備份一次：`railway ssh --service worker`，再執行 `python -c "from forliosa import backup; print(backup.run())"`。
+  非互動的環境（例如 agent）：`railway ssh` 要先 `railway ssh keys add` 登記公鑰；確認主機指紋要互動，可改用
+  `railway ssh config --service worker --path <暫存檔>` 產生設定，再 `ssh -F <暫存檔> -o StrictHostKeyChecking=accept-new railway-worker '<指令>'`。
+- **2026-11-21 第一次備份與還原演練**：`forliosa-21.dump` 43.2 MB（`pg_dump` 18.7）；下載回來還原到臨時資料庫，97 張表、2,879,549 筆，
+  和正式資料庫逐表比對只差備份完成後才寫進去的那一筆 `dataset_status`；臨時資料庫已刪除。
 - 還原：在 worker 容器裡（有 18 版的 `pg_restore`）下載那天的檔案，**先還原到另一個資料庫核對**，確定沒問題才考慮覆蓋正式資料庫：
   `pg_restore --no-owner --no-privileges -d <另一個資料庫> forliosa-DD.dump`。下載用 S3 簽章（例如
   `curl --aws-sigv4 "aws:amz:auto:s3" --user "$BACKUP_S3_ACCESS_KEY_ID:$BACKUP_S3_SECRET_ACCESS_KEY" https://$BACKUP_S3_BUCKET.t3.storageapi.dev/postgres/forliosa-DD.dump -o forliosa-DD.dump`）。

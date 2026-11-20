@@ -172,7 +172,10 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getQuote: (symbol) => request<Quote>("GET", `/instruments/${enc(symbol)}/quote`),
     getDailyClose: (symbol, date) => request<DailyClose>("GET", `/instruments/${encodeURIComponent(symbol)}/close`, { query: { date } }),
     getQuotes: (symbols) => request<Quote[]>("GET", "/quotes", { query: { symbols: symbols.join(",") } }),
-    getHistory: (symbol, range: HistoryRange) => request<History>("GET", `/instruments/${enc(symbol)}/history`, { query: { range } }),
+    getHistory: (symbol, range: HistoryRange, opts) =>
+      request<History>("GET", `/instruments/${enc(symbol)}/history`, {
+        query: opts?.asTraded ? { range, prices: "as_traded", ...(opts.until ? { until: opts.until } : {}) } : { range },
+      }),
     getValuation: (symbol, range = "5Y") => request<Valuation>("GET", `/instruments/${enc(symbol)}/valuation`, { query: { range } }),
     getRevenue: (symbol) => request<MonthlyRevenue[]>("GET", `/instruments/${enc(symbol)}/revenue`),
     getDividends: (symbol) => request<DividendRecord[]>("GET", `/instruments/${enc(symbol)}/dividends`),

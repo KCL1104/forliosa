@@ -52,6 +52,7 @@ def txn_out(t: TxnModel) -> dict:
         "fee": ser.money(t.fee), "tax": ser.money(t.tax), "health_insurance": ser.money(t.health_insurance),
         "currency": t.currency, "is_day_trade": t.is_day_trade, "note": t.note, "source": t.source,
         "created_at": iso_taipei(t.created_at), "import_batch_id": t.import_batch_id,
+        "date_basis": t.date_basis, "estimated_date": t.estimated_date, "imported_on": t.imported_on,
     }
 
 

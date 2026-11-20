@@ -16,6 +16,7 @@ from forliosa.api import serialize as ser
 from forliosa.api.errors import not_found, unprocessable
 from forliosa.datapolicy import label, labels, source_clause, tagged
 from forliosa.marketdata.base import Candle, DividendEvent, InstrumentInfo, QuoteData, market_of_symbol
+from forliosa.marketdata.catalog import KNOWN_REDUCTIONS
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.indices import INDICES, is_index
 from forliosa.marketdata.service import MarketData, dividend_sort_key
@@ -155,6 +156,64 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
         "is_demo": h.is_demo,
         "sources": labels(tagged(h.source, "price")),
         "notes": notes,
+    }
+
+
+def traded_history_out(db: Session, md: MarketData, symbol: str, range_: str,
+                       until: date | None = None) -> dict[str, Any]:
+    """``GET /instruments/{symbol}/history?prices=as_traded`` (資產組成原型, 選買入日; ``docs/proposals/
+    asset-composition.md`` 附錄 B): the same ``History`` as :func:`history`, but every bar at the price as traded — the
+    history backfill's days before the archive multiplied back for known splits and capital reductions
+    (``services.buy_date.traded_history``), a US series not split-adjusted — so a broker's average cost can be compared
+    with it. A note names the last day from Yahoo Finance and the sources list it (only when a returned bar is one).
+    ``pick_from``: the share-count limit of a buy imported on ``until`` (default today; ``services.buy_date.
+    share_changes``) — the picker offers no earlier day and says so itself, so the notes leave out the changes on or
+    before it and where the prices begin when that is earlier still. An index answers as before."""
+    if range_ not in HISTORY_RANGES:
+        raise unprocessable(f"不支援的區間：{range_}（可用 {'、'.join(HISTORY_RANGES)}）")
+    if is_index(symbol):
+        return _index_history(md, symbol, range_)
+    from forliosa.datapolicy import HISTORY_SOURCE
+    from forliosa.services.buy_date import share_changes, traded_history
+    from forliosa.services.coverage import US_NOTE, covers, since_note, ymd
+
+    info = require_instrument(md, symbol)
+    today = today_taipei()
+    start = today - timedelta(days=30) if range_ == "5D" else range_start(range_, today, date(1990, 1, 1))
+    th = traded_history(db, md, [info.symbol], start, today)[info.symbol]
+    candles = th.candles[-5:] if range_ == "5D" else th.candles
+    # the Yahoo note and source follow the bars returned (5D slices a 30-day read: often all official by then)
+    ref_until = (max(c.t for c in candles if c.t <= th.reference_until)
+                 if th.reference_until is not None and candles and candles[0].t <= th.reference_until else None)
+    limit = share_changes(md, [info.symbol], min(until or today, today)).get(info.symbol)
+    notes: list[str] = []
+    if ref_until is not None:
+        notes.append(f"{ymd(ref_until)} 以前的股價來自 Yahoo Finance，不是官方資料")
+    first = th.candles[0].t if th.candles else None
+    for e in md.corporate_events(info.symbol):  # a broker's cost is in today's shares: the picker must know
+        if limit is not None and e.date <= limit.date:
+            continue  # days before the limit are not offered: the picker names the change itself
+        if e.kind == "split" and e.ratio and candles and candles[0].t < e.date <= candles[-1].t:
+            reduction = (info.symbol, e.date) in KNOWN_REDUCTIONS
+            how = reduction_how(e.ratio) if reduction else split_how(e.ratio)
+            notes.append(f"{ymd(e.date)} {'減資' if reduction else '股票分割'}（{how}），之前是當時的成交價，沒有換算")
+    if not covers(first, start) and not (limit is not None and first is not None and limit.date > first):
+        us_missing = info.market == "US" and md.policy == "commercial" and not md.us_prices_served()
+        notes.append(US_NOTE if us_missing else since_note(first))
+    sources = labels(tagged(th.official_source, "price"))
+    if ref_until is not None:
+        sources = labels([*tagged(th.official_source, "price"), HISTORY_SOURCE])
+    return {
+        "symbol": info.symbol,
+        "interval": "1d",
+        "candles": [
+            {"t": c.t, "o": ser.price(c.o), "h": ser.price(c.h), "l": ser.price(c.l), "c": ser.price(c.c), "v": c.v}
+            for c in candles
+        ],
+        "is_demo": th.is_demo,
+        "sources": sources,
+        "notes": notes,
+        "pick_from": limit.out() if limit is not None else None,
     }
 
 

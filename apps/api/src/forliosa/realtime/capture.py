@@ -218,7 +218,9 @@ class LedgerFanout(Resolver):
 
 
 # Transaction columns that change neither positions nor performance (what returns / holdings shares show) …
-NON_POSITION_COLUMNS = frozenset({"note", "source", "import_batch_id", "created_at", "updated_at"})
+NON_POSITION_COLUMNS = frozenset({"note", "source", "import_batch_id", "created_at", "updated_at",
+                                  # a buy date's basis (資產組成原型): the user's own 績效 only (its ``ledger`` event)
+                                  "date_basis", "estimated_date", "imported_on"})
 # … and the columns a group feed item shows (eligibility itself — side, source, note — is compared separately)
 FEED_COLUMNS = frozenset({"symbol", "type", "trade_date", "quantity", "price", "currency"})
 

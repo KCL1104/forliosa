@@ -1,6 +1,10 @@
 import type { Account, Currency, ImportFlag, LedgerHolding, PositionRaw, PositionRow, PositionsImport, Transaction } from "../types"
+import { shareChangeOn } from "./auto-dividends"
+import { BACKFILL_START, US_ARCHIVE_START, usCandles } from "./commercial"
 import { INSTRUMENTS, findInstrument, type MockInstrumentSpec } from "./instruments"
 import { replay } from "./ledger"
+import { dailyCandles } from "./market"
+import { estimateBuyDate } from "@/lib/buy-date"
 
 /**
  * 匯入庫存的 mock（和後端 `services/positions_import.py` 同一套代碼與句子，只做示範用得到的部分）：
@@ -188,6 +192,33 @@ export function parsePastedHoldings(text: string): ReadPosition[] {
   return out
 }
 
+/**
+ * 估計的買入日（資產組成原型，`lib/buy-date.ts`）：從今天往回，股價最近一次經過成本價的那一天。
+ * 台股用 Yahoo 回補的五年（當時的成交價），美股只有 2024/7/1 以後的收盤；都沒有經過時 `estimated_date: null`＋一句原因。
+ * 融券、找不到股票、沒讀到成本的列不估（沒有這個欄位）。
+ */
+function estimateFor(r: PositionRow, today: string): Pick<PositionRow, "estimated_date" | "flags"> | Record<string, never> {
+  const spec = r.symbol ? findInstrument(r.symbol) : undefined
+  if (!spec || r.price === null || r.flags.some((f) => f.code === "short_sale")) return {}
+  const us = spec.market === "US"
+  const candles = us ? usCandles(spec).filter((c) => c.t >= US_ARCHIVE_START) : dailyCandles(spec).filter((c) => c.t >= BACKFILL_START)
+  // 和後端一樣：最早只找到最近一次股票分割、減資、配股那天（券商的均價是照現在的股數算的）
+  const change = shareChangeOn(spec.symbol, today)
+  const est = estimateBuyDate(candles, r.price, today, change?.date)
+  if (est) return { estimated_date: est, flags: r.flags }
+  const cost = us ? `US$${n0(r.price)}` : n0(r.price)
+  const first = candles[0]?.t
+  const day = (t: string) => t.split("-").map(Number).join("/")
+  const reason = change ? { split: "股票分割", reduction: "減資", stock_dividend: "配股" }[change.reason] : ""
+  const message =
+    change && first && change.date >= first
+      ? `${day(change.date)} 以後的股價都沒有經過均價 ${cost}，沒辦法估買入日（那天${reason}，之前的股價和現在的均價比不起來）。`
+      : us
+        ? `美股的股價只有 2024/7/1 以後的，都沒有經過均價 ${cost}，沒辦法估買入日。`
+        : `五年內的股價都沒有經過均價 ${cost}，沒辦法估買入日。`
+  return { estimated_date: null, flags: [...r.flags, flag("no_crossing", message)] }
+}
+
 /** 讀出來的列 → 回應（合併重疊的列、同一檔兩列以上標出來） */
 export function readPositions(read: ReadPosition[], ctx: Ctx & { brokerName: string; today: string }, kind: "images" | "text"): PositionsImport {
   const built = read.map((x, i) => buildRow(ctx, x, i + 1))
@@ -208,7 +239,7 @@ export function readPositions(read: ReadPosition[], ctx: Ctx & { brokerName: str
     if (same.length < 2) continue
     for (const r of same) r.flags.push(flag("same_symbol_twice", `這一檔有 ${same.length} 列，都匯入會加在一起（例如整股和零股分開列）。`))
   }
-  const out: PositionRow[] = rows.map(({ key: _key, ...r }, i) => ({ ...r, row_id: `p${i + 1}` }))
+  const out: PositionRow[] = rows.map(({ key: _key, ...r }, i) => ({ ...r, ...estimateFor(r, ctx.today), row_id: `p${i + 1}` }))
   const documentKind = out.length ? "holdings" : "other"
   return {
     account_id: ctx.account.id,

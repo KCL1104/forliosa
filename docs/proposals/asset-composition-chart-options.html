@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>資產組成：疊色走勢圖的畫法比較（示意）</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #1f2a44; --ink-2: #5b6478; --rule: #d6dee8; --print: #93a6c6;
+    --grid: #e6ebf1; --bench: #8a93a6; --red: #c42b2b; --green: #12773e; --ochre: #a87a26;
+    --fill-base: rgb(138 147 166 / 0.24); --fill-gain: rgb(196 43 43 / 0.17);
+    --fill-loss: rgb(18 119 62 / 0.22); --fill-div: rgb(168 122 38 / 0.5);
+  }
+  :root.dark {
+    --paper: #12100e; --ink: #e6e5e2; --ink-2: #a6a39e; --rule: #46433f; --print: #65625c;
+    --grid: #1d1b19; --bench: #86837e; --red: #ff6b6b; --green: #4cc38a; --ochre: #d2a75a;
+    --fill-base: rgb(134 131 126 / 0.3); --fill-gain: rgb(255 107 107 / 0.22);
+    --fill-loss: rgb(76 195 138 / 0.24); --fill-div: rgb(210 167 90 / 0.55);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "Noto Sans TC Variable", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+  main { max-width: 1360px; margin: 0 auto; padding: 32px 24px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--print); }
+  section { padding: 28px 0 8px; }
+  .lead { color: var(--ink-2); margin: 8px 0 0; max-width: 62em; }
+  .grid { display: grid; gap: 28px 40px; margin-top: 20px; }
+  .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cell h3 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+  .cell .what { color: var(--ink-2); font-size: 13px; margin: 0 0 10px; min-height: 2.9em; }
+  .legend { display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
+  .legend b { color: var(--ink); font-weight: 500; }
+  .legend .up { color: var(--red); } .legend .dn { color: var(--green); }
+  .sw { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
+  .sw.line { height: 0; border-top: 2px solid var(--ink); vertical-align: 4px; width: 14px; }
+  .sw.tick { width: 2px; height: 9px; background: var(--ink-2); }
+  svg { display: block; width: 100%; height: auto; }
+  svg text { font-family: inherit; font-size: 11px; fill: var(--ink-2); }
+  .say { font-size: 14px; margin: 8px 0 0; }
+  .say .up { color: var(--red); } .say .dn { color: var(--green); }
+  .note { font-size: 12px; color: var(--ink-2); margin: 4px 0 0; }
+  .phone { width: 320px; }
+  @media (max-width: 900px) { .g2, .g3 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>資產組成：疊色走勢圖的畫法比較</h1>
+  <p class="lead">示意圖，數字是假的。三件事要選：虧損怎麼畫、股利放哪裡、縱軸要不要從 0 開始。墨色粗線一律是總資產。</p>
+
+  <section id="s-loss">
+    <h2>一、虧損怎麼畫</h2>
+    <p class="lead">賺錢時很單純：灰色的本金上面疊一塊紅色，疊到總資產。虧錢時總資產掉到本金下面，沒有東西可以「疊」，所以要選一種畫法。</p>
+    <div class="grid g3" id="loss"></div>
+  </section>
+
+  <section id="s-div">
+    <h2>二、股利放哪裡</h2>
+    <p class="lead">領到的現金股利已經不在股票裡，所以不算在總資產。疊上去的話，最上緣會比總資產高一點（等於總資產加領過的股利）。</p>
+    <div class="grid g2" id="div"></div>
+  </section>
+
+  <section id="s-axis">
+    <h2>三、縱軸要不要從 0 開始</h2>
+    <p class="lead">從 0 開始，每一塊的厚度才是真的比例；但看短區間時，總資產的起伏會被壓成一條平線。</p>
+    <div class="grid g2" id="axis"></div>
+  </section>
+
+  <section id="s-nofill">
+    <h2>五、本金不填色：只畫一條線，總資產在它上下波動</h2>
+    <p class="lead">灰色階梯線是本金。總資產在線上面的部分塗紅（賺），在線下面的部分塗綠（虧）。</p>
+    <div class="grid g3" id="nofill"></div>
+  </section>
+
+  <section id="s-phone">
+    <h2>四、手機寬度（320px）</h2>
+    <div class="grid g3" id="phone"></div>
+  </section>
+</main>
+
+<script>
+if (new URLSearchParams(location.search).has("dark")) document.documentElement.classList.add("dark")
+
+// ── 假資料 ─────────────────────────────────────────────
+function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296) }
+function gauss(r) { return Math.sqrt(-2 * Math.log(r() + 1e-9)) * Math.cos(2 * Math.PI * r()) }
+
+function gen(kind, n = 560, seed = 7) {
+  const r = rng(seed)
+  const buys = { 40: 320000, 150: 90000, 255: 280000, 300: 75000, 380: 110000, 430: 60000 }
+  const sells = { 205: 180000, 470: 55000 }
+  let p = 1700000, pnl = 0, cum = 0
+  const pts = []
+  const start = new Date(2024, 6, 1)
+  for (let i = 0; i < n; i++) {
+    if (buys[i]) p += buys[i]
+    if (sells[i]) p -= sells[i]
+    let mu = 0.00075
+    if (kind === "cross") mu = i < 170 ? 0.0011 : i < 400 ? -0.0019 : 0.0017
+    if (kind === "loss") mu = i < 60 ? 0.0004 : -0.00075
+    pnl += (p + pnl) * (mu + 0.0085 * gauss(r))
+    if (i > 20 && i % 62 === 30) cum += 14000 + Math.round(r() * 22000)
+    const d = new Date(start.getTime() + Math.round(i * 1.45) * 86400000)
+    pts.push({ d, p, v: p + pnl, div: cum })
+  }
+  return pts
+}
+
+// ── 畫圖 ──────────────────────────────────────────────
+const NS = "http://www.w3.org/2000/svg"
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag)
+  for (const k in attrs) e.setAttribute(k, attrs[k])
+  if (parent) parent.appendChild(e)
+  return e
+}
+const wan = (x) => `${Math.round(x / 10000).toLocaleString()}萬`
+const nt = (x) => `NT$${Math.round(Math.abs(x)).toLocaleString()}`
+
+function niceTicks(lo, hi, count) {
+  const raw = (hi - lo) / count
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)))
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw)
+  const out = []
+  for (let t = Math.ceil(lo / step) * step; t <= hi + 1e-6; t += step) out.push(t)
+  return out
+}
+
+/**
+ * opts.loss: "fill" 虧掉的那塊塗綠 | "blank" 虧掉的那塊留白
+ * opts.div:  "stack" 疊在總資產上面 | "ticks" 橫軸記號 | "none"
+ * opts.zero: 縱軸從 0 開始
+ */
+function chart(data, opts) {
+  const W = opts.w ?? 620, H = opts.h ?? 230
+  const m = { l: 44, r: 12, t: 10, b: 24 }
+  const iw = W - m.l - m.r, ih = H - m.t - m.b
+  const top = (q) => q.v + (opts.div === "stack" ? q.div : 0)
+  const hi = Math.max(...data.map((q) => Math.max(top(q), q.p)))
+  const loRaw = Math.min(...data.map((q) => Math.min(q.v, q.p)))
+  const vHi = Math.max(...data.map((q) => q.v)), vLo = Math.min(...data.map((q) => q.v))
+  // 縱軸：zero 從 0｜cut 放大（含本金）｜fit 貼著兩條線｜total 只跟總資產
+  const axis = opts.axis ?? (opts.zero ? "zero" : "cut")
+  const lo = axis === "zero" ? 0 : axis === "total" ? vLo - (vHi - vLo) * 0.25 : axis === "fit" ? loRaw - (hi - loRaw) * 0.08 : loRaw - (hi - loRaw) * 0.18
+  const axHi = axis === "total" ? vHi : hi
+  const max = axHi + (axHi - lo) * 0.06
+  const clipId = "c" + Math.random().toString(36).slice(2)
+  const x = (i) => m.l + (iw * i) / (data.length - 1)
+  const y = (val) => m.t + ih - (ih * (val - lo)) / (max - lo)
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" })
+  el("rect", { x: m.l, y: m.t, width: iw, height: ih }, el("clipPath", { id: clipId }, el("defs", {}, svg)))
+
+  // 格線與縱軸
+  for (const t of niceTicks(lo, max, opts.h && opts.h < 200 ? 3 : 4)) {
+    if (y(t) < m.t + 4 || y(t) > m.t + ih + 0.5) continue
+    el("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: "var(--grid)", "stroke-width": 1 }, svg)
+    el("text", { x: m.l - 6, y: y(t) + 4, "text-anchor": "end" }, svg).textContent = t === 0 ? "0" : wan(t)
+  }
+
+  // 區塊：每一段先水平（本金是階梯）、再在 x_i 上垂直
+  const band = (topOf, botOf, fill) => {
+    const up = [], dn = []
+    data.forEach((q, i) => {
+      const prev = data[Math.max(0, i - 1)]
+      if (i > 0) { up.push([x(i), y(topOf(q, prev))]); dn.push([x(i), y(botOf(q, prev))]) }
+      up.push([x(i), y(topOf(q, q))]); dn.push([x(i), y(botOf(q, q))])
+    })
+    const d = "M" + up.map((c) => c.join(",")).join("L") + "L" + dn.reverse().map((c) => c.join(",")).join("L") + "Z"
+    el("path", { d, fill, stroke: "none", "clip-path": `url(#${clipId})` }, svg)
+  }
+  // 本金：0 → 本金與總資產比較低的那個（還在的本金）
+  if (opts.base !== "none") band((q, s) => Math.min(q.v, s.p), () => lo, "var(--fill-base)")
+  // 賺的：本金 → 總資產
+  band((q, s) => Math.max(q.v, s.p), (q, s) => s.p, "var(--fill-gain)")
+  // 虧的：總資產 → 本金
+  if (opts.loss === "fill") band((q, s) => s.p, (q, s) => Math.min(q.v, s.p), "var(--fill-loss)")
+  // 股利：疊在總資產上面
+  if (opts.div === "stack") band((q) => q.v + q.div, (q) => q.v, "var(--fill-div)")
+
+  // 本金階梯線
+  let pd = `M${x(0)},${y(data[0].p)}`
+  for (let i = 1; i < data.length; i++) pd += `H${x(i)}V${y(data[i].p)}`
+  el("path", { d: pd, fill: "none", stroke: "var(--bench)", "stroke-width": 1.5, "clip-path": `url(#${clipId})` }, svg)
+  const lastP = data[data.length - 1].p
+  if (opts.base === "none" && y(lastP) > m.t + ih) {
+    el("text", { x: W - m.r, y: m.t + ih - 6, "text-anchor": "end" }, svg).textContent = `本金 ${wan(lastP)}，在圖的下方`
+  }
+  // 總資產
+  el("path", { d: "M" + data.map((q, i) => `${x(i)},${y(q.v)}`).join("L"), fill: "none", stroke: "var(--ink)", "stroke-width": 2, "stroke-linejoin": "round" }, svg)
+  const last = data.length - 1
+  el("circle", { cx: x(last), cy: y(data[last].v), r: 4, fill: "var(--ink)", stroke: "var(--paper)", "stroke-width": 2 }, svg)
+
+  // 橫軸
+  el("line", { x1: m.l, x2: W - m.r, y1: m.t + ih, y2: m.t + ih, stroke: "var(--bench)", "stroke-width": 1 }, svg)
+  if (opts.div === "ticks") {
+    data.forEach((q, i) => {
+      if (i > 0 && q.div !== data[i - 1].div)
+        el("line", { x1: x(i), x2: x(i), y1: m.t + ih - 7, y2: m.t + ih - 1, stroke: "var(--ink-2)", "stroke-width": 2 }, svg)
+    })
+  }
+  const labels = W < 400 ? 3 : 5
+  for (let k = 0; k < labels; k++) {
+    const i = Math.round(((k + 0.5) * last) / labels)
+    const d = data[i].d
+    const text = data.length < 60 ? `${d.getMonth() + 1}/${d.getDate()}` : `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}`
+    el("text", { x: x(i), y: H - 6, "text-anchor": "middle" }, svg).textContent = text
+  }
+  if (axis === "cut") el("text", { x: m.l - 6, y: m.t + ih + 4, "text-anchor": "end" }, svg).textContent = "≈"
+  return svg
+}
+
+function cell(parent, title, what, data, opts) {
+  const q = data[data.length - 1]
+  const pnl = q.v - q.p
+  const up = pnl >= 0
+  const box = document.createElement("div")
+  box.className = "cell" + (opts.phone ? " phone" : "")
+  const divLegend = opts.div === "stack" ? `<span><i class="sw" style="background:var(--fill-div)"></i>領到的股利 <b>${nt(q.div)}</b></span>`
+    : opts.div === "ticks" ? `<span><i class="sw tick"></i>股利</span>` : ""
+  const lossSw = opts.loss === "fill" ? `<i class="sw" style="background:var(--fill-loss)"></i>` : `<i class="sw" style="border:1.5px solid var(--bench);border-bottom:0"></i>`
+  box.innerHTML = `
+    <h3>${title}</h3>
+    <p class="what">${what}</p>
+    <div class="legend">
+      <span>${opts.base === "none" ? '<i class="sw line" style="border-top:1.5px solid var(--bench)"></i>' : '<i class="sw" style="background:var(--fill-base)"></i>'}本金 <b>${nt(q.p)}</b></span>
+      ${up ? `<span><i class="sw" style="background:var(--fill-gain)"></i>賺的 <b class="up">+${nt(pnl)}</b></span>`
+           : `<span>${lossSw}虧的 <b class="dn">−${nt(pnl)}</b></span>`}
+      ${divLegend}
+      <span><i class="sw line"></i>總資產</span>
+    </div>`
+  box.appendChild(chart(data, opts))
+  const say = document.createElement("p")
+  say.className = "say"
+  say.innerHTML = up
+    ? `總資產 <b>${nt(q.v)}</b>＝本金 <b>${nt(q.p)}</b>＋賺的 <b class="up">${nt(pnl)}</b>。` + (q.div && opts.div !== "none" ? `另外領了股利 <b>${nt(q.div)}</b>。` : "")
+    : `總資產 <b>${nt(q.v)}</b>＝本金 <b>${nt(q.p)}</b>－虧的 <b class="dn">${nt(pnl)}</b>。` + (q.div && opts.div !== "none" ? `另外領了股利 <b>${nt(q.div)}</b>。` : "")
+  box.appendChild(say)
+  if (opts.note) { const n = document.createElement("p"); n.className = "note"; n.textContent = opts.note; box.appendChild(n) }
+  parent.appendChild(box)
+}
+
+const gain = gen("gain"), cross = gen("cross", 560, 11), loss = gen("loss", 560, 5)
+const $ = (id) => document.getElementById(id)
+
+// 一、虧損
+cell($("loss"), "一路賺（兩種畫法都長這樣）", "灰色是本金，買進時往上跳一階、賣出時往下掉一階。紅色是賺的。", gain, { loss: "fill", div: "none", zero: true })
+cell($("loss"), "甲：虧掉的那塊塗綠", "總資產掉到本金線下面時，本金被吃掉的那一塊塗成綠色。賺轉虧的那一天，顏色從紅變綠。", cross, { loss: "fill", div: "none", zero: true })
+cell($("loss"), "乙：虧掉的那塊留白", "本金線還在上面，底下空掉的那一塊就是虧的。顏色比較少，但「空的」要自己想一下才懂。", cross, { loss: "blank", div: "none", zero: true })
+cell($("loss"), "一路賺，中間有賣出", "本金線往下掉的地方是賣出：錢離開了股票，總資產跟著少，但不是虧。", gain.slice(150, 330), { loss: "fill", div: "none", zero: true })
+cell($("loss"), "甲：一直虧", "", loss, { loss: "fill", div: "none", zero: true })
+cell($("loss"), "乙：一直虧", "", loss, { loss: "blank", div: "none", zero: true })
+
+// 二、股利
+cell($("div"), "疊在最上面（你提的做法）", "赭色那一條越來越厚，是累積領到的股利。最上緣＝總資產＋領過的股利，會比上面的大數字高。", gain, { loss: "fill", div: "stack", zero: true })
+cell($("div"), "不疊，在橫軸上做記號（現在這版）", "每一道短線是領到股利的那一天，金額滑過去才看得到。疊起來的最上緣就是總資產。", gain, { loss: "fill", div: "ticks", zero: true })
+cell($("div"), "疊在最上面，虧損時", "股利那一條會蓋在綠色上面：可以讀成「股利補回了一部分」，但三種顏色擠在一起。", loss, { loss: "fill", div: "stack", zero: true })
+cell($("div"), "橫軸記號，虧損時", "", loss, { loss: "fill", div: "ticks", zero: true })
+
+// 三、縱軸
+const month = gain.slice(-22), quarter = gain.slice(-64)
+cell($("axis"), "近 1 個月，從 0 開始", "每一塊的厚度是真的比例，但這個月的起伏幾乎看不出來。", month, { loss: "fill", div: "none", zero: true })
+cell($("axis"), "近 1 個月，放大", "看得到起伏，但灰色那一塊被切掉大半，厚度不能拿來比（左下角標 ≈）。", month, { loss: "fill", div: "none", zero: false })
+cell($("axis"), "近 3 個月，從 0 開始", "", quarter, { loss: "fill", div: "none", zero: true })
+cell($("axis"), "近 3 個月，放大", "", quarter, { loss: "fill", div: "none", zero: false })
+
+// 五、本金不填色
+const NF = { loss: "fill", div: "ticks", base: "none" }
+cell($("nofill"), "全部・賺｜縱軸從 0", "", gain, { ...NF, axis: "zero" })
+cell($("nofill"), "全部・賺｜縱軸貼著兩條線", "", gain, { ...NF, axis: "fit" })
+cell($("nofill"), "近 1 個月｜縱軸只跟總資產", "本金離太遠時不硬塞進來，寫一行說它在下面。", month, { ...NF, axis: "total" })
+cell($("nofill"), "全部・賺轉虧｜縱軸從 0", "", cross, { ...NF, axis: "zero" })
+cell($("nofill"), "全部・賺轉虧｜縱軸貼著兩條線", "", cross, { ...NF, axis: "fit" })
+cell($("nofill"), "近 1 個月｜縱軸貼著兩條線", "本金塞進來，這個月的起伏就被壓扁。", month, { ...NF, axis: "fit" })
+cell($("nofill"), "全部・一直虧｜縱軸從 0", "", loss, { ...NF, axis: "zero" })
+cell($("nofill"), "全部・一直虧｜縱軸貼著兩條線", "", loss, { ...NF, axis: "fit" })
+cell($("nofill"), "近 3 個月・賺轉虧｜縱軸只跟總資產", "本金線在畫面裡時照畫。", cross.slice(-64), { ...NF, axis: "total" })
+
+// 四、手機
+cell($("phone"), "賺", "", gain, { loss: "fill", div: "ticks", zero: true, w: 320, h: 180, phone: true })
+cell($("phone"), "賺轉虧（甲）", "", cross, { loss: "fill", div: "ticks", zero: true, w: 320, h: 180, phone: true })
+cell($("phone"), "股利疊上去", "", gain, { loss: "fill", div: "stack", zero: true, w: 320, h: 180, phone: true })
+</script>
+</body>
+</html>
