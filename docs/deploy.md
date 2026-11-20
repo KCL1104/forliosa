@@ -26,7 +26,7 @@ Forliosa 由兩部分組成：
 | 新聞元搜尋 | 服務 **`searxng-news`**（不是 `searxng`），新加坡，沒有公開網域；api 與 worker 的 `NEWS_SEARXNG_URL=http://searxng-news.railway.internal:8080` |
 | 資料庫 | 服務 `Postgres`（官方 image＋volume），新加坡。**沒有備份**：Railway 的備份與排程只給 Pro 方案（2026-11-13 API 回覆），見第 6 節 |
 | 行銷網站（2026-11-19） | Ploy 網站 `ae204fd9-54b4-4b18-a958-722cf336602f`（workspace Forliosa，Starter 方案），自訂網域 **`about.forliosa.trade`**（2026-11-20 接上；備用網址 `https://my-site-ae204fd9.ploy.build`）。不用 `www` 的原因：Ploy 一定把 `www` 和根網域綁成一組，要求根網域也指過去（A `207.207.209.209`），根網域是 app，不能給；後台也沒有出現「只留一個」的選項。一般子網域（`about`）是單獨一筆，只要兩筆 DNS。app 仍在 `forliosa.trade`，行銷網站不碰後端、OAuth 與 cookie |
-| DNS（Cloudflare） | 根網域 CNAME → `forliosa.pages.dev`（Proxied）；`api` CNAME → Railway 給的目標（DNS only）；`_railway-verify.api` TXT；`about` CNAME → `proxy.runploy.com`（DNS only）；`_acme-challenge.about` CNAME → `about.forliosa.trade.a93c3620a44f1490.dcv.cloudflare.com`（DNS only）；`www`、`_acme-challenge.www` 是 2026-11-19 試接 www 留下的，待改成轉址到 about |
+| DNS（Cloudflare） | 根網域 CNAME → `forliosa.pages.dev`（Proxied）；`api` CNAME → Railway 給的目標（DNS only）；`_railway-verify.api` TXT；`about` CNAME → `proxy.runploy.com`（DNS only）；`_acme-challenge.about` CNAME → `about.forliosa.trade.a93c3620a44f1490.dcv.cloudflare.com`（DNS only）；`www` AAAA `100::`（Proxied，只做轉址）＋ Redirect Rule：`www.forliosa.trade/*` 301 → `https://about.forliosa.trade/*`（保留網址參數） |
 | 信箱 | Cloudflare Email Routing：`support@forliosa.trade` 轉寄到產品負責人的信箱 |
 
 > **不要在 Ploy 後台用「Connect with Cloudflare」（Entri 一鍵設定）**。2026-11-19 23:09 在 Ploy 後台按了自動設定，它把根網域的
