@@ -402,7 +402,10 @@ export function createImportStore(deps: {
           quantity: r.quantity, price, amount: r.total_cost ?? Math.round(r.quantity * price * 100) / 100, fee: 0, tax: 0, health_insurance: 0,
           currency: spec.currency, is_day_trade: false, note: "", source: "import", created_at: now, import_batch_id: batchId,
           // 資產組成原型：買進日期的來由（估計的、自己改過的、找不到用整批日期的），帳本裡之後可以在走勢圖上改
-          ...(r.date_basis ? { date_basis: r.date_basis, estimated_date: r.estimated_date ?? null, imported_on: deps.today } : {}),
+          ...(r.date_basis
+            ? // 和後端 `date_basis_of` 一樣：跟著匯入那天的列不留估計（沒按「套用」的估計只是建議）
+              { date_basis: r.date_basis, estimated_date: r.date_basis === "import_day" ? null : (r.estimated_date ?? null), imported_on: deps.today }
+            : {}),
         }
       })
       // 以券商為準：這個帳戶裡這一檔的所有紀錄（含自動入帳的股利）和略過紀錄先刪掉，和寫入同一次
