@@ -35,6 +35,7 @@ export function CentreBars({
   unit,
   currency = "TWD",
   decimals,
+  scale,
   label,
   className,
 }: {
@@ -44,12 +45,14 @@ export function CentreBars({
   currency?: Currency
   /** 小數位（漲跌幅預設 2 位；金額照幣別：NT$ 0 位、US$ 2 位） */
   decimals?: number
+  /** 共用的比例：一份清單分成幾欄、每欄各畫一張時，傳整份清單最大的絕對值（見 `centreBars`）；沒給就用這幾列自己的 */
+  scale?: number
   /** 清單的名稱（給螢幕閱讀器；托盤的標題已經說了就不用） */
   label?: string
   className?: string
 }) {
   if (rows.length === 0) return null
-  const bars = centreBars(rows.map((r) => r.value))
+  const bars = centreBars(rows.map((r) => r.value), scale)
   const short = rows.some((r) => r.short)
   return (
     <div className={cn("@container", className)}>

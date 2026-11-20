@@ -1,67 +1,67 @@
-import { Fragment, useState } from "react"
+import { useRef, useState } from "react"
 import type { MarketOverview } from "@/api/types"
-import { Pct } from "@/components/finance"
-import { Section } from "@/components/section"
+import { CentreBars, type CentreBarRow } from "@/components/centre-bars"
+import { Tray, type TrayTint } from "@/components/tray"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { useWidth } from "./use-width"
 
-/** 窄畫面先只列漲最多與跌最多的各幾個 */
+/** 一欄的時候先只列漲最多與跌最多的各幾個 */
 const HEAD = 5
+/** 一欄至少這麼寬才多分一欄：七個字的名稱（電腦及週邊設備）、最短的橫條、「▼10.00%」，加上欄距 */
+const COLUMN_MIN = 300
+const COLUMN_GAP = 32
+const MAX_COLUMNS = 3
+
+/** 托盤的 meta：日期・上漲幾個・下跌幾個（持平的有才寫）。數字照清單算，不另外寫 */
+function sectorMeta(sectors: NonNullable<MarketOverview["sectors"]>): string {
+  const up = sectors.items.filter((s) => s.change_pct > 0).length
+  const down = sectors.items.filter((s) => s.change_pct < 0).length
+  const flat = sectors.items.length - up - down
+  return [formatDateShort(sectors.date, false), `上漲 ${up}`, `下跌 ${down}`, ...(flat > 0 ? [`持平 ${flat}`] : [])].join("・")
+}
 
 /**
- * 類股漲跌：證交所各類股指數當天的漲跌幅，由高到低。
- * 每列是名稱、一條從零軸往右（漲）或往左（跌）的橫條、漲跌幅。橫條 6px 高、65% 的漲跌色，最短 3px（2026-11-20：
- * 以前 8px 的 40% 色，±0.3% 以內只剩零軸那一點，看不出方向），
- * 方向靠位置與 ▲▼，不只靠顏色；數字是主角，橫條只幫忙看大小。寬的時候排成兩到三欄（一欄讀完接下一欄），
- * 窄的時候先列頭尾各 5 個，按「全部」展開。
+ * 類股：證交所各類股指數當天的漲跌幅，由高到低，畫成中線橫條（`CentreBars`：中線固定在中間、漲往右、跌往左）。
+ * 托盤的 meta 是日期與上漲、下跌的類股數（「11/12・上漲 16・下跌 16」，照清單算）。
+ * 托盤裡放得下幾欄就分幾欄（一欄至少 300px，最多三欄；一欄讀完接下一欄），每欄一張 `CentreBars`、共用同一個比例。
+ * 只放得下一欄時（手機）先列漲最多與跌最多的各 5 個，文字鈕「全部 N 個類股」展開。
  */
-export function SectorList({ sectors }: { sectors: NonNullable<MarketOverview["sectors"]> }) {
+export function SectorList({ sectors, tint, className }: { sectors: NonNullable<MarketOverview["sectors"]>; tint?: TrayTint; className?: string }) {
+  const [bodyRef, width] = useWidth<HTMLDivElement>()
+  const trayRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
-  const items = sectors.items
-  const max = Math.max(...items.map((s) => Math.abs(s.change_pct)), 0.0001)
-  const collapsible = items.length > HEAD * 2 + 1
+  const rows: CentreBarRow[] = sectors.items.map((s) => ({ id: s.index_name, label: s.name, value: s.change_pct }))
+  const scale = Math.max(0, ...rows.map((r) => Math.abs(r.value)))
+  const columns = Math.max(1, Math.min(MAX_COLUMNS, Math.floor((width + COLUMN_GAP) / (COLUMN_MIN + COLUMN_GAP)), rows.length))
+  const collapsible = columns === 1 && rows.length > HEAD * 2 + 1
+  const shown = collapsible && !open ? [...rows.slice(0, HEAD), ...rows.slice(-HEAD)] : rows
+  const per = Math.ceil(shown.length / columns)
+  const chunks = Array.from({ length: columns }, (_, c) => shown.slice(c * per, (c + 1) * per)).filter((c) => c.length > 0)
+  const toggle = () => {
+    // 收起來時把托盤捲回畫面：不會被留在清單原本的下面
+    if (open) trayRef.current?.scrollIntoView({ block: "nearest", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })
+    setOpen((v) => !v)
+  }
   return (
-    <Section title="類股" titleId="market-sectors" aside={<span className="num">{formatDateShort(sectors.date, false)}</span>} bodyClassName="pt-0">
-      <ul className="@2xl:columns-2 @2xl:gap-x-10 @5xl:columns-3">
-        {items.map((s, n) => {
-          const middle = collapsible && n >= HEAD && n < items.length - HEAD
-          const up = s.change_pct > 0
-          const flat = s.change_pct === 0
-          return (
-            <Fragment key={s.index_name}>
-              {/* 窄畫面收著的時候：頭 5 個和尾 5 個之間空一格，看得出中間跳過了 */}
-              {collapsible && !open && n === items.length - HEAD && (
-                <li aria-hidden className="flex h-8 items-center justify-center border-b border-rule text-sm text-ink-2 @2xl:hidden">
-                  ⋯
-                </li>
-              )}
-              <li className={cn("grid h-10 break-inside-avoid grid-cols-[8em_minmax(2.5rem,1fr)_4.25rem] items-center gap-x-3 border-b border-rule", middle && !open && "@max-2xl:hidden")}>
-                <span className="truncate text-base">{s.name}</span>
-                <span aria-hidden className="relative h-1.5">
-                  <span className="absolute -inset-y-1 left-1/2 w-px bg-ctl" />
-                  {!flat && (
-                    <span
-                      className={cn("absolute inset-y-0 rounded-[1px]", up ? "left-1/2 bg-rise/65" : "right-1/2 bg-fall/65")}
-                      style={{ width: `max(3px, ${(Math.abs(s.change_pct) / max) * 50}%)` }}
-                    />
-                  )}
-                </span>
-                <Pct value={s.change_pct} className="justify-end text-base" />
-              </li>
-            </Fragment>
-          )
-        })}
-      </ul>
-      {collapsible && (
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-          className="mt-1 inline-flex min-h-11 items-center text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink @2xl:hidden"
-        >
-          {open ? "只看漲跌最多的" : `全部 ${items.length} 個類股`}
-        </button>
-      )}
-    </Section>
+    <div ref={trayRef} className={cn("min-w-0 scroll-mt-(--sticky-top)", className)}>
+      <Tray title="類股" meta={sectorMeta(sectors)} tint={tint} className="h-full">
+        <div ref={bodyRef} className={cn("grid gap-x-8", columns === 2 && "grid-cols-2", columns === 3 && "grid-cols-3")}>
+          {chunks.map((c, n) => (
+            <CentreBars key={n} rows={c} unit="pct" scale={scale} />
+          ))}
+        </div>
+        {collapsible && (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={toggle}
+            className="mt-1 inline-flex min-h-11 items-center text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink"
+          >
+            {open ? "只看漲跌最多的" : `全部 ${rows.length} 個類股`}
+          </button>
+        )}
+      </Tray>
+    </div>
   )
 }

@@ -63,6 +63,16 @@ describe("centreBars：所有列共用一個比例，中線固定在正中間", 
       { side: "down", share: 1 },
     ])
   })
+  it("分欄時傳整份清單的 scale：這一欄照全部的比例；scale 比這幾列小時不用（不會超出半邊）", () => {
+    expect(centreBars([-0.01, -0.02], 0.04)).toEqual([
+      { side: "down", share: 0.25 },
+      { side: "down", share: 0.5 },
+    ])
+    expect(centreBars([8, 4], 2)).toEqual([
+      { side: "up", share: 1 },
+      { side: "up", share: 0.5 },
+    ])
+  })
 })
 
 const HOLDINGS: CentreBarRow[] = [

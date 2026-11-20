@@ -122,20 +122,27 @@ describe("市場頁的內容", () => {
     expect(document.querySelector(".ai-voice")).toBeNull()
   })
 
-  it("類股由高到低（32 類：沒有電子工業合計與 4 個舊的綜合類）；窄畫面按了才列出全部", async () => {
+  it("類股由高到低（32 類：沒有電子工業合計與 4 個舊的綜合類）；只放得下一欄時先列頭尾各 5 個，按了才列出全部", async () => {
     mount()
     renderApp()
     const section = (await screen.findByRole("heading", { name: "類股" }, T)).closest("section")!
-    const rows = within(section).getAllByRole("listitem").filter((li) => !li.hasAttribute("aria-hidden"))
-    expect(rows).toHaveLength(32)
-    expect(rows[0]).toHaveTextContent("半導體")
-    expect(rows[0]).toHaveTextContent("3.12%")
-    expect(rows.at(-1)).toHaveTextContent("玻璃陶瓷")
-    for (const name of ["電子工業", "機電", "塑膠化工", "水泥窯製", "化學生技醫療"]) expect(within(section).queryByText(name)).toBeNull()
+    // 托盤的 meta：日期與上漲、下跌的類股數（照清單算）
+    expect(within(section).getByText("11/12・上漲 16・下跌 16")).toBeInTheDocument()
+    // 量不到寬度（測試環境）＝一欄：漲最多與跌最多的各 5 個
+    const head = within(section).getAllByRole("listitem")
+    expect(head).toHaveLength(10)
+    expect(head[0]).toHaveTextContent("半導體")
+    expect(head[0]).toHaveTextContent("3.12%")
+    expect(head.at(-1)).toHaveTextContent("玻璃陶瓷")
     const toggle = within(section).getByRole("button", { name: "全部 32 個類股" })
     expect(toggle).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(toggle)
     expect(within(section).getByRole("button", { name: "只看漲跌最多的" })).toHaveAttribute("aria-expanded", "true")
+    const rows = within(section).getAllByRole("listitem")
+    expect(rows).toHaveLength(32)
+    expect(rows[0]).toHaveTextContent("半導體")
+    expect(rows.at(-1)).toHaveTextContent("玻璃陶瓷")
+    for (const name of ["電子工業", "機電", "塑膠化工", "水泥窯製", "化學生技醫療"]) expect(within(section).queryByText(name)).toBeNull()
   })
 
   it("排行三張表：每一列連到個股頁；成交量以張為單位", async () => {
@@ -359,6 +366,101 @@ describe("美股（產品負責人 2026-11-15）", () => {
     renderApp()
     expect(await screen.findByRole("heading", { name: "美股" }, T)).toBeInTheDocument()
     expect(screen.queryByText("還沒有資料")).toBeNull()
+  })
+})
+
+describe("托盤（產品負責人 2026-11-21：方向 C 的結構，頁面只有標籤和數字）", () => {
+  const sectors = (values: [string, number][]) => ({ date: "2026-11-12", items: values.map(([name, change_pct]) => ({ name, index_name: `${name}類指數`, close: 100, change_pct })) })
+
+  it("每一塊是一盤；底色照出現的順序輪流 1→2→3，相鄰的兩盤不同色", async () => {
+    mount()
+    renderApp()
+    await screen.findByRole("heading", { name: "重大訊息" }, T)
+    const trays = Array.from(document.querySelectorAll<HTMLElement>("section.tray"))
+    expect(trays.map((t) => t.querySelector("h2")!.textContent)).toEqual(["指數與匯率", "收盤重點", "類股", "排行", "美股", "重大訊息"])
+    expect(trays.map((t) => t.dataset.tint)).toEqual(["1", "2", "3", "1", "2", "3"])
+  })
+
+  it("沒有收盤重點：類股接在指數後面，底色照樣輪流（類股是 2）", async () => {
+    mount({}, (o) => ({ ...o, summary: null }))
+    renderApp()
+    await screen.findByRole("heading", { name: "重大訊息" }, T)
+    const trays = Array.from(document.querySelectorAll<HTMLElement>("section.tray"))
+    expect(trays.map((t) => [t.querySelector("h2")!.textContent, t.dataset.tint])).toEqual([
+      ["指數與匯率", "1"], ["類股", "2"], ["排行", "3"], ["美股", "1"], ["重大訊息", "2"],
+    ])
+  })
+
+  it("頁面沒有說明句：沒有頁首的一句話、沒有「以 0 為中線」「由漲到跌」這類說明", async () => {
+    mount()
+    renderApp()
+    await screen.findByRole("heading", { name: "重大訊息" }, T)
+    const main = document.getElementById("main")!
+    expect(main).not.toHaveTextContent(/以 0 為中線|由漲到跌|由高到低|個類股有|收漲 ▲/)
+  })
+
+  it("類股全部上漲、全部下跌、有持平：meta 照清單算（下跌 0 也寫），持平的有才寫", async () => {
+    mount({}, (o) => ({ ...o, sectors: sectors([["半導體", 0.02], ["航運", 0.01], ["食品", 0.001]]) }))
+    renderApp()
+    let section = (await screen.findByRole("heading", { name: "類股" }, T)).closest("section")!
+    expect(within(section).getByText("11/12・上漲 3・下跌 0")).toBeInTheDocument()
+    expect(section.querySelectorAll('[data-bar="down"]')).toHaveLength(0)
+    cleanup()
+    mount({}, (o) => ({ ...o, sectors: sectors([["半導體", -0.001], ["航運", -0.01], ["食品", 0]]) }))
+    renderApp()
+    section = (await screen.findByRole("heading", { name: "類股" }, T)).closest("section")!
+    expect(within(section).getByText("11/12・上漲 0・下跌 2・持平 1")).toBeInTheDocument()
+    expect(section.querySelectorAll('[data-bar="up"]')).toHaveLength(0)
+    // 11 個以下不收合
+    expect(within(section).queryByRole("button", { name: /全部/ })).toBeNull()
+  })
+
+  it("類股的名稱很長也不截斷", async () => {
+    const long = "其他電子與資訊服務與數位雲端合計"
+    mount({}, (o) => ({ ...o, sectors: sectors([[long, 0.01], ["航運", -0.01]]) }))
+    renderApp()
+    const section = (await screen.findByRole("heading", { name: "類股" }, T)).closest("section")!
+    const name = within(section).getByText(long)
+    expect(name.className).not.toMatch(/truncate/)
+  })
+
+  it("托盤夠寬時分欄（最多三欄），每欄一張中線橫條、共用同一個比例", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 1000, height: 0, top: 0, left: 0, right: 1000, bottom: 0, x: 0, y: 0, toJSON: () => ({}) })
+    mount()
+    renderApp()
+    const section = (await screen.findByRole("heading", { name: "類股" }, T)).closest("section")!
+    const lists = within(section).getAllByRole("list")
+    expect(lists.map((l) => within(l).getAllByRole("listitem").length)).toEqual([11, 11, 10])
+    expect(within(section).queryByRole("button", { name: /全部/ })).toBeNull()
+    // 第一欄的半導體（▲3.12%，最大）佔滿半邊；第三欄的玻璃陶瓷（▼1.87%）照同一個比例，不是佔滿
+    const bar = (l: HTMLElement, n: number) => within(l).getAllByRole("listitem")[n]!.querySelector<HTMLElement>("[data-bar]")!.style.getPropertyValue("--bar")
+    expect(bar(lists[0]!, 0)).toBe("50%")
+    expect(parseFloat(bar(lists[2]!, 9))).toBeCloseTo((0.0187 / 0.0312) * 50, 2)
+  })
+
+  it("排行的表名寫實際的列數：跌幅只有 6 檔是「跌幅前 6」；一檔都沒有時只寫種類和「沒有下跌的股票」", async () => {
+    mount()
+    renderApp()
+    let section = (await screen.findByRole("heading", { name: "排行" }, T)).closest("section")!
+    const lists = within(section).getAllByRole("list")
+    expect(lists.map((l) => l.getAttribute("aria-labelledby")).map((id) => document.getElementById(id!)!.textContent)).toEqual(["漲幅前 10", "跌幅前 6", "成交量前 10"])
+    expect(within(lists[1]!).getAllByRole("link")).toHaveLength(6)
+    // 範圍寫在托盤的 meta，不是遠處的註腳
+    expect(section.querySelector("header")).toHaveTextContent("11/12・16 檔普通股，不含 ETF")
+    cleanup()
+    mount({}, (o) => ({ ...o, movers: { ...o.movers!, losers: [] } }))
+    renderApp()
+    section = (await screen.findByRole("heading", { name: "排行" }, T)).closest("section")!
+    expect(document.getElementById("market-movers-losers")).toHaveTextContent(/^跌幅$/)
+    expect(within(section).getByText("沒有下跌的股票")).toBeInTheDocument()
+    expect(within(section).queryByText(/跌幅前/)).toBeNull()
+  })
+
+  it("美股的日期寫在托盤的 meta（紐約的日期）", async () => {
+    mount()
+    renderApp()
+    const section = (await screen.findByRole("heading", { name: "美股" }, T)).closest("section")!
+    expect(section.querySelector("header")).toHaveTextContent("11/11 收盤（美東）")
   })
 })
 
