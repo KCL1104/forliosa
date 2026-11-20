@@ -222,6 +222,12 @@
   /* 價格：紅與綠（依 data-convention 對應漲跌） */
   --red: #c42b2b;
   --green: #12773e;
+  /*
+   * 資產組成 v2（原型，docs/proposals/asset-composition.md；DESIGN.md「不填色」還要負責人同意）：
+   * 總資產走勢裡本金線上方（賺）與下方（虧）的淡色。平塗、不漸層；綠色比較深，同樣的透明度看起來比紅淡，所以多一點
+   */
+  --red-tint: rgb(196 43 43 / 0.15);
+  --green-tint: rgb(18 119 62 / 0.18);
 
   /* 圖表：我的＝墨、基準＝鉛筆灰、分類第二色＝藍筆、第三色＝螢光赭 */
   --chart-mine: var(--ink);
@@ -311,6 +317,8 @@
 
   --red: #ff6b6b;
   --green: #4cc38a;
+  --red-tint: rgb(255 107 107 / 0.2);
+  --green-tint: rgb(76 195 138 / 0.18);
 
   --chart-bench: #86837e;
   /* 圖表的資料色（MA20、比較圖的第一條線）保留藍色：只在線上，用來和赭色、灰色的線分開（產品負責人 2026-11-14） */
@@ -334,10 +342,14 @@
 [data-convention="tw"] {
   --rise: var(--red);
   --fall: var(--green);
+  --rise-tint: var(--red-tint);
+  --fall-tint: var(--green-tint);
 }
 [data-convention="us"] {
   --rise: var(--green);
   --fall: var(--red);
+  --rise-tint: var(--green-tint);
+  --fall-tint: var(--red-tint);
 }
 
 @theme inline {
@@ -365,6 +377,8 @@
   --color-ai-rule: var(--ai-rule);
   --color-rise: var(--rise);
   --color-fall: var(--fall);
+  --color-rise-tint: var(--rise-tint);
+  --color-fall-tint: var(--fall-tint);
   --color-chart-mine: var(--chart-mine);
   --color-chart-bench: var(--chart-bench);
   --color-chart-blue: var(--chart-blue);

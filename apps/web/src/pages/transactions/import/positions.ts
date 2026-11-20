@@ -41,10 +41,19 @@ export interface DraftPosition {
   edited: ReadonlySet<PositionField>
   /** 使用者自己勾過或取消過（之後的檢查不再替他改勾選） */
   includeSet: boolean
+  /**
+   * 估計的買入日（資產組成原型；伺服器的 `estimated_date`）：一開始這一列的日期就是它（標「估計」）。
+   * null：五年內股價都沒有經過均價，跟著整批的日期（原因在 `no_crossing` 旗標）；undefined：舊版伺服器，照舊整批一個日期
+   */
+  estimate?: string | null
 }
 
 /** 重新檢查（dry_run）會再算一次的：每次換成新的 */
-const CHECK_CODES: ReadonlySet<string> = new Set(["unknown_symbol", "bad_date", "validation_error", "invalid_row", "account_mismatch", "unsupported_type", "oversell", "duplicate", "possible_duplicate", "ledger_inconsistent"])
+const CHECK_CODES: ReadonlySet<string> = new Set([
+  "unknown_symbol", "bad_date", "validation_error", "invalid_row", "account_mismatch", "unsupported_type", "oversell", "duplicate", "possible_duplicate", "ledger_inconsistent",
+  // 資產組成原型：日期早於匯入以前最近一次分割、減資、配股；估計不是估得到的日子
+  "before_share_change", "bad_estimated_date",
+])
 /** 讀的時候才算得出來的旗標：改了哪幾格就算處理過，直接拿掉 */
 const RESOLVED_BY: Readonly<Record<string, readonly PositionField[]>> = {
   unreadable: ["symbol", "qty", "price", "total"],
@@ -58,11 +67,12 @@ const RESOLVED_BY: Readonly<Record<string, readonly PositionField[]>> = {
   same_symbol_twice: ["symbol"],
   in_other_account: ["symbol"],
   bad_date: ["date"],
+  before_share_change: ["date"],
 }
 /** 和後端的 EXCLUDED 相同：預設不勾（任何 error 也不勾） */
 const EXCLUDED_CODES: ReadonlySet<string> = new Set(["unknown_symbol", "ambiguous_symbol", "unreadable", "fractional_tw_qty", "currency_mismatch", "short_sale", "in_ledger"])
 /** 標籤（不是要處理的問題）：小一號淡墨 */
-export const POSITION_NOTE_CODES: ReadonlySet<string> = new Set(["margin", "in_other_account"])
+export const POSITION_NOTE_CODES: ReadonlySet<string> = new Set(["margin", "in_other_account", "no_crossing"])
 
 export const isShortSale = (row: PositionRow) => row.flags.some((f) => f.code === "short_sale")
 
@@ -80,14 +90,22 @@ export function toDraftPosition(row: PositionRow): DraftPosition {
     price: byTotal ? "" : numText(row.price),
     total: byTotal ? numText(row.total_cost) : "",
     basis: byTotal ? "total" : "price",
-    date: "",
+    // 有估計的買入日：這一列先用它（不跟著整批）
+    date: row.estimated_date ?? "",
     replace: false,
     inLedger: row.in_ledger,
     flags: row.flags.filter((f) => f.code !== "in_ledger"),
     edited: new Set(),
     includeSet: false,
+    ...(row.estimated_date !== undefined ? { estimate: row.estimated_date } : {}),
   }
 }
+
+/** 這一列的日期是沒改過的估計（畫面寫「估計 2024/8/14」） */
+export const isEstimatedDate = (d: Pick<DraftPosition, "estimate" | "date" | "edited">) => !!d.estimate && d.date === d.estimate && !d.edited.has("date")
+
+/** 有沒有任何一列有估計的買入日（伺服器有給 `estimated_date`）：日期下面那一句換成估計的說法 */
+export const hasEstimates = (rows: readonly Pick<DraftPosition, "estimate">[]) => rows.some((d) => d.estimate !== undefined)
 
 export const currencyOf = (d: Pick<DraftPosition, "symbol">): Currency => (d.symbol?.market === "US" ? "USD" : "TWD")
 const isTw = (d: Pick<DraftPosition, "symbol">) => !!d.symbol && d.symbol.market !== "US"
@@ -201,14 +219,38 @@ export function checkable(d: DraftPosition): boolean {
   return !!d.symbol && q !== null && q > 0 && c !== null && c > 0
 }
 
-/** 送出去的一列：給的是總成本就送總成本（帳本的總成本和券商一樣），日期和整批不同才送 */
-export function toCommitRow(d: DraftPosition, batchDate: string): PositionsCommitRow {
+/**
+ * 送出去的一列：給的是總成本就送總成本（帳本的總成本和券商一樣），日期和整批不同才送。
+ * `importDay`：匯入那天（伺服器給的預設日期，今天）。估不到買入日的列跟著整批的日期：整批的日期沒改過才是 `import_day`，
+ * 使用者把整批改成別天時，那是他自己選的日期（`picked`）。
+ */
+export function toCommitRow(d: DraftPosition, batchDate: string, importDay: string = batchDate): PositionsCommitRow {
   const row: PositionsCommitRow = { symbol: d.symbol!.symbol, quantity: parseNumber(d.qty)!, currency: currencyOf(d) }
   if (d.basis === "total") row.total_cost = parseNumber(d.total)!
   else row.price = parseNumber(d.price)!
   if (d.date && d.date !== batchDate) row.trade_date = d.date
   if (d.replace) row.replace = true
+  // 資產組成原型：日期怎麼來的（沒改過的估計、自己改過、找不到所以用整批的日期），帳本之後可以在走勢圖上改
+  if (d.estimate !== undefined) {
+    const followsImportDay = d.estimate === null && !d.edited.has("date") && batchDate === importDay
+    row.date_basis = isEstimatedDate(d) ? "estimated" : followsImportDay ? "import_day" : "picked"
+    row.estimated_date = d.estimate
+  }
   return row
+}
+
+/**
+ * 整批日期下面那一句（伺服器有估計時）：照實說有幾檔估得到——全部都估到、只有一部分、一檔都沒有。
+ * 估計是從今天往回找「最近一次」經過均價的那一天（往回第一個碰到的就是最近的）。舊版伺服器（沒有估計）是 null，用原本那一句。
+ */
+export function estimateHint(rows: readonly Pick<DraftPosition, "estimate">[]): string | null {
+  if (!hasEstimates(rows)) return null
+  const estimated = rows.filter((d) => typeof d.estimate === "string").length
+  const others = rows.length - estimated
+  const rule = "從今天往回，股價最近一次經過均價的那一天"
+  if (others === 0) return `每一檔的買入日是估計的：${rule}。`
+  if (estimated === 0) return "估不到買入日，每一檔都用這個日期。"
+  return `${estimated} 檔的買入日是估計的：${rule}。其他 ${others} 檔用這個日期。`
 }
 
 /**

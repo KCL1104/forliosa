@@ -194,6 +194,15 @@ export function useQuote(symbol: string, enabled = true) {
 export function useHistory(symbol: string, range: HistoryRange) {
   return useQuery({ queryKey: qk.history(symbol, range), queryFn: () => api.getHistory(symbol, range), placeholderData: keepPreviousData, staleTime: 5 * 60_000 })
 }
+/** 五年的日線、當時的成交價（選買入日；資產組成原型）。`until`：匯入那天（`pick_from` 照這天算） */
+export function useTradedHistory(symbol: string, until?: string | null, enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: ["history", symbol, "5Y", "as-traded", until ?? null],
+    queryFn: () => api.getHistory(symbol, "5Y", { asTraded: true, ...(until ? { until } : {}) }),
+    staleTime: 30 * 60_000,
+  })
+}
 export function useValuation(symbol: string, enabled = true) {
   return useQuery({ enabled, queryKey: qk.valuation(symbol), queryFn: () => api.getValuation(symbol, "5Y"), staleTime: 30 * 60_000 })
 }

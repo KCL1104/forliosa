@@ -24,6 +24,7 @@ import { formatMoney, formatPrice, formatQuantity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useStartReduce } from "@/pages/transactions/use-start-reduce"
 import { usePrefs } from "@/stores/prefs"
+import { BuyDatePicker } from "./BuyDatePicker"
 import { buyAverage, DILUTING, recordDate, useSymbolTransactions } from "./symbol-records"
 
 /** 展開後最多列幾筆（新的在前）；更多的到「紀錄」看 */
@@ -85,6 +86,8 @@ export function SymbolRecords({
   const remove = useDeleteTransaction()
   // 刪除的確認框放在清單這一層（不放在列裡）：那一列刪掉時確認框不會跟著卸載、關到一半
   const [deleting, setDeleting] = useState<{ t: Transaction; date: string; label: string } | null>(null)
+  // 選買入日（資產組成原型）：匯入庫存時估的買進，在走勢圖上自己選日期；對話框同樣放在清單這一層
+  const [picking, setPicking] = useState<Transaction | null>(null)
   if (q.isError) {
     return (
       <p className={cn("py-3 text-base text-ink", className)}>
@@ -142,6 +145,7 @@ export function SymbolRecords({
                 account={multiAccount ? accountName(e.account_id) : undefined}
                 readOnly={readOnly}
                 onDelete={(t, date, label) => setDeleting({ t, date, label })}
+                onPickDate={setPicking}
               />
             ))}
           </ul>
@@ -179,6 +183,7 @@ export function SymbolRecords({
           )}
         </div>
       )}
+      {picking && <BuyDatePicker lot={picking} name={name} market={market} type={type} open onOpenChange={(o) => !o && setPicking(null)} />}
       <AlertDialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -217,6 +222,7 @@ function RecordRow({
   account,
   readOnly,
   onDelete,
+  onPickDate,
 }: {
   entry: Transaction
   market: Market
@@ -225,6 +231,7 @@ function RecordRow({
   account?: string
   readOnly: boolean
   onDelete: (t: Transaction, date: string, label: string) => void
+  onPickDate: (t: Transaction) => void
 }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
@@ -243,6 +250,10 @@ function RecordRow({
   const avgText = avg !== null ? `${market === "US" ? "US$" : ""}${formatPrice(avg, market, type)}` : null
   const date = recordDate(e.trade_date)
   const hide = (s: string) => (privacy ? <Masked /> : s)
+  // 資產組成原型：匯入庫存時估的買進日期（「估計」）、自己在走勢圖上選的（「自己選的日期」）；找不到、用匯入那天的不標
+  const canPick = e.type === "buy" && !!e.date_basis && !readOnly && !!e.symbol
+  // 資產組成先只給自己看（決定 11）：查看別人的資產時不標
+  const tag = !readOnly && e.type === "buy" && (e.date_basis === "estimated" || e.date_basis === "picked") ? <DateBasisTag basis={e.date_basis} date={date} onClick={canPick ? () => onPickDate(e) : undefined} /> : null
   return (
     <li className={cn("ruled-row min-h-12 items-baseline py-2 text-base", GRID)}>
       {/* 窄：第一行日期・類型｜金額，第二行股數 × 價格、均價｜買進後漲跌 */}
@@ -250,14 +261,19 @@ function RecordRow({
       <span className="num flex min-w-0 flex-wrap items-baseline gap-x-2 @[43rem]:hidden">
         <span className="whitespace-nowrap">{date}</span>
         <span className={cn("whitespace-nowrap", strong ? "font-medium" : "text-ink-2")}>{label}</span>
+        {tag && <span className="self-center">{tag}</span>}
         {account && <span className="truncate text-sm text-ink-2">{account}</span>}
       </span>
       <span className="num text-right font-medium @[43rem]:hidden">{hide(amount)}</span>
       {/* 寬：每一格一欄 */}
       <span className="num @max-[43rem]:hidden">{date}</span>
       <span className={cn("@max-[43rem]:hidden", strong ? "font-medium" : "text-ink-2")}>{label}</span>
-      <span className="truncate text-sm text-ink-2 @max-[43rem]:hidden" title={account}>
-        {account}
+      {/* 標記和帳戶放在有彈性的那一欄（日期那一欄只有 7.5rem） */}
+      <span className="flex min-w-0 items-center gap-2 @max-[43rem]:hidden">
+        {tag}
+        <span className="truncate text-sm text-ink-2" title={account}>
+          {account}
+        </span>
       </span>
       <span className="num text-right @max-[43rem]:hidden">{hide(qty)}</span>
       {/* 價格一格兩行：成交價；買進多一行 13px 淡墨「均價 815.32」（和持倉表收盤價下面那一行同一個樣子）。太長時往左（股數那一格的第二行是空的）伸，不壓到金額 */}
@@ -268,7 +284,7 @@ function RecordRow({
       <span className="num text-right font-medium @max-[43rem]:hidden">{hide(amount)}</span>
       <span className="text-right @max-[43rem]:hidden">{change !== null && <Pct value={change} />}</span>
       <span className="row-span-2 flex justify-end self-center @[43rem]:row-span-1">
-        {!readOnly && <RecordMenu t={e} date={date} label={label} onDelete={() => onDelete(e, date, label)} />}
+        {!readOnly && <RecordMenu t={e} date={date} label={label} onDelete={() => onDelete(e, date, label)} onPickDate={canPick ? () => onPickDate(e) : undefined} />}
       </span>
       {/* 「股數 × 價格」與「均價 …」各自不斷開：放不下時均價整段換到下一行，不用「・」（換行後會掛在行尾） */}
       <span className="num col-start-1 row-start-2 flex min-w-0 flex-wrap gap-x-3 text-sm text-ink-2 @[43rem]:hidden">
@@ -290,18 +306,41 @@ function RecordRow({
 export const ROW_MENU_BUTTON =
   "press grid size-9 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-sel hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink pointer-coarse:size-11"
 
-/** 一筆的動作：修改（完整表單，日期也能改）、刪除（確認框在清單那一層） */
-function RecordMenu({ t, date, label, onDelete }: { t: Transaction; date: string; label: string; onDelete: () => void }) {
+/**
+ * 一筆的動作：修改（完整表單，日期也能改）、在走勢圖上選買入日（只有匯入庫存時估的買進；資產組成原型）、刪除（確認框在清單那一層）
+ */
+function RecordMenu({ t, date, label, onDelete, onPickDate }: { t: Transaction; date: string; label: string; onDelete: () => void; onPickDate?: () => void }) {
   const openTradeForm = useUi((s) => s.openTradeForm)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={<button type="button" aria-label={`${date} ${label}的動作`} className={ROW_MENU_BUTTON} />}>
         <EllipsisIcon aria-hidden className="size-5" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-36">
+      <DropdownMenuContent align="end" className={onPickDate ? "w-48" : "w-36"}>
         <DropdownMenuItem onClick={() => openTradeForm({ edit: t })}>修改</DropdownMenuItem>
+        {onPickDate && <DropdownMenuItem onClick={onPickDate}>在走勢圖上選買入日</DropdownMenuItem>}
         <DropdownMenuItem onClick={onDelete}>刪除</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/**
+ * 買進日期的標記（資產組成原型）：細框小字（和「示範資料」「已在帳本」同一種 `status-tag`）——
+ * 「估計」：匯入庫存時照股價估的；「自己選的日期」：自己在走勢圖上選的。
+ * 能改的時候（自己的帳本）標記本身就是按鈕，打開選日期的走勢圖；觸控時可按範圍用看不見的 `::before` 放大到 44px。
+ */
+export function DateBasisTag({ basis, date, onClick }: { basis: "estimated" | "picked"; date: string; onClick?: () => void }) {
+  const text = basis === "estimated" ? "估計" : "自己選的日期"
+  if (!onClick) return <span className="status-tag">{text}</span>
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${date}是${basis === "estimated" ? "估計的買入日" : "自己選的買入日"}：在走勢圖上選日期`}
+      className="status-tag press relative cursor-pointer hover:border-ink pointer-coarse:before:absolute pointer-coarse:before:-inset-x-1.5 pointer-coarse:before:-inset-y-3 pointer-coarse:before:content-['']"
+    >
+      {text}
+    </button>
   )
 }

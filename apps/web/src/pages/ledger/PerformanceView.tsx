@@ -26,6 +26,8 @@ import { useReadOnly, useWho } from "@/api/view-as"
 import { isReferenceNote } from "@/lib/data-notes"
 import { isUnpricedNote, trendClipNote, trendReferenceLine } from "./trend-reason"
 import { useTrendChipsShown, useTrendRange } from "./use-trend-range"
+import { touchesSpan, trendEstimatedText } from "./composition-text"
+import { FundRankLine, MonthlyTable } from "./MonthlyTable"
 
 /**
  * 算不出來、而且換區間或基準也沒有用：有持股還沒有收盤價（剛加入、還沒抓到收盤價的美股；後端的說明是
@@ -81,6 +83,12 @@ export function PerformanceView() {
   // 期間：看回應自己的區間（換區間時先留著上一個區間的數字，期間也跟著上一個）。回應真的從這個帳戶的第一個收盤開始才寫「只有」：
   // 切換帳戶時兩個查詢回來的先後不同，不會把新帳戶的「全部」和舊帳戶的區間湊在一起寫錯（`responseExceedsData`）
   const exceeds = !!p && responseExceedsData(p, ownSeries)
+  // 資產組成（原型）只給自己看（決定 11）：查看別人的資產時，每月拆解、基金排名、估計的說明都不放
+  const composition = readOnly ? undefined : p?.composition
+  // 這個區間用到估計的買入日：指標下面一行說是哪幾天（和首頁走勢那一行同一個規則：含基準收盤，`trendEstimatedText`）。
+  // 看這個帳戶「全部」的序列（區間的回應沒有基準收盤那一點）
+  // 分好幾次匯入時每一次一段，一行列出來（「2024/7/29 – 2025/11/28、2026/9/1 – 2026/11/18」）
+  const estimateText = composition?.estimated?.length && ownSeries ? trendEstimatedText(ownSeries, range, composition.estimated) : null
 
   return (
     <div className="flex flex-col gap-5">
@@ -129,7 +137,17 @@ export function PerformanceView() {
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity", perf.isPlaceholderData && "opacity-60")}>
           <DataNotes notes={p.notes?.filter((n) => n !== trendNote && !(heroSaysReference && isReferenceNote(n)))} />
-          <Metrics p={p} />
+          <div>
+            {/* 資產組成只給自己看（決定 11）：查看別人的資產時傳 undefined，「含估計的買入日，不年化」也不寫 */}
+            <Metrics p={p} composition={composition} />
+            {/* 指標都含估計那一段時說一次（13px 淡墨）：報酬、和基準的差距、最大回撤、波動度都是照那段期間的估計持股算的 */}
+            {estimateText && (
+              <p className="mt-2 text-sm text-ink-2" data-metrics-estimate>
+                這些數字含 {estimateText}，{estimateText.includes("、") ? "那幾段" : "那段"}期間用估計的買入日計算。
+              </p>
+            )}
+          </div>
+          {!readOnly && <FundRankLine r={p.fund_rank} />}
           <Panel title="與基準比較" titleId="cmp-title">
             <Legend
               className="mb-2"
@@ -143,6 +161,7 @@ export function PerformanceView() {
             )}
             <ReturnChart series={p.series} showBenchmark benchmarkName={p.benchmark?.name ?? "基準"} mineLabel={`${me}的報酬`} height={300} />
           </Panel>
+          {!readOnly && <MonthlyTable p={p} />}
           <div className="grid gap-10 xl:grid-cols-2">
             <DividendsByMonth p={p} />
             <RealizedByYear p={p} />
@@ -198,11 +217,13 @@ function pricedAccount<A extends { id: string }>(accounts: A[], holdings?: Holdi
   return accounts.find((a) => held.has(a.id) && !unpriced.has(a.id))
 }
 
-function Metrics({ p }: { p: Performance }) {
+function Metrics({ p, composition }: { p: Performance; composition: Performance["composition"] }) {
   const you = useWho("你")
   // 基準比區間晚開始（存檔開始以前沒有資料的指數，從它的第一個收盤起算）：期間不同，不比多少
   const benchLate = p.series[0]?.benchmark_index === null && p.series.some((x) => x.benchmark_index !== null)
   const excess = !benchLate && p.twr !== null && p.benchmark?.twr != null ? p.twr - p.benchmark.twr : null
+  // 資產組成（原型）：估計的那一段不算年化報酬（後端這時 xirr 是 null），說出原因。`composition` 是外面已經依「只給自己看」擋過的
+  const estimated = p.xirr === null && touchesSpan(composition?.estimated, p.start_date, p.end_date)
   const items: { label: string; help: string; value: React.ReactNode; sub?: React.ReactNode }[] = [
     {
       label: "時間加權報酬（TWR）",
@@ -221,7 +242,14 @@ function Metrics({ p }: { p: Performance }) {
       label: "年化 XIRR",
       help: `算進每一筆投入與取回的時間，是${you}實際的年化報酬。`,
       value: p.xirr === null ? <span className="text-ink-2">—</span> : <Pct value={p.xirr} />,
-      sub: p.xirr === null ? (p.range === "1D" || p.range === "5D" ? "5 天以內不年化" : "期間太短或現金流不足，無法計算") : "金額加權",
+      sub:
+        p.xirr === null
+          ? p.range === "1D" || p.range === "5D"
+            ? "5 天以內不年化"
+            : estimated
+              ? "含估計的買入日，不年化"
+              : "期間太短或現金流不足，無法計算"
+          : "金額加權",
     },
     {
       label: "最大回撤",

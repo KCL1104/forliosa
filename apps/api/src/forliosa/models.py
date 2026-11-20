@@ -107,6 +107,13 @@ class Transaction(Base):
     # The statement import (``POST /transactions/batch``) that wrote this row, so the whole import can be undone at once
     # (``DELETE /transactions/batches/{id}``); NULL for every other row.
     import_batch_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # 資產組成原型 (docs/proposals/asset-composition.md, migration 0029): how a 匯入庫存 buy's date came about —
+    # ``estimated`` (the price last crossed the broker's average cost that day), ``picked`` (the user chose the day),
+    # ``import_day`` (no crossing in five years: the import day); NULL for every other row. ``estimated_date``: the
+    # estimate (kept after a pick; NULL for import_day); ``imported_on``: the import's day (a pick may not be later).
+    date_basis: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    estimated_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    imported_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
 

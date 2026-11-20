@@ -15,7 +15,7 @@ import {
 } from "../types"
 import { viewAsId } from "../view-as"
 import { createAnalystStore } from "./analyst"
-import { skipKey, syncAutoDividends } from "./auto-dividends"
+import { beforeShareChangeMessage, shareChangeOn, skipKey, syncAutoDividends } from "./auto-dividends"
 import { buildAttributions, DATABENTO_ATTRIBUTION, sourceOf } from "./attributions"
 import { mockMarketNow, mockMarketStatus, mockToday, type MockMarket } from "./market-status"
 import { buildFacts as buildBriefingFacts, createMockBriefings } from "./briefings"
@@ -36,6 +36,7 @@ import {
   US_SESSION,
   US_VALUATION_NOTE,
   usCandles,
+  YAHOO_HISTORY_LABEL,
   ymd,
   type MockPolicy,
 } from "./commercial"
@@ -55,6 +56,7 @@ import { DISCLAIMER } from "@/lib/disclaimer"
 import { createMarketReportsStore, type MockReportsScenario } from "./market-reports"
 import { todayInTaipei } from "@/lib/format"
 import { closedRounds, positionHistory } from "./rounds"
+import { monthlyBreakdown } from "@/lib/asset-composition"
 import {
   buildChips,
   buildEvents,
@@ -74,20 +76,24 @@ import {
  * - default：一般示範資料
  * - empty：首次使用（沒有任何交易與持股）
  * - stress：極端資料（超長股名、上千億金額、大幅虧損），給 harden 測試用
+ * - cashout：資產組成原型——多一筆買了又整批賣掉的台積電，賣股票收到的錢比買股票花的多（本金是負的）
+ * - loss：資產組成原型——多一筆在高點買的長榮，從第一天起一直虧（總資產在本金下面）
+ * - cross：資產組成原型——多一筆中美晶，先賺、後來轉虧（總資產從本金上面掉到下面）
+ * - lastday：資產組成原型——換成一個小帳本，最後一天在高點買進、整體從賺變虧（見 ledger.ts 的 `lastDayTrades`）
  * 以網址 `?mock=empty` 切換，會記在 sessionStorage。
  */
-export type MockScenario = "default" | "empty" | "stress"
+export type MockScenario = "default" | "empty" | "stress" | "cashout" | "loss" | "cross" | "lastday"
 
 export function readMockScenario(): MockScenario {
   if (typeof window === "undefined") return "default"
   try {
     const fromUrl = new URLSearchParams(window.location.search).get("mock")
-    if (fromUrl === "empty" || fromUrl === "stress" || fromUrl === "default") {
+    if (fromUrl === "empty" || fromUrl === "stress" || fromUrl === "default" || fromUrl === "cashout" || fromUrl === "loss" || fromUrl === "cross" || fromUrl === "lastday") {
       window.sessionStorage.setItem("forliosa:mock", fromUrl)
       return fromUrl
     }
     const saved = window.sessionStorage.getItem("forliosa:mock")
-    if (saved === "empty" || saved === "stress") return saved
+    if (saved === "empty" || saved === "stress" || saved === "cashout" || saved === "loss" || saved === "cross" || saved === "lastday") return saved
   } catch {
     // sessionStorage 不可用時使用預設情境
   }
@@ -145,6 +151,38 @@ export function readMockHistory(): number | undefined {
 }
 
 /**
+ * 只給截圖用的走勢形狀（資產組成原型，總資產走勢 v2）：網址 `?curve=arch` 把「全部」的走勢換成最後 9 個收盤的倒 U——
+ * 從最後一天的總資產往上 52 萬再回來、本金都是最後一天的本金（示範帳本：410 萬 → 462 萬 → 410 萬，本金 288 萬）。
+ * 兩個角落都碰到總資產線，「本金…在圖的下方」那一行放不進圖裡、改寫在圖例。上面的大數字不跟著變（最後一天一樣）。
+ * `?curve=off` 切回。記在 sessionStorage。
+ */
+export function readMockCurve(): "arch" | undefined {
+  if (typeof window === "undefined") return undefined
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("curve")
+    if (fromUrl === "arch") window.sessionStorage.setItem("forliosa:mock-curve", "arch")
+    else if (fromUrl) window.sessionStorage.removeItem("forliosa:mock-curve")
+    return window.sessionStorage.getItem("forliosa:mock-curve") === "arch" ? "arch" : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** `?curve=arch`：最後 9 個收盤換成倒 U（見 `readMockCurve`）；沒有買賣、沒有股利、沒有估計的那一段 */
+export function archCurve(p: Performance): Performance {
+  const days = p.series.map((x) => x.t)
+  if (days.length < 9) return p
+  const last = p.series.at(-1)!
+  const base = limitHistory(p, days[days.length - 9]!)
+  const mv = (i: number) => Math.round(last.market_value + 520_000 * Math.sin((Math.PI * i) / 8))
+  return {
+    ...base,
+    series: base.series.map((x, i) => ({ ...x, market_value: mv(i), net_invested: last.net_invested, twr_index: Number((mv(i) / mv(0)).toFixed(6)) })),
+    ...(base.composition ? { composition: { ...base.composition, dividends: [], estimated: [] } } : {}),
+  }
+}
+
+/**
  * 只留 `first` 那天以後的收盤（`?hist=N`）：和後端存檔晚於持股期間時一樣，第一點是基準收盤（twr_index 1），
  * 說明換成「績效從 … 收盤開始算，之前沒有資料」；剩不到兩點時算不出來（series 空的＋「資料從 … 開始」）。
  */
@@ -159,6 +197,7 @@ export function limitHistory(p: Performance, first: string): Performance {
       ...p, start_date: null, end_date: null, twr: null, xirr: null, max_drawdown: null, volatility: null, series: [],
       benchmark: p.benchmark ? { ...p.benchmark, twr: null } : null, dividends_by_month: [], realized_by_year: [],
       notes: [`${accumulatingNote(first)}；持股期間有幾天沒有收盤價，績效算不出來`],
+      ...(p.composition ? { composition: { ...p.composition, dividends: [], months: [], months_estimated: 0 }, fund_rank: null } : {}),
     }
   }
   const base = series[0]!
@@ -188,7 +227,24 @@ export function limitHistory(p: Performance, first: string): Performance {
     realized_by_year: p.realized_by_year.filter((r) => r.year >= Number(first.slice(0, 4))),
     notes: [`績效從 ${ymd(base.t)} 收盤開始算，之前沒有資料`, ...others],
     reference_until: reference,
+    // 資產組成（原型）：第一點是基準收盤，股利與每個月從它的下一天算起
+    ...(p.composition
+      ? (() => {
+          const { months, skipped } = monthlyBreakdown(rebased.slice(1), { base: rebased[0]!, estimated: p.composition.estimated })
+          return {
+            composition: { ...p.composition, dividends: p.composition.dividends.filter((d) => d.t > base.t), months, months_estimated: skipped },
+            fund_rank: p.fund_rank && p.fund_rank.start > base.t ? p.fund_rank : null,
+          }
+        })()
+      : {}),
   }
+}
+
+/** 舊版後端沒有的欄位（`?composition=off`）：買進日期的來由 */
+function withoutDateBasis(t: Transaction): Transaction {
+  if (t.date_basis === undefined && t.estimated_date === undefined && t.imported_on === undefined) return t
+  const { date_basis: _b, estimated_date: _e, imported_on: _i, ...rest } = t
+  return rest
 }
 
 /**
@@ -262,6 +318,8 @@ export interface MockOptions {
   terms?: { current: string; accepted?: string | null; effectiveDate?: string | null; summary?: string | null }
   /** 帳本的歷史只留最後幾個收盤（`?hist=N`，看存檔剛開始時的走勢與績效）；預設全部 */
   history?: number
+  /** 只給截圖用的走勢形狀（`?curve=arch`，見 `readMockCurve`）；預設照帳本算 */
+  curve?: "arch"
   /** 市場報告的情境（`?mreport=`，見 `mock/market-reports.ts`）；預設 public（對全站公開） */
   reports?: MockReportsScenario
   /**
@@ -273,6 +331,25 @@ export interface MockOptions {
   importStatements?: MockImportStatements
   /** 配置的上限（`?limits=30,50`：單一個股 30%、單一產業 50%）；預設都沒設，和後端一樣 */
   allocationLimits?: AllocationLimits
+  /**
+   * 資產組成的欄位（原型；績效的 `composition`、`fund_rank`，匯入庫存的 `estimated_date`，交易的 `date_basis`）：
+   * 預設 true；false 模擬還沒有這些欄位的後端（`?composition=off`），畫面要和以前一樣
+   */
+  composition?: boolean
+}
+
+/** mock 的資產組成欄位：網址 `?composition=off` 拿掉（模擬舊版後端），`?composition=on` 切回。記在 sessionStorage */
+export function readMockComposition(): boolean | undefined {
+  if (typeof window === "undefined") return undefined
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("composition")
+    // `v1`／`v2`：走勢畫哪一版（`pages/ledger/trend-chart.ts`），也表示有資產組成的欄位
+    if (fromUrl === "on" || fromUrl === "v1" || fromUrl === "v2") window.sessionStorage.removeItem("forliosa:mock-composition")
+    else if (fromUrl === "off") window.sessionStorage.setItem("forliosa:mock-composition", "off")
+    return window.sessionStorage.getItem("forliosa:mock-composition") === "off" ? false : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -331,6 +408,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const scenario = options.scenario ?? "default"
   const commercial = (options.policy ?? "commercial") === "commercial"
   const backfill = options.historyBackfill ?? true
+  // 資產組成的欄位（原型）：false 模擬舊版後端（`?composition=off`）
+  const composition = options.composition ?? true
   const demo = !commercial
   const [minLatency, maxLatency] = options.latency ?? [120, 320]
 
@@ -347,7 +426,11 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   let allocationLimits: AllocationLimits = { holding: null, industry: null, ...options.allocationLimits }
   let signedIn = options.signedIn ?? true
   let accounts: Account[] = scenario === "empty" ? [] : ACCOUNTS.map((a) => ({ ...a }))
-  let txns: Transaction[] = scenario === "empty" ? [] : seedTransactions()
+  // 資產組成原型：`?composition=off` 時不套用匯入庫存的估計買入日（和現在的示範帳本一樣）；
+  // `?mock=cashout` 本金是負的、`?mock=loss` 一直虧、`?mock=cross` 賺轉虧（在示範帳本上多幾筆；分享、討論串照預設）
+  const extra = scenario === "cashout" || scenario === "loss" || scenario === "cross" || scenario === "lastday" ? scenario : undefined
+  const storeScenario = scenario === "cashout" || scenario === "loss" || scenario === "cross" || scenario === "lastday" ? "default" : scenario
+  let txns: Transaction[] = scenario === "empty" ? [] : seedTransactions({ importedLots: composition, extra })
   if (scenario === "stress") {
     txns.push({
       id: "txn_stress", account_id: ACCOUNTS[0]!.id, symbol: STRESS_INSTRUMENT.symbol, type: "buy", trade_date: "2025-06-02",
@@ -432,7 +515,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       origin: () => (typeof window === "undefined" ? "http://localhost:5173" : window.location.origin),
       marketReportsPublic: () => reports.publicMode(),
     },
-    scenario,
+    storeScenario,
   )
 
   /** 示範的「今天」：平常是最後一個收盤日；`?market=open|pending` 是它的下一個交易日（本週事項從這一天起算） */
@@ -452,7 +535,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       groupRoster: (id) => sharing.groupRoster(id),
       now: discussionNow,
     },
-    scenario,
+    storeScenario,
     options.discussion,
   )
   // ── 管理後台：和討論串的站方管理同一個判斷（沒登入 401、不是站方管理員 404） ──
@@ -616,7 +699,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     const inception = mine.map((t) => t.trade_date).sort()[0]
     const firstClose = priced.map(startOf).sort()[0]
     const axisStart = inception && firstClose ? (inception > firstClose ? inception : firstClose) : null
-    const empty = buildPerformance([], range, accountId, benchmark, { isDemo: false })
+    const empty = buildPerformance([], range, accountId, benchmark, { isDemo: false, composition })
     if (unpriced.length > 0) {
       // 持股期間有幾天台股沒有收盤價（台股的存檔起點晚於日期軸的第一天）時，後端多一句「資料從 … 開始；…」
       const twGap = !!axisStart && axisStart < twStart && priced.some((sym) => startOf(sym) === twStart && firstTrade(sym) < twStart)
@@ -628,10 +711,18 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     }
     // 每一檔都有收盤價的第一天：持有時還沒有收盤價的商品，從它的收盤開始那天起；日期軸本身的第一天也是
     const minStart = [axisStart ?? twStart, ...priced.filter((sym) => firstTrade(sym) < startOf(sym)).map(startOf)].sort().at(-1)!
-    const full = buildPerformance(txns, range, accountId, benchmark, { isDemo: false })
+    const full = buildPerformance(txns, range, accountId, benchmark, { isDemo: false, composition })
     if (!full.start_date || full.start_date >= minStart) return withReference({ ...full, notes: [] }, mine, benchmark)
-    const clipped = buildPerformance(txns, range, accountId, benchmark, { isDemo: false, minStart })
-    const bench = benchmark === "^TAIEXTR" ? { benchmark: clipped.benchmark ? { ...clipped.benchmark, twr: null } : null, series: clipped.series.map((p) => ({ ...p, benchmark_index: null })) } : {}
+    const clipped = buildPerformance(txns, range, accountId, benchmark, { isDemo: false, minStart, composition })
+    const bench =
+      benchmark === "^TAIEXTR"
+        ? {
+            benchmark: clipped.benchmark ? { ...clipped.benchmark, twr: null } : null,
+            series: clipped.series.map((p) => ({ ...p, benchmark_index: null })),
+            // 指數存檔以前沒有資料：每個月和基準的差距也算不出來
+            ...(clipped.composition ? { composition: { ...clipped.composition, months: clipped.composition.months.map((m) => ({ ...m, benchmark_twr: null })) } } : {}),
+          }
+        : {}
     return withReference({ ...clipped, ...bench, notes: [`績效從 ${ymd(clipped.start_date!)} 收盤開始算，之前沒有資料`, ...(benchmark === "^TAIEXTR" ? [INDEX_NOTE] : [])] }, mine, benchmark)
   }
   const sortTxns = () =>
@@ -816,7 +907,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         return { symbol: s.symbol, date, close, currency: s.market === "US" ? "USD" : "TWD", reference, note: reference ? REFERENCE_NOTE : null }
       }),
     getQuotes: (symbols) => wait(() => symbols.map((x) => spec(x)).filter((x) => !noQuote(x)).map(quoteOf)),
-    getHistory: (symbol, range) =>
+    getHistory: (symbol, range, opts) =>
       wait((): History => {
         if (commercial && symbol.startsWith("^")) return { symbol, interval: "1d", candles: [], is_demo: false, sources: [], notes: [INDEX_NOTE] }
         // 指數（^TAIEXTR）：示範資料以 0050 的走勢代替
@@ -824,10 +915,24 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         // 還沒有收盤價的美股：「還沒有資料」（和後端 coverage.since_note 相同）
         if (noQuote(s)) return { symbol: s.symbol, interval: "1d", candles: [], is_demo: false, sources: [], notes: [NO_DATA_NOTE] }
         const from = rangeFrom(range)
+        // 選買入日（資產組成原型，`prices=as_traded`）：台股存檔以前用 Yahoo 回補、換算回當時的成交價（示範的日線本來就是），
+        // 美股從 2024/7/1 起（Databento）；回補關掉時和一般的走勢一樣從存檔開始
+        // `pick_from`（和後端一樣，`until`＝匯入那天）：那天以前最近一次股票分割、減資、配股——選日期的畫面不給選更早的日子
+        const pickFrom = opts?.asTraded && composition ? { pick_from: shareChangeOn(s.symbol, opts.until && opts.until < MOCK_TODAY ? opts.until : MOCK_TODAY) } : {}
+        if (opts?.asTraded && composition && commercial && backfill && s.market !== "US") {
+          const rows = candlesOf(s).filter((c) => c.t >= (from > BACKFILL_START ? from : BACKFILL_START))
+          const refUntil = rows.filter((c) => c.t < ARCHIVE_START).at(-1)?.t
+          return {
+            symbol: s.symbol, interval: "1d", candles: rows, is_demo: false,
+            sources: [priceSource(s), YAHOO_HISTORY_LABEL], notes: refUntil ? [`${ymd(refUntil)} 以前的股價來自 Yahoo Finance，不是官方資料`] : [],
+            ...pickFrom,
+          }
+        }
         const { rows, notes } = clip(candlesOf(s).filter((c) => c.t >= from), from, s.market === "US" ? US_ARCHIVE_START : ARCHIVE_START)
         return {
           symbol: symbol.startsWith("^") ? symbol : s.symbol, interval: "1d", candles: rows, is_demo: demo,
           sources: commercial ? [priceSource(s)] : [], notes,
+          ...pickFrom,
         }
       }),
     getValuation: (symbol, range = "5Y") =>
@@ -941,7 +1046,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
           .reverse()
         const offset = query.cursor ? Number(query.cursor) : 0
         const limit = query.limit ?? 50
-        const items = filtered.slice(offset, offset + limit)
+        // 舊版後端（`?composition=off`）沒有買進日期的來由
+        const items = filtered.slice(offset, offset + limit).map((t) => (composition ? t : withoutDateBasis(t)))
         return { items, next_cursor: offset + limit < filtered.length ? String(offset + limit) : null }
       }),
     getTransactionCounts: () =>
@@ -993,6 +1099,19 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         if (found.source === "auto") skips.add(skipKey(found))
         // 換成新的物件（不原地修改）：React Query 才看得出資料變了
         const next: Transaction = { ...found, ...(patch as Partial<Transaction>), source: found.source === "auto" ? "auto_edited" : found.source }
+        // 資產組成原型（和後端 `_basis_after` 一樣）：匯入庫存的買進——
+        // 改成別的種類或別的股票：變成一般的紀錄（三個欄位清掉；估計與匯入那天是原本那一檔的）；
+        // 還是那一筆買進：日期不能晚於匯入那天、不能早於匯入以前最近一次分割、減資、配股；改了日期（走勢圖上選的、或完整表單裡改的）就是「自己選的日期」
+        if (found.date_basis) {
+          if (next.type !== "buy" || next.symbol !== found.symbol) Object.assign(next, { date_basis: null, estimated_date: null, imported_on: null })
+          else {
+            const day = patch.trade_date ?? found.trade_date
+            if (patch.trade_date && found.imported_on && day > found.imported_on) throw new ApiError(422, "after_import_day", `買進日期不能晚於匯入那天（${found.imported_on.replaceAll("-", "/")}）`)
+            const change = day !== found.trade_date && found.symbol ? shareChangeOn(found.symbol, found.imported_on ?? MOCK_TODAY) : null
+            if (change && day < change.date) throw new ApiError(422, "before_share_change", beforeShareChangeMessage(change))
+            next.date_basis = day !== found.trade_date || patch.date_basis === "picked" ? "picked" : found.date_basis
+          }
+        }
         // 與後端相同：數量、價格、日期等輸入改了，沒有指定的手續費、稅、二代健保依新內容重算；買賣與現金股利改了數量或價格時金額也重算
         const inputsChanged = (["quantity", "price", "amount", "type", "trade_date", "symbol", "account_id", "is_day_trade"] as const).some((k) => k in patch)
         if (inputsChanged) {
@@ -1034,7 +1153,10 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     parsePositions: (body, opts) =>
       aiRead(() => {
         requireImport("這個帳號還不能匯入庫存。")
-        return imports.parsePositions(body)
+        const doc = imports.parsePositions(body)
+        // 舊版後端（`?composition=off`）：沒有估計的買入日，整批一個日期
+        if (composition) return doc
+        return { ...doc, rows: doc.rows.map(({ estimated_date: _e, ...r }) => ({ ...r, flags: r.flags.filter((f) => f.code !== "no_crossing") })) }
       }, opts?.signal),
     checkPositions: (body) => wait(() => imports.checkPositions(body)),
     commitPositions: (body) => wait(() => imports.commitPositions(body)),
@@ -1128,8 +1250,10 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         const l = ledger(account_id)
         // 查看模式的基準用授權者的（示範：0050）
         const bench = benchmark ?? (l.viewing ? "0050.TW" : user.preferences.benchmark)
-        const perf = (r: typeof range) => (commercial ? commercialPerformance(l.txns, r, account_id, bench) : buildPerformance(l.txns, r, account_id, bench))
+        const perf = (r: typeof range) => (commercial ? commercialPerformance(l.txns, r, account_id, bench) : buildPerformance(l.txns, r, account_id, bench, { composition }))
         const p = perf(range)
+        // ?curve=arch：首頁走勢（「全部」）換成倒 U，只給截圖用
+        if (options.curve === "arch" && range === "ALL") return archCurve(p)
         if (!options.history) return p
         // ?hist=N：從「全部」的最後 N 個收盤開始
         const days = (range === "ALL" ? p : perf("ALL")).series.map((x) => x.t)

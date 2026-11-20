@@ -78,7 +78,8 @@ async function allTxns(): Promise<Transaction[]> {
 /** 帳本工具列的「匯入」（桌面和手機各一顆，jsdom 沒有 CSS 兩顆都在：按第一顆）→ 選擇 */
 async function openFromToolbar(user: ReturnType<typeof userEvent.setup>) {
   renderApp()
-  await screen.findByText("總資產", {}, T)
+  // 帳本出來了（主數字的標籤與走勢的圖例都寫「總資產」）
+  await screen.findAllByText("總資產", {}, T)
   const buttons = await screen.findAllByRole("button", { name: "匯入" }, T)
   await user.click(buttons[0]!)
   return screen.findByRole("dialog", { name: "匯入" }, T)
@@ -108,7 +109,8 @@ describe("匯入庫存", () => {
 
     // 確認表：整批的買進日期（照實說均價到那天收盤的漲跌算進那一天的報酬）、重疊的列只算一次
     expect(within(dialog).getByLabelText("買進日期")).toBeInTheDocument()
-    expect(within(dialog).getByText("損益照券商均價算；均價到這天收盤的漲跌會算進這天的報酬，這天之前沒有走勢。每一檔也可以改日期。")).toBeInTheDocument()
+    // 資產組成原型：伺服器給了每一檔估計的買入日，說明換成估計的說法（沒有估計的舊版伺服器照舊，見 asset-composition.test.tsx）
+    expect(within(dialog).getByText("4 檔的買入日是估計的：從今天往回，股價最近一次經過均價的那一天。其他 2 檔用這個日期。")).toBeInTheDocument()
     expect(within(dialog).getByText(/永豐金證券・讀到 7 檔・重疊的 1 列只算一次/)).toBeInTheDocument()
     // 已在帳本：不勾、標「已在帳本」，下面一行帳本的股數與均價＋以券商為準；左邊的勾選照實說勾了會刪掉舊紀錄
     const tsmc = within(dialog).getByRole("checkbox", { name: /^匯入並以券商為準：台積電，刪掉 \d+ 筆紀錄/ })
@@ -137,8 +139,9 @@ describe("匯入庫存", () => {
 
     // 送出去的：每一檔一筆，只給總成本的送總成本，台積電 replace
     const body = commit.mock.calls[0]![0]
-    expect(body.rows.find((r) => r.symbol === "2412.TW")).toEqual({ symbol: "2412.TW", quantity: 1500, total_cost: 180000, currency: "TWD" })
-    expect(body.rows.find((r) => r.symbol === "2330.TW")).toMatchObject({ quantity: 1500, price: 612.4, replace: true })
+    // 資產組成原型：中華電五年內股價都沒有經過均價，跟著整批的日期（`import_day`）；台積電用估計的買入日
+    expect(body.rows.find((r) => r.symbol === "2412.TW")).toEqual({ symbol: "2412.TW", quantity: 1500, total_cost: 180000, currency: "TWD", date_basis: "import_day", estimated_date: null })
+    expect(body.rows.find((r) => r.symbol === "2330.TW")).toMatchObject({ quantity: 1500, price: 612.4, replace: true, trade_date: "2023-05-08", date_basis: "estimated" })
     const mine = (await allTxns()).filter((t) => t.source === "import" && t.symbol === "2330.TW")
     expect(mine.map((t) => [t.quantity, t.price, t.fee])).toEqual([[1500, 612.4, 0]])
 
@@ -156,7 +159,7 @@ describe("匯入庫存", () => {
     const parse = vi.spyOn(api, "parsePositions")
     const user = userEvent.setup()
     renderApp()
-    await screen.findByText("總資產", {}, T)
+    await screen.findAllByText("總資產", {}, T)
     act(() => useUi.getState().openImport("positions"))
     const dialog = await screen.findByRole("dialog", { name: "匯入庫存" }, T)
     await user.click(within(dialog).getByRole("tab", { name: "貼上文字" }))
@@ -289,7 +292,7 @@ describe("匯入的入口", () => {
     desktop = true
     const user = userEvent.setup()
     renderApp()
-    await screen.findByText("總資產", {}, T)
+    await screen.findAllByText("總資產", {}, T)
     act(() => useUi.getState().openTradeForm())
     await user.click(await screen.findByRole("button", { name: "匯入庫存或對帳單" }, T))
     expect(await screen.findByRole("dialog", { name: "匯入" }, T)).toBeInTheDocument()
@@ -306,8 +309,59 @@ describe("匯入的入口", () => {
     const me = await api.getMe()
     vi.spyOn(api, "getMe").mockResolvedValue({ ...me, plan: { ...me.plan!, statement_import: false } } as User)
     renderApp()
-    await screen.findByText("總資產", {}, T)
+    await screen.findAllByText("總資產", {}, T)
     await screen.findAllByRole("button", { name: "記一筆" }, T)
     expect(screen.queryByRole("button", { name: "匯入" })).toBeNull()
   })
+})
+
+describe("匯入庫存：估計的買入日（資產組成原型）", () => {
+  async function readShot(user: ReturnType<typeof userEvent.setup>) {
+    renderApp()
+    await screen.findAllByText("總資產", {}, T)
+    act(() => useUi.getState().openImport("positions"))
+    const dialog = await screen.findByRole("dialog", { name: "匯入庫存" }, T)
+    await user.upload(fileInput(dialog), pngFile())
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "開始讀" })).toBeEnabled(), T)
+    await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
+    await within(dialog).findByRole("button", { name: /^簽名：匯入 \d+ 檔$/ }, { timeout: 20_000 })
+    return dialog
+  }
+
+  it("每一列先用估計的買入日（「估計 2023/5/8」）；找不到的跟著整批的日期並說原因（改了日期之後的寫法見 positions.test.ts）", async () => {
+    desktop = true
+    const user = userEvent.setup()
+    const dialog = await readShot(user)
+    expect(within(dialog).getByText("估計 2023/5/8")).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: /^第 1 檔的買進日期（估計）：/ })).toBeInTheDocument()
+    // 中華電：五年內股價都沒有經過均價，跟著整批的日期，下面一行 13px 淡墨說為什麼
+    expect(within(dialog).getByText("五年內的股價都沒有經過均價 120，沒辦法估買入日。").closest("li")).toHaveClass("text-sm", "text-ink-2")
+    expect(within(dialog).getByRole("button", { name: /^第 4 檔的買進日期：/ })).toBeInTheDocument()
+  }, 45_000)
+
+  it("舊版伺服器（沒有 estimated_date）：整批一個日期、說明照舊", async () => {
+    desktop = true
+    const real = api.parsePositions.bind(api)
+    vi.spyOn(api, "parsePositions").mockImplementation(async (body, opts) => {
+      const doc = await real(body, opts)
+      return { ...doc, rows: doc.rows.map(({ estimated_date: _e, ...r }) => ({ ...r, flags: r.flags.filter((f) => f.code !== "no_crossing") })) }
+    })
+    const commit = vi.spyOn(api, "commitPositions")
+    const user = userEvent.setup()
+    const dialog = await readShot(user)
+    expect(within(dialog).getByText("損益照券商均價算；均價到這天收盤的漲跌會算進這天的報酬，這天之前沒有走勢。每一檔也可以改日期。")).toBeInTheDocument()
+    expect(within(dialog).queryByText(/^估計 /)).toBeNull()
+    expect(within(dialog).queryByText(/沒辦法估買入日/)).toBeNull()
+    // 送出去的列不帶日期的來由（舊版伺服器不認得 date_basis、estimated_date）。
+    // 同一個檔案前面的測試可能已經匯入過這幾檔（都「已在帳本」、預設不勾）：勾一個「以券商為準」，一定有東西可以送
+    await user.click(within(dialog).getAllByRole("checkbox", { name: /^以券商為準/ })[0]!)
+    await user.click(within(dialog).getByRole("button", { name: /^簽名：匯入 \d+ 檔$/ }))
+    await waitFor(() => expect(commit).toHaveBeenCalled(), T)
+    const rows = commit.mock.calls[0]![0].rows
+    expect(rows.length).toBeGreaterThan(0)
+    for (const r of rows) {
+      expect(r).not.toHaveProperty("date_basis")
+      expect(r).not.toHaveProperty("estimated_date")
+    }
+  }, 45_000)
 })

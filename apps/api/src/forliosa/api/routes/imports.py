@@ -153,7 +153,7 @@ async def read_statement(request: Request, user: User = Depends(current_user), d
         watcher.cancel()
 
 
-@router.post("/positions", response_model=PositionsImportOut,
+@router.post("/positions", response_model=PositionsImportOut, response_model_exclude_unset=True,
              summary="匯入庫存：AI 讀庫存截圖或貼上的文字、伺服器逐列檢查（什麼都不存）",
              openapi_extra={"requestBody": {"required": True, "content": {
                  "application/json": {"schema": inline_schema(PositionsImportIn)}}}})

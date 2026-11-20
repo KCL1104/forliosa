@@ -133,6 +133,11 @@ class PositionRowOut(BaseModel):
     flags: list[ImportFlagOut]
     include: bool = Field(description="預設要不要匯入")
     in_ledger: LedgerHoldingOut | None = Field(description="這個帳戶現在已經有這一檔時，帳本裡的股數與均價")
+    # 資產組成原型 (docs/proposals/asset-composition.md 附錄 B): left out of rows that were not estimated (short sale,
+    # no stock, no cost; the route drops unset fields)
+    estimated_date: date | None = Field(
+        default=None,
+        description="估計的買入日：從今天往回，股價最近一次經過均價的那一天；null＝找不到（no_crossing 旗標）")
 
 
 class PositionsImportOut(BaseModel):
@@ -161,6 +166,11 @@ class PositionsCommitRowIn(BaseModel):
     trade_date: date | None = Field(default=None, description="這一列自己的買進日期；不給就用整批的 trade_date")
     currency: Literal["TWD", "USD"] | None = None
     replace: bool = Field(default=False, description="以券商為準：先刪掉這個帳戶裡這一檔的所有紀錄")
+    # 資產組成原型 (附錄 B): how the review table's date for this row came about, and the server's estimate
+    date_basis: Literal["estimated", "picked", "import_day"] | None = Field(
+        default=None,
+        description="estimated 沒改過的估計｜picked 自己改過｜import_day 找不到、用匯入那天；不給和以前一樣")
+    estimated_date: date | None = Field(default=None, description="伺服器估的買入日（POST /imports/positions）")
 
     @model_validator(mode="after")
     def _one_cost(self) -> PositionsCommitRowIn:

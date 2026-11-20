@@ -214,6 +214,14 @@ class CandleOut(BaseModel):
     v: int
 
 
+class PickFrom(BaseModel):
+    """資產組成原型 (``prices=as_traded``): the earliest day an imported buy may have — the latest share-count change on
+    or before its import day (the day itself allowed)."""
+
+    date: date
+    reason: Literal["split", "reduction", "stock_dividend"]
+
+
 class History(BaseModel):
     symbol: str
     interval: str
@@ -221,6 +229,9 @@ class History(BaseModel):
     is_demo: bool
     sources: list[str] = []
     notes: list[str] = []
+    # 資產組成原型: ``prices=as_traded`` only (null otherwise, and when the stock had no split, reduction or stock
+    # dividend on or before ``until``)
+    pick_from: PickFrom | None = None
 
 
 class DayClose(BaseModel):
@@ -339,6 +350,8 @@ def _check_trade_date(v: date) -> date:
 
 
 EARLIEST_TRADE_DATE = date(1990, 1, 1)
+# How a 匯入庫存 buy's date came about (資產組成原型; ``models.Transaction.date_basis``)
+BuyDateBasis = Literal["estimated", "picked", "import_day"]
 # Fields a PATCH may not set to null (a null would reach the ledger and crash it with a 500; 2026-11-14 review)
 _PATCH_NOT_NULL = ("account_id", "type", "trade_date", "currency", "is_day_trade", "note", "source")
 
@@ -358,6 +371,10 @@ class TransactionPatch(StrictModel):
     is_day_trade: bool | None = None
     note: str | None = Field(default=None, max_length=2000)
     source: Literal["manual", "import", "ai_draft"] | None = None
+    # 資產組成原型: ``picked`` — the user chose this buy's date on the chart. The server decides the basis: only a
+    # 匯入庫存 buy (``date_basis`` not null) becomes ``picked``, also when its ``trade_date`` changes without this;
+    # any other value (or a normal row) is ignored
+    date_basis: BuyDateBasis | None = None
 
     @field_validator("trade_date")
     @classmethod
@@ -393,6 +410,12 @@ class Transaction(BaseModel):
     created_at: str
     # the statement import that wrote this row (``DELETE /transactions/batches/{id}`` undoes it); null otherwise
     import_batch_id: str | None = None
+    # 資產組成原型 (docs/proposals/asset-composition.md 附錄 B): a 匯入庫存 buy's date — estimated | picked |
+    # import_day; null for every other row. ``estimated_date``: the estimate (kept after a pick; null for
+    # import_day); ``imported_on``: the import's day (Taipei)
+    date_basis: BuyDateBasis | None = None
+    estimated_date: date | None = None
+    imported_on: date | None = None
 
 
 class TransactionPage(BaseModel):
@@ -707,6 +730,51 @@ class YearAmount(BaseModel):
     amount: float
 
 
+class CompositionDividend(BaseModel):
+    t: date
+    amount: float  # TWD, net of withholding and 二代健保
+
+
+class EstimatedSpan(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_: date = Field(alias="from")
+    until: date
+
+
+class PerformanceMonth(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    month: str  # 2026-10
+    from_: date = Field(alias="from")
+    to: date
+    whole: bool
+    flows: float  # 本金增減: the change of net_invested
+    pnl: float  # the change of market_value − net_invested (dividends excluded)
+    twr: float | None
+    benchmark_twr: float | None
+
+
+class PerformanceComposition(BaseModel):
+    dividends: list[CompositionDividend]
+    # one span per import (oldest first; overlapping or touching ones merged); empty without an estimated buy
+    estimated: list[EstimatedSpan]
+    months: list[PerformanceMonth]
+    months_estimated: int
+    months_import_day: int = 0  # provisional (owner decision 4)
+
+
+class FundRank(BaseModel):
+    start: date
+    end: date
+    beat: float
+    funds: int
+    universe: str
+    source: str
+    notes: list[str] = []
+    is_demo: bool = False
+
+
 class Performance(BaseModel):
     range: str
     start_date: date | None
@@ -724,6 +792,11 @@ class Performance(BaseModel):
     # 產品負責人 2026-11-18: the last day of the window on which a holding was valued with the history backfill's close
     # (Yahoo, as traded; days before the archive only). null: every day of the window is official closes
     reference_until: date | None = None
+    # 資產組成原型 (docs/proposals/asset-composition.md 附錄 B; ``services.composition``)
+    composition: PerformanceComposition | None = None
+    # 贏過幾成的台股基金 (原型): always null for now — the fund NAV file has no distributions to add back (proposal
+    # 附錄 B〈基金排名〉); the shape is the front end's ``FundRank``
+    fund_rank: FundRank | None = None
 
 
 # -- stock page (redesign 2026-11-12) ---------------------------------------------------------------

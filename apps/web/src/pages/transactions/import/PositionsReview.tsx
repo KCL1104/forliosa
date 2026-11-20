@@ -23,8 +23,11 @@ import {
   costTotals,
   currencyOf,
   editPosition,
+  estimateHint,
+  hasEstimates,
   hasPositionErrors,
   inLedgerLine,
+  isEstimatedDate,
   isShortSale,
   namedReplaced,
   POSITION_NOTE_CODES,
@@ -96,6 +99,8 @@ export function PositionsReview({
   const included = rows.filter((r) => r.include)
   const today = appToday()
   const dateHintId = useId()
+  // 資產組成原型：伺服器有給估計的買入日（舊版伺服器沒有，照舊整批一個日期）
+  const estimates = hasEstimates(rows)
 
   const patch = (id: string, p: Partial<Pick<DraftPosition, PositionField>>) => setRows((rs) => rs.map((r) => (r.id === id ? editPosition(r, p) : r)))
   const onInclude = (id: string, on: boolean) => setRows((rs) => rs.map((r) => (r.id === id ? setInclude(r, on) : r)))
@@ -109,7 +114,7 @@ export function PositionsReview({
     const seq = ++checkSeq.current
     const sent = list.filter(checkable)
     const accountChanged = account !== checkedFor.current
-    const check = sent.length ? await api.checkPositions({ account_id: account, trade_date: date, rows: sent.map((d) => toCommitRow(d, date)) }) : { rows: [], problems: [] }
+    const check = sent.length ? await api.checkPositions({ account_id: account, trade_date: date, rows: sent.map((d) => toCommitRow(d, date, doc.trade_date)) }) : { rows: [], problems: [] }
     if (seq !== checkSeq.current) return { changed: 0, blocking: 0, problems: [], stale: true }
     checkedFor.current = account
     const result = applyCheck(list, sent, check, accountChanged)
@@ -186,7 +191,7 @@ export function PositionsReview({
         return
       }
       setBusy("saving")
-      const result = await commit.mutateAsync({ account_id: accountId, trade_date: batchDate, rows: included.map((d) => toCommitRow(d, batchDate)) })
+      const result = await commit.mutateAsync({ account_id: accountId, trade_date: batchDate, rows: included.map((d) => toCommitRow(d, batchDate, doc.trade_date)) })
       onDone(result, included.length, namedReplaced(result.replaced, included))
     } catch (e) {
       const failing = e instanceof ApiError && Array.isArray(e.extra.rows) ? (e.extra.rows as BatchRejectedRow[]) : null
@@ -249,7 +254,8 @@ export function PositionsReview({
             </Row>
           </div>
           <p id={dateHintId} className="text-sm text-ink-2">
-            損益照券商均價算；均價到這天收盤的漲跌會算進這天的報酬，這天之前沒有走勢。每一檔也可以改日期。
+            {/* 資產組成原型：伺服器估了買入日時照實說估到幾檔（`estimateHint`）；舊版伺服器照原本那一句 */}
+            {estimateHint(rows) ?? "損益照券商均價算；均價到這天收盤的漲跌會算進這天的報酬，這天之前沒有走勢。每一檔也可以改日期。"}
           </p>
           <p className="num text-sm text-ink-2">{facts}</p>
           {doc.unreadable.length > 0 && <p className="text-base text-ink">沒讀清楚：{doc.unreadable.join("、")}。</p>}
@@ -282,7 +288,8 @@ export function PositionsReview({
                 <col className="w-[7rem]" />
                 <col className="w-[7rem]" />
                 <col className="w-[8.5rem]" />
-                <col className="w-[8.5rem]" />
+                {/* 資產組成原型：「估計 2024/8/14」比較長，日期欄寬一點 */}
+                <col className={estimates ? "w-[10rem]" : "w-[8.5rem]"} />
               </colgroup>
               <thead className="sticky top-0 z-10 bg-ai-wash">
                 <tr className="form-head text-left text-sm text-ink-2">
@@ -469,7 +476,9 @@ function MobileRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, o
         <div className="flex items-center justify-between gap-3">
           <p className={cn("num text-md", off ? "text-ink-2" : "text-ai")}>
             {d.qty ? `${d.qty} 股` : "—"}・均價 {price || "—"}
-            {d.date && d.date !== batchDate ? `・${dayText(d.date)} 買進` : ""}
+            {d.date && d.date !== batchDate && !isEstimatedDate(d) ? `・${dayText(d.date)} 買進` : ""}
+            {/* 資產組成原型：估計的買入日自己一行（「・」不會掛在行尾），算出來的是淡墨 */}
+            {isEstimatedDate(d) && <span className="block text-sm text-ink-2">估計 {dayText(d.date)} 買進</span>}
           </p>
           {!open && (
             <button type="button" onClick={() => setEditing(true)} className={cn(textAction, "shrink-0")} aria-label={`修改第 ${n} 檔：${nameOf(d)}`}>
@@ -605,17 +614,20 @@ function NumCell({
  * 表格裡（`compact`）和手機的半欄都寫短、不放圖示（手機半欄在 360 寬只有約 100px）
  */
 function RowDate({ row: d, batchDate, label, invalid, onPatch, compact }: { row: DraftPosition; batchDate: string; label: string; invalid: boolean; onPatch: RowProps["onPatch"]; compact?: boolean }) {
+  // 資產組成原型：沒改過的估計寫「估計 2024/8/14」，算出來的（和跟著整批的一樣）是淡墨；改過就是墨色、不再寫估計
+  const estimated = isEstimatedDate(d)
+  const own = !!d.date && !estimated
   return (
     <DateField
       id={`pos-date-${d.id}`}
       value={d.date || batchDate}
       onChange={(date) => onPatch(d.id, { date: date === batchDate ? "" : date })}
-      label={label}
+      label={estimated ? `${label}（估計）` : label}
       invalid={invalid}
       icon={false}
       placeholder="選日期"
-      format={shortDate}
-      className={compact ? cn(cellInput, "px-1.5", d.date ? "text-ink" : "text-ink-2") : d.date ? undefined : "text-ink-2"}
+      format={estimated ? (v) => `估計 ${shortDate(v)}` : shortDate}
+      className={compact ? cn(cellInput, "px-1.5", own ? "text-ink" : "text-ink-2") : own ? undefined : "text-ink-2"}
     />
   )
 }

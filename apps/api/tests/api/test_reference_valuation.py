@@ -383,9 +383,11 @@ def test_without_the_backfill_everything_is_as_before(client, ledgers, engine, m
 # -- after the archive began: byte for byte as before --------------------------------------------------------------
 def snapshot(client, other_client, ledgers) -> dict:
     """What the change must not touch: B's performance (bought on the archive's first day) in every range, A's 1D,
-    and the day board (every member, both benchmarks). ``reference_until`` is new (the old code has none)."""
+    and the day board (every member, both benchmarks). ``reference_until`` is new (the old code has none), and so are
+    the asset-composition prototype's ``composition`` and ``fund_rank`` (``tests/test_composition.py``)."""
     def strip(x: dict) -> dict:
-        return {k: v for k, v in x.items() if k not in ("reference_until", "comment_count", "reactions")}
+        return {k: v for k, v in x.items() if k not in ("reference_until", "comment_count", "reactions", "composition",
+                                                         "fund_rank")}
 
     out = {f"B {r}": strip(perf(other_client, r)) for r in ("ALL", "1M", "3M", "YTD", "MTD", "5D", "1D")}
     out["A 1D"] = strip(perf(client, "1D"))

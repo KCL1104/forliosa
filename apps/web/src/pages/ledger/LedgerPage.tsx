@@ -26,6 +26,7 @@ import { useLedgerCounts } from "./use-ledger-counts"
 import { useLedgerClose } from "@/hooks/use-close"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { SourcesFooter } from "@/components/data-notes"
+import { SourcesProvider } from "@/components/sources"
 import { upcomingShort, upcomingText } from "@/lib/ledger-display"
 import { useReadOnly } from "@/api/view-as"
 import { PlainLink } from "@/app/links"
@@ -103,6 +104,8 @@ export function LedgerPage() {
   }, [navigate])
 
   return (
+    // 資產組成原型：績效分段「贏過幾成的台股基金」把基金淨值的來源登記到頁尾（沒有登記任何來源時頁尾和以前一樣是一個連結）
+    <SourcesProvider>
     <PageFrame>
       <h1 className="sr-only">帳本</h1>
       {summary.isError ? (
@@ -228,6 +231,7 @@ export function LedgerPage() {
       {panelSlot ? createPortal(<WeekLine variant="panel" />, panelSlot) : <WeekLine />}
       <SourcesFooter />
     </PageFrame>
+    </SourcesProvider>
   )
 }
 

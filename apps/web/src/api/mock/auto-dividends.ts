@@ -1,4 +1,4 @@
-import type { Account, DividendRecord, Transaction, TransactionSource } from "../types"
+import type { Account, DividendRecord, PickFrom, Transaction, TransactionSource } from "../types"
 import { USER_RECORD_WINDOW_DAYS } from "@/lib/ledger-display"
 import { ARCHIVE_START } from "./commercial"
 import { computePreview } from "./fees"
@@ -32,6 +32,38 @@ export function exDividendNotices(symbol: string): DividendRecord[] {
   return dividendRecords(spec)
     .filter((d) => d.ex_dividend_date !== null && d.ex_dividend_date >= ARCHIVE_START && d.cash_dividend > 0)
     .sort((a, b) => a.ex_dividend_date!.localeCompare(b.ex_dividend_date!))
+}
+
+/** 目錄裡已知的股票分割與減資（後端 `catalog.KNOWN_SPLITS` 的一部分；示範只放用得到的）：代號 → [第一個用新價格的日子, 原因] */
+const KNOWN_SHARE_CHANGES: Record<string, readonly [string, "split" | "reduction"][]> = {
+  "0050.TW": [["2025-06-18", "split"]],
+}
+
+/**
+ * 匯入的買進最早可以是哪一天（資產組成原型；和後端 `services/buy_date.share_changes` 同樣的來源）：`until`（匯入那天，含）以前
+ * 最近一次股票分割、減資（目錄裡已知的），或配股（存檔的除權預告，配股 > 0——和股利自動入帳看的是同一份）。
+ * 券商的股數與均價已經算進這一次；買在那天以前，帳本會拿現在的股數乘當時的價格，配股也會再記一次。沒有是 null。
+ */
+export function shareChangeOn(symbol: string, until: string): PickFrom | null {
+  let out: PickFrom | null = null
+  const offer = (date: string, reason: PickFrom["reason"]) => {
+    if (date <= until && (!out || date > out.date)) out = { date, reason }
+  }
+  for (const [date, reason] of KNOWN_SHARE_CHANGES[symbol] ?? []) offer(date, reason)
+  const spec = findInstrument(symbol)
+  if (spec && spec.market !== "US") {
+    for (const d of dividendRecords(spec)) {
+      if (d.ex_dividend_date && d.ex_dividend_date >= ARCHIVE_START && d.stock_dividend > 0) offer(d.ex_dividend_date, "stock_dividend")
+    }
+  }
+  return out
+}
+
+/** 匯入的買進日期早於分割、減資、配股的那一天時，伺服器的句子（和後端 `before_change_message` 一樣） */
+export function beforeShareChangeMessage(p: PickFrom): string {
+  const [y, m, d] = p.date.split("-").map(Number)
+  const reason = p.reason === "split" ? "股票分割" : p.reason === "reduction" ? "減資" : "配股"
+  return `${y}/${m}/${d} ${reason}，買進日期不能早於這一天`
 }
 
 /**
