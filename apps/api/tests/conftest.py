@@ -30,19 +30,20 @@ os.environ.pop("NEWS_LANGSEARCH_ENABLED", None)
 os.environ.pop("LANGSEARCH_API_KEY", None)
 os.environ.pop("AI_LANGSEARCH_ENABLED", None)
 
-# Same reason for the .env file: running pytest from apps/api would read the local deployment settings
-# (US_PRICE_SOURCE=databento, AI keys, …) because Settings has env_file=".env". Tests read the environment only.
-import forliosa.config as _config
-
-_config.Settings.model_config["env_file"] = None
-
 import pytest
 from fastapi.testclient import TestClient
 
+import forliosa.config as _config
 import forliosa.models  # noqa: F401 - register every table on Base.metadata before create_all
 from forliosa.db import Base, make_engine, set_engine
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
+
+# Same reason for the .env file: running pytest from apps/api would read the local deployment settings
+# (US_PRICE_SOURCE=databento, AI keys, …) because Settings has env_file=".env". Tests read the environment only.
+# Nothing reads the settings at import time, so turning it off after the imports is early enough.
+_config.Settings.model_config["env_file"] = None
+_config.get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
