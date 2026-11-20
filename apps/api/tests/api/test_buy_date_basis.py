@@ -541,3 +541,44 @@ def test_demo_prices_estimate_nothing(client, fake, monkeypatch):
     rows = read(client, account_id=acc).json()["rows"]
     assert all("estimated_date" not in r and all(f["code"] != "no_crossing" for f in r["flags"]) for r in rows)
     get_settings.cache_clear()
+
+
+def test_the_estimate_comes_after_an_earlier_round_trip_of_that_stock(client, arch, fake):
+    # review 2026-11-21: the account bought and sold 2330 before; an imported buy estimated before that sell would be
+    # the lot FIFO sells first (the old gain and today's cost both wrong)
+    acc = account(client)["id"]
+    days, today = arch.days, today_taipei()
+    tw_bars = [Candle(d, *arch.bars["2330.TW"][d], 0) for d in days]
+    cost = arch.close("2330.TW", days[-400])
+    free = estimate_buy_date(tw_bars, cost, today)
+    assert free is not None and free < days[-30]
+    i = days.index(free)
+    trade(client, acc, "2330", "buy", days[i + 1], 1000, 100)
+    sold = days[i + 10]
+    trade(client, acc, "2330", "sell", sold, 1000, 100)
+    answer(fake, doc([p("2330", "台積電", "1000", avg=str(cost))]))
+    r = read(client, account_id=acc)
+    assert r.status_code == 200, r.text
+    got = r.json()["rows"][0]["estimated_date"]
+    want = estimate_buy_date(tw_bars, cost, today, start=sold + timedelta(days=1))
+    assert got == (want.isoformat() if want else None)
+    assert got is None or got > sold.isoformat()
+
+
+def test_commit_refuses_an_estimated_date_before_the_accounts_last_record_of_that_stock(client, arch):
+    acc = account(client)["id"]
+    days = arch.days
+    trade(client, acc, "2330", "buy", days[-50], 1000, 100)
+    trade(client, acc, "2330", "sell", days[-40], 1000, 100)
+
+    def flags(row: dict) -> set[str]:
+        r = _commit(client, acc, [row], dry_run=True)
+        assert r.status_code == 200, r.text
+        return {f["code"] for f in r.json()["rows"][0]["flags"]}
+
+    early = {"symbol": "2330", "quantity": 1000, "price": 500, "trade_date": days[-60].isoformat(),
+             "date_basis": "estimated", "estimated_date": days[-60].isoformat()}
+    assert flags(early) == {"before_earlier_records"}
+    assert flags({**early, "trade_date": days[-30].isoformat(), "estimated_date": days[-30].isoformat()}) == set()
+    assert flags({**early, "date_basis": "picked"}) == set()  # a date the user picked is theirs
+    assert flags({**early, "replace": True}) == set()  # 以券商為準: the old records go

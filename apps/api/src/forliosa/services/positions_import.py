@@ -37,12 +37,13 @@ from __future__ import annotations
 import logging
 import time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from forliosa.ai import importer, positions
@@ -53,7 +54,7 @@ from forliosa.config import Settings
 from forliosa.domain.ledger import replay
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
-from forliosa.models import BrokerAccount, User
+from forliosa.models import BrokerAccount, Transaction, User
 from forliosa.services import auto_dividends, buy_date, sharing
 from forliosa.services import imports as stm
 from forliosa.services import transactions as txn_svc
@@ -384,14 +385,29 @@ def read_positions(db: Session, user: User, account_id: str | None, pages: Seque
     ctx = _Ctx(md, account, holdings(db, user, inp), {a.id: a.name for a in inp.accounts})
     run = stm.read_with_retry(db, user, pages, settings, pool, cancelled, spec=positions.SPEC,
                               evaluate=lambda results: _evaluate(ctx, results), id_prefix="pos", messages=MESSAGES)
-    estimate_buy_dates(db, md, run.reading.rows)
+    estimate_buy_dates(db, md, run.reading.rows, account.id, ctx.held)
     out = _response(run.reading, account, run.model, run.retried)
     log.info("positions import %s: %d pages, %d rows, %d merged, %d calls, retried=%s, %.1f s", run.read_id,
              len(pages), len(out["rows"]), run.reading.merged, run.calls, run.retried, time.monotonic() - run.began)
     return out
 
 
-def estimate_buy_dates(db: Session, md: MarketData, rows: Sequence[_Pos]) -> None:
+def record_floors(db: Session, account_id: str, symbols: Iterable[str],
+                  keep_out: Iterable[str] = ()) -> dict[str, date]:
+    """The earliest day an estimated buy of each stock may have in ``account_id``: the day after the account's latest
+    record of it (review 2026-11-21). A stock the account no longer holds can have an old buy and sell; an imported buy
+    estimated before that sell is the lot FIFO sells first, and both the old realized gain and today's cost go wrong.
+    ``keep_out``: stocks whose records do not stay (held ones, which a row must replace; rows that replace)."""
+    wanted = sorted(set(symbols) - set(keep_out))
+    if not wanted:
+        return {}
+    q = (select(Transaction.symbol, func.max(Transaction.trade_date))
+         .where(Transaction.account_id == account_id, Transaction.symbol.in_(wanted)).group_by(Transaction.symbol))
+    return {s: d + timedelta(days=1) for s, d in db.execute(q)}
+
+
+def estimate_buy_dates(db: Session, md: MarketData, rows: Sequence[_Pos], account_id: str | None = None,
+                       held: dict[tuple[str, str], Held] | None = None) -> None:
     """資產組成原型 (``docs/proposals/asset-composition.md``): each row with a stock and a cost, short sales left out,
     gets its estimated buy date — the most recent day, looking back from today (Taipei), the price as traded crossed
     the cost (``services.buy_date``); none: ``estimated_date`` null and a ``no_crossing`` warning (not unticked). Demo
@@ -403,8 +419,10 @@ def estimate_buy_dates(db: Session, md: MarketData, rows: Sequence[_Pos]) -> Non
     wanted = [(r, r.info, r.price) for r in rows if r.info is not None and r.price is not None
               and not any(f["code"] == "short_sale" for f in r.flags)]
     try:
+        floors = (record_floors(db, account_id, [info.symbol for _, info, _ in wanted],
+                                {s for a, s in (held or {}) if a == account_id}) if account_id else {})
         found = buy_date.estimate_rows(db, md, [(info.symbol, price, info.currency) for _, info, price in wanted],
-                                       today_taipei())
+                                       today_taipei(), floors)
     except Exception:  # the reading is paid for: a failed estimate leaves the rows as an older server sent them
         log.warning("positions import: buy dates not estimated for %d rows", len(wanted), exc_info=True)
         db.rollback()  # (the reading's usage rows are committed already)
@@ -482,7 +500,7 @@ def date_basis_of(row: CommitRow, trade_date: date, imported_on: date) -> tuple[
 
 
 def basis_errors(row: CommitRow, symbol: str, trade_date: date, imported_on: date,
-                 change: buy_date.ShareChange | None) -> list[dict[str, str]]:
+                 change: buy_date.ShareChange | None, floor: date | None = None) -> list[dict[str, str]]:
     """資產組成原型: why a row the review table sent a basis for cannot be written (row errors; a row without
     ``date_basis`` is as before):
 
@@ -491,7 +509,9 @@ def basis_errors(row: CommitRow, symbol: str, trade_date: date, imported_on: dat
       after the import day (today, Taipei);
     * ``before_share_change``: its date is before the share-count limit (``change``: the latest split, capital
       reduction or stock dividend on or before the import day; ``services.buy_date.share_changes``) — the broker's
-      shares already include it, and the ledger would book it again."""
+      shares already include it, and the ledger would book it again;
+    * ``before_earlier_records``: an estimated date before ``floor`` (:func:`record_floors`: the day after the account's
+      last record of the stock) — FIFO would sell this lot in that old sell. A date the user picked is theirs."""
     if row.date_basis is None:
         return []
     out: list[dict[str, str]] = []
@@ -504,6 +524,11 @@ def basis_errors(row: CommitRow, symbol: str, trade_date: date, imported_on: dat
                              f"{buy_date.ymd_text(imported_on)}）。", "error"))
     if change is not None and trade_date < change.date:
         out.append(_flag(buy_date.BEFORE_SHARE_CHANGE, f"{buy_date.before_change_message(change)}。", "error"))
+    if floor is not None and trade_date < floor and date_basis_of(row, trade_date, imported_on)[0] == "estimated":
+        last = buy_date.ymd_text(floor - timedelta(days=1))
+        out.append(_flag(buy_date.BEFORE_EARLIER_RECORDS,
+                         f"這個帳戶裡這一檔最後一筆紀錄在 {last}，估計的買入日比它早，那筆賣出會先賣掉這一批。"
+                         f"請改成 {buy_date.ymd_text(floor)} 以後的日期。", "error"))
     return out
 
 
@@ -535,13 +560,17 @@ def commit(db: Session, user: User, account_id: str, rows: Sequence[CommitRow], 
     in_ledger = [held.get((account.id, info.symbol)) if info is not None else None for info in infos]
     limits = buy_date.share_changes(md, [info.symbol for r, info in zip(rows, infos, strict=True)
                                          if info is not None and r.date_basis is not None], imported_on)
+    floors = record_floors(db, account.id, [info.symbol for r, info in zip(rows, infos, strict=True)
+                                            if info is not None and r.date_basis == "estimated"],
+                           {*replacing, *(s for a, s in held if a == account.id)})
     pre: list[list[dict[str, str]]] = [[] for _ in rows]
     for i, (r, info, h) in enumerate(zip(rows, infos, in_ledger, strict=True)):
         if info is not None and h is not None and info.symbol not in replacing:
             pre[i].append(_flag("in_ledger", f"帳本裡已經有 {_num(h.quantity)} 股。勾「以券商為準」才會換掉，"
                                              "不然這一列不要匯入。", "error"))
         if info is not None:
-            pre[i] += basis_errors(r, info.symbol, r.trade_date or day, imported_on, limits.get(info.symbol))
+            pre[i] += basis_errors(r, info.symbol, r.trade_date or day, imported_on, limits.get(info.symbol),
+                                   floors.get(info.symbol))
     replaced: list[dict[str, Any]] = []
     feed_keys: list[sharing.TradeKey] = []
     for symbol in replacing:

@@ -22,7 +22,7 @@ estimate stops there, the commit and ``PATCH`` refuse earlier days, the picker's
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
@@ -41,6 +41,7 @@ from forliosa.services.reference_close import valuation_prices
 NO_CROSSING = "no_crossing"
 BEFORE_SHARE_CHANGE = "before_share_change"  # 422 / row error: an imported buy dated before the share-count limit
 BAD_ESTIMATED_DATE = "bad_estimated_date"  # row error: an estimate the estimator could not have found
+BEFORE_EARLIER_RECORDS = "before_earlier_records"  # row error: an estimated buy before the account's last record of it
 
 ShareChangeReason = Literal["split", "reduction", "stock_dividend"]
 # how a reason is written (the picker's line, the no_crossing sentence, the 422 message)
@@ -177,8 +178,8 @@ def search_floor(symbol: str, until: date, change: ShareChange | None) -> date:
     return max(lo, change.date) if change is not None else lo
 
 
-def estimate_rows(db: Session, md: MarketData, rows: Sequence[tuple[str, Decimal, str]], today: date
-                  ) -> list[Estimate]:
+def estimate_rows(db: Session, md: MarketData, rows: Sequence[tuple[str, Decimal, str]], today: date,
+                  floors: Mapping[str, date] | None = None) -> list[Estimate]:
     """The estimated buy date of each ``(symbol, cost, currency)``, looking back from ``today`` (Taipei): one read of
     every symbol's prices together (:func:`traded_history`).
 
@@ -187,7 +188,10 @@ def estimate_rows(db: Session, md: MarketData, rows: Sequence[tuple[str, Decimal
     today's shares (0050 bought at 188 before its 2025 1-to-4 split shows 47), so the prices as traded before it
     cannot be compared — and their drop on that day would otherwise read as a gap «over» every cost between the old
     and the new price. A buy dated before it would also be valued with today's share count at the old prices, and a
-    stock dividend booked again."""
+    stock dividend booked again.
+
+    ``floors``: the earliest day per symbol on top of that (``positions_import.record_floors``: the day after the
+    account's last record of a stock it no longer holds)."""
     if not rows:
         return []
     start = search_start(today, us=False)
@@ -202,6 +206,8 @@ def estimate_rows(db: Session, md: MarketData, rows: Sequence[tuple[str, Decimal
         us = market_of_symbol(symbol) == "US"
         change = changes.get(symbol)
         lo = search_floor(symbol, today, change)
+        if floors and symbol in floors:
+            lo = max(lo, floors[symbol])
         stopped = change if change is not None and change.date >= search_start(today, us) else None
         day = estimate_buy_date(hist[symbol].candles, cost, today, start=lo)
         if day is not None:
