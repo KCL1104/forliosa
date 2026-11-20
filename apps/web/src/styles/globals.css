@@ -247,6 +247,33 @@
   --band-4: #7a93b6;
   --band-5: #627ea6;
 
+  /*
+   * 托盤（產品負責人 2026-11-21：帳本、個股、市場採方向 C「圓桌」的結構；見 DESIGN.md〈托盤〉與 `.tray`）。
+   * 三種底色只為了讓相鄰的兩盤分得開，不代表任何意思。沒有框線、沒有陰影；圓角是方肩的 8px（不是 C 的 24px）。
+   * 對比（WCAG，字對托盤／對托盤裡的 hover 列）：
+   *   tray-1 #ffffff：墨 14.3、淡墨與印刷藍 5.9（hover 5.0）、漲跌 5.6（hover 4.7）
+   *   tray-2 #f3efe6：墨 12.4、淡墨與印刷藍 5.2（hover 4.8）、漲跌 4.9（hover 4.5）
+   *   tray-3 #ecf0f6：墨 12.5、淡墨與印刷藍 5.2（hover 4.8）、漲跌 4.9（hover 4.6）
+   * 托盤要放漲跌的字，所以不能比 tray-2 更深（#ebe5d9 的漲跌只剩 4.49:1）。tray-3 是印刷藍的淡底，
+   * 比 AI 的石墨淡底（#f1f2f4）藍；AI 的草稿另有石墨灰虛線框，兩者靠框分開。
+   * 托盤裡的格線、控制項的框、圖表格線用托盤自己的一組（`.tray` 換掉 --rule、--ctl、--chart-grid）：
+   *   控制項的框 #7c8599 對三種托盤 3.7／3.2／3.2:1（原本的 --ctl 在 tray-2 只有 2.9:1）；
+   *   格線 #cfd7e2 對托盤 1.45／1.26／1.27:1（和紙上的格線 1.26:1 同一個份量）；圖表格線 #dde3ea 1.29／1.13／1.13:1。
+   */
+  --tray-1: #ffffff;
+  --tray-1-hov: #efebe2;
+  --tray-2: #f3efe6;
+  --tray-2-hov: #ebe6db;
+  --tray-3: #ecf0f6;
+  --tray-3-hov: #e2e8f1;
+  --tray-rule: #cfd7e2;
+  --tray-ctl: #7c8599;
+  --tray-grid: #dde3ea;
+  --tray-radius: 8px;
+  /* 托盤的內距與托盤之間的距離：手機 16／12px，≥ 768px 24／16px */
+  --tray-pad: 1rem;
+  --tray-gap: 0.75rem;
+
   /* shadcn／Base UI 元件對應 */
   --background: var(--paper);
   --foreground: var(--ink);
@@ -272,6 +299,12 @@
   /* 手機底部列的高度（不含 safe area）；桌面（≥ 1024px）沒有底部列，是 0。要避開底部列的東西用 calc(var(--dock-h) + env(safe-area-inset-bottom, 0px)) */
   --dock-h: 3.75rem;
   color-scheme: light;
+}
+@media (min-width: 768px) {
+  :root {
+    --tray-pad: 1.5rem;
+    --tray-gap: 1rem;
+  }
 }
 @media (min-width: 1024px) {
   :root {
@@ -333,6 +366,24 @@
   --band-4: #8f8b85;
   --band-5: #afaba4;
 
+  /*
+   * 托盤：石墨（深色維持石墨，不用 C 的藍黑）。三盤都是同一個暖灰色相，一盤比一盤亮一階；沒有藍色的底。
+   * 對比（字對托盤／對托盤裡的 hover 列）：
+   *   tray-1 #191714：墨 14.2、淡墨與印刷字 7.1（hover 6.6）、漲 6.5（hover 6.0）、跌 8.1
+   *   tray-2 #1e1b18：墨 13.6、淡墨 6.8（hover 6.2）、漲 6.2（hover 5.6）、跌 7.7
+   *   tray-3 #23201c：墨 12.9、淡墨 6.5（hover 5.8）、漲 5.8（hover 5.3）、跌 7.3
+   * 控制項的框 #75726c 對托盤 3.7／3.6／3.4:1；格線 #4f4c47 1.9–2.1:1（深色的格線保持 1.9:1 以上）；圖表格線 #2d2a26 1.14–1.25:1。
+   */
+  --tray-1: #191714;
+  --tray-1-hov: #211e1b;
+  --tray-2: #1e1b18;
+  --tray-2-hov: #26231f;
+  --tray-3: #23201c;
+  --tray-3-hov: #2b2824;
+  --tray-rule: #4f4c47;
+  --tray-ctl: #75726c;
+  --tray-grid: #2d2a26;
+
   --scrim: rgb(0 0 0 / 0.6);
   color-scheme: dark;
 }
@@ -384,6 +435,10 @@
   --color-chart-blue: var(--chart-blue);
   --color-chart-ochre: var(--chart-ochre);
   --color-chart-grid: var(--chart-grid);
+  /* 托盤的底色（一般用 `<Tray tint>`；`bg-tray-*` 只給不是托盤、但要和托盤同色的東西） */
+  --color-tray-1: var(--tray-1);
+  --color-tray-2: var(--tray-2);
+  --color-tray-3: var(--tray-3);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -413,6 +468,11 @@
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-2xl: 16px;
+  /* 托盤 8px（`rounded-tray`） */
+  --radius-tray: var(--tray-radius);
+  /* 托盤之間（`gap-tray-gap`）與托盤的內距（`p-tray-pad`）：手機 12／16px，≥ 768px 16／24px */
+  --spacing-tray-gap: var(--tray-gap);
+  --spacing-tray-pad: var(--tray-pad);
 
   /* 書寫（使用者的墨水）：黑體；印好的字：明體。兩套的數字都是 Forliosa Figures（IBM Plex Sans） */
   --font-sans: "Forliosa Figures", "Noto Sans TC Variable", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
@@ -638,6 +698,42 @@
   }
   .heat-fall-2 {
     background-color: color-mix(in srgb, var(--fall) 12%, transparent);
+  }
+
+  /*
+   * 托盤（`components/tray.tsx`）：一組內容放在一塊有底色、有圓角的面上——沒有框線、沒有陰影，托盤不疊托盤。
+   * 三種底色（data-tint 1–3）只為了讓相鄰的兩盤分得開，不代表任何意思。
+   * 托盤裡，托盤就是紙：紙色、hover、格線、控制項的框、圖表格線換成托盤的版本，裡面的元件不用另外改——
+   * `bg-paper` 的遮擋（圖表的紙色線、虛線上的標籤、sticky 的表頭）和托盤同色；hover 列、分段的軌道、骨架比托盤深一階；
+   * 控制項的框對托盤仍 ≥ 3:1。canvas 圖表（lightweight-charts）讀顏色時要把托盤裡的元素傳給 `cssVarColor(name, a, el)`，
+   * 預設讀的是 <html>，會拿到托盤外面的紙色與格線。
+   */
+  .tray {
+    --tray-bg: var(--tray-1);
+    --tray-hov-bg: var(--tray-1-hov);
+    --paper: var(--tray-bg);
+    --background: var(--tray-bg);
+    --hov: var(--tray-hov-bg);
+    --muted: var(--tray-hov-bg);
+    /* 次要按鈕滑過、程式碼底：墨色 8%（淺色和紙上的 --sel 同值；深色在托盤上才看得出來） */
+    --sel: color-mix(in srgb, var(--ink) 8%, transparent);
+    --rule: var(--tray-rule);
+    --border: var(--tray-rule);
+    --ctl: var(--tray-ctl);
+    --input: var(--tray-ctl);
+    --chart-grid: var(--tray-grid);
+    min-width: 0;
+    padding: var(--tray-pad);
+    border-radius: var(--tray-radius);
+    background: var(--tray-bg);
+  }
+  .tray[data-tint="2"] {
+    --tray-bg: var(--tray-2);
+    --tray-hov-bg: var(--tray-2-hov);
+  }
+  .tray[data-tint="3"] {
+    --tray-bg: var(--tray-3);
+    --tray-hov-bg: var(--tray-3-hov);
   }
 
   /* 格線列：整列可點、hover 是淡墨底 */
