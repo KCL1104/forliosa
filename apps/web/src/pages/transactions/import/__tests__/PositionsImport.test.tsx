@@ -61,7 +61,13 @@ function renderApp() {
   )
 }
 
-const fileInput = (dialog: HTMLElement) => dialog.querySelector<HTMLInputElement>("input[type=file]")!
+/** 對話框出現時內容可能還沒畫好（CI 上忙的時候拿到 null）：等上傳欄位出現 */
+const fileInput = (dialog: HTMLElement) =>
+  waitFor(() => {
+    const el = dialog.querySelector<HTMLInputElement>("input[type=file]")
+    if (!el) throw new Error("還沒有上傳欄位")
+    return el
+  }, T)
 const pngFile = (name = "庫存.png") => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], name, { type: "image/png" })
 
 async function allTxns(): Promise<Transaction[]> {
@@ -99,7 +105,7 @@ describe("匯入庫存", () => {
     const dialog = await screen.findByRole("dialog", { name: "匯入庫存" }, T)
     // 按過的那一列不在了：焦點移到新的第一個控制項（「截圖｜貼上文字」選中的那一個）
     await waitFor(() => expect(within(dialog).getByRole("tab", { name: "截圖" })).toHaveFocus(), T)
-    await user.upload(fileInput(dialog), [pngFile("庫存1.png"), pngFile("庫存2.png")])
+    await user.upload(await fileInput(dialog), [pngFile("庫存1.png"), pngFile("庫存2.png")])
     expect(await within(dialog).findByText("截圖會整張送給 AI 讀。", {}, T)).toBeInTheDocument()
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "開始讀" })).toBeEnabled(), T)
     await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
@@ -189,7 +195,7 @@ describe("匯入庫存", () => {
     const chooser = await openFromToolbar(user)
     await user.click(within(chooser).getByRole("button", { name: /^匯入庫存/ }))
     const sheet = await screen.findByRole("dialog", { name: "匯入庫存" }, T)
-    await user.upload(fileInput(sheet), pngFile())
+    await user.upload(await fileInput(sheet), pngFile())
     await waitFor(() => expect(within(sheet).getByRole("button", { name: "開始讀" })).toBeEnabled(), T)
     await user.click(within(sheet).getByRole("button", { name: "開始讀" }))
     const sign = await within(sheet).findByRole("button", { name: /^簽名：匯入 \d+ 檔$/ }, { timeout: 20_000 })
@@ -213,7 +219,7 @@ describe("匯入庫存：換帳戶、沒填好的列", () => {
     const chooser = await openFromToolbar(user)
     await user.click(within(chooser).getByRole("button", { name: /^匯入庫存/ }))
     const dialog = await screen.findByRole("dialog", { name: "匯入庫存" }, T)
-    await user.upload(fileInput(dialog), pngFile())
+    await user.upload(await fileInput(dialog), pngFile())
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "開始讀" })).toBeEnabled(), T)
     await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
     await within(dialog).findByRole("button", { name: /^簽名：匯入 \d+ 檔$/ }, { timeout: 20_000 })
@@ -326,7 +332,7 @@ describe("匯入庫存：估計的買入日（資產組成原型）", () => {
     await screen.findAllByText("總資產", {}, T)
     act(() => useUi.getState().openImport("positions"))
     const dialog = await screen.findByRole("dialog", { name: "匯入庫存" }, T)
-    await user.upload(fileInput(dialog), pngFile())
+    await user.upload(await fileInput(dialog), pngFile())
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "開始讀" })).toBeEnabled(), T)
     await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
     await within(dialog).findByRole("button", { name: /^簽名：匯入 \d+ 檔$/ }, { timeout: 20_000 })

@@ -32,7 +32,9 @@ describe("個人資料（GET /me 多三個欄位）", () => {
     expect(me.is_admin).toBe(true)
     expect(me.public_posting_suspended_until).toBeNull()
   })
-  it("情境：已經有暱稱、被停權（時間是 UTC、Z 結尾、到秒）、不是管理員", async () => {
+  // ponytail: 建三份完整的示範資料，全部測試一起跑時會超過預設的 15 秒（2026-11-21 本機 16s）；
+  // 放寬到 30 秒。要再快就讓 mock 的資料延後到用到才建，或這幾個情境共用一份
+  it("情境：已經有暱稱、被停權（時間是 UTC、Z 結尾、到秒）、不是管理員", { timeout: 30_000 }, async () => {
     expect((await named().api.getMe()).public_name).toBe("示範小資")
     const suspended = await fresh({ discussion: { publicName: "示範小資", suspended: true } }).api.getMe()
     expect(suspended.public_posting_suspended_until).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
