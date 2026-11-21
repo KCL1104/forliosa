@@ -237,6 +237,22 @@ def test_a_ledger_from_2024_covers_its_ranges_and_says_where_yahoo_was_used(clie
     assert one["start_date"] == ARCHIVE[-2].isoformat() and one["reference_until"] is None and one["notes"] == []
 
 
+def test_an_otc_stock_whose_archive_starts_a_day_later_keeps_its_history(client, engine, archive, backfill_on):
+    # Production 2026-11-21: TPEx's archive began on 11/13, a day after TWSE's. Cutting the Yahoo rows at the archive's
+    # first day (11/12) left 11/12 unpriced for an OTC stock, and performance then started on 11/13, dropping every
+    # range's history. Its Yahoo rows now reach its own first official close.
+    with Session(engine) as db:
+        db.add_all(price("6488.TWO", d, "400", "tpex-openapi") for d in ARCHIVE[1:])
+        db.add_all(price("6488.TWO", d, "390", "yahoo-history") for d in [*YAHOO_DAYS, ARCHIVE[0]])
+        db.commit()
+    acc = account(client, "上櫃")["id"]
+    trade(client, acc, "6488.TWO", "buy", date(2025, 3, 3), 1000, "390")
+    p = perf(client, "1Y", acc)
+    assert p["start_date"] == "2025-11-17"
+    assert p["reference_until"] == ARCHIVE[0].isoformat()  # 11/12 is valued with its reference close
+    assert ARCHIVE[0].isoformat() in [x["t"] for x in p["series"]]
+
+
 def test_an_index_benchmark_starts_at_its_first_close(client, ledgers, backfill_on):
     """The backfill has no index: across the archive's start the total return index starts at its first close."""
     p = perf(client, "MTD", benchmark="^TAIEXTR")

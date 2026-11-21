@@ -225,7 +225,10 @@ def valuation_prices(db: Session, md: MarketData, histories: dict[str, HistoryRe
         first = h.candles[0].t if h.candles else None
         if h.is_demo or (first is not None and first <= need_from):
             continue  # demo data (personal mode), or the series already covers the period
-        wanted[s] = min(since, first) if first is not None else since
+        # up to the symbol's own first official close: TPEx's archive began a day after TWSE's (11/13 vs 11/12), and
+        # cutting every symbol at the archive's first day left 11/12 unpriced for OTC stocks — performance then
+        # started after that gap and dropped the whole history before it (2026-11-21)
+        wanted[s] = first if first is not None else since
     if not wanted:
         return out
     rows: dict[str, list[Any]] = {s: [] for s in wanted}
