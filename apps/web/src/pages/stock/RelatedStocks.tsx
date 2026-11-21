@@ -5,6 +5,7 @@ import { Pct } from "@/components/finance"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { formatPrice, formatPriceLevel } from "@/lib/format"
+import { typeFromCode } from "@/lib/tick"
 import { QuietSection } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
@@ -43,9 +44,6 @@ export function RelatedStocks({ inst }: { inst: InstrumentDetail }) {
   )
 }
 
-/** 台股 ETF（含受益憑證）的代號都是 00 開頭：決定升降單位（ETF 50 元以上是 0.05 檔） */
-const typeOf = (code: string) => (code.startsWith("00") ? ("etf" as const) : ("stock" as const))
-
 function RelatedRow({ card }: { card: RelatedCard }) {
   const code = card.is_index ? "指數" : card.symbol.split(".")[0]!
   const body = (
@@ -57,7 +55,7 @@ function RelatedRow({ card }: { card: RelatedCard }) {
       <span className="flex flex-wrap items-baseline justify-end gap-x-2 text-right">
         <span className="num">
           {/* 和報價同一套小數位（214、52.40、1,085）；指數點位四捨五入 */}
-          {card.is_index ? (card.close === null ? "—" : formatPriceLevel(card.close)) : formatPrice(card.close, card.symbol.endsWith(".TWO") ? "TPEX" : "TWSE", typeOf(code))}
+          {card.is_index ? (card.close === null ? "—" : formatPriceLevel(card.close)) : formatPrice(card.close, card.symbol.endsWith(".TWO") ? "TPEX" : "TWSE", typeFromCode(code))}
         </span>
         <Pct value={card.change_pct} className="text-md" />
       </span>

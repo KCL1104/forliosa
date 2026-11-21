@@ -110,10 +110,12 @@ describe("查看模式：帳本沒有寫入或 AI 的動作", () => {
     expect(document.body.textContent).not.toContain("跟 AI 說")
   })
 
-  it("自己的帳本沒有交易：照常有「記第一筆交易」", async () => {
+  it("自己的帳本沒有交易：照常有「記第一筆交易」與「用一句話記一筆」；沒有說明句、例子不帶價格（2026-11-21 評論）", async () => {
     vi.spyOn(api, "listTransactions").mockResolvedValue({ items: [], next_cursor: null })
     renderInRouter(<TransactionsView />)
     expect(await screen.findByRole("button", { name: "記第一筆交易" }, T)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "用一句話記一筆" })).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/跟 AI 說|52\.4/)
   })
 
   it("「接下來」的定期定額扣款是純文字，不連到被擋下的設定頁", async () => {

@@ -44,9 +44,8 @@ export function NewsCoverage({ inst }: { inst: InstrumentDetail }) {
   return (
     <QuietSection title="新聞報導">
       {items.length === 0 ? (
-        <NotYet title={`最近沒有找到${inText(inst.name)}的媒體報導`}>
-          新聞大約每小時更新一次。
-        </NotYet>
+        // 只有標題（2026-11-21 評論：「新聞大約每小時更新一次」是機制）
+        <NotYet title={`最近沒有找到${inText(inst.name)}的媒體報導`} />
       ) : (
         <>
           <ul>

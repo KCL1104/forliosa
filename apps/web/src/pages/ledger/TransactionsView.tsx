@@ -11,6 +11,7 @@ import { useUi } from "@/app/ui-store"
 import { Masked, SourceTag } from "@/components/finance"
 import { RangeChips } from "@/components/segmented"
 import { EmptyState, ErrorState } from "@/components/states"
+import { textAction } from "@/components/text-action"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -169,14 +170,19 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
           // 查看模式：唯讀，沒有記帳動作也沒有 AI
           <EmptyState className={LAST} title="沒有交易紀錄" />
         ) : (
+          // 兩條路照帳本的空狀態（2026-11-21 評論）：自己填，或用一句話交給 AI（例子不帶價格，在 AI 面板裡問）——不寫一句說明
           <EmptyState
             className={LAST}
             title="還沒有交易紀錄"
-            description="自己填第一筆，或跟 AI 說一句「買 0050 2 張 52.4」。"
             action={
-              <Button variant="outline" onClick={() => ask.action("form")}>
-                記第一筆交易
-              </Button>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
+                <Button variant="outline" onClick={() => ask.action("form")}>
+                  記第一筆交易
+                </Button>
+                <button type="button" onClick={() => ask.action("trade")} className={textAction}>
+                  用一句話記一筆
+                </button>
+              </div>
             }
           />
         )

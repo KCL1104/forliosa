@@ -84,34 +84,36 @@ async function withPerformance(patch: (p: Performance) => Performance) {
 }
 
 describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
-  it("區間（3 個月）：圖下面沒有拆解的句子（使用者只要圖）；圖例寫「目前賺的」（累積到最後一天），滑過時寫那一天的「賺的」；本金＋賺的＝總資產", async () => {
+  it("區間（3 個月）：圖下面沒有拆解的句子（使用者只要圖）；圖例寫「目前價差」（累積到最後一天），滑過時寫那一天的「價差」；本金＋價差＝總資產", async () => {
     act(() => useLedgerPrefs.setState({ trendRange: "3M" }))
     renderApp("/")
     const region = await trend()
     expect(sentence(region)).toBeNull()
     expect(region.querySelector("[data-bands]")).not.toBeNull()
     const gainText = legend(region, "gain")!.textContent!
-    expect(gainText).toMatch(/^目前賺的 \+NT\$[\d,]+$/)
-    // 最後一天：本金＋賺的＝總資產（圖的說明念的「到 NT$…」）
+    expect(gainText).toMatch(/^目前價差 \+NT\$[\d,]+$/)
+    // 最後一天：本金＋價差＝總資產（圖的說明念的「到 NT$…」）
     const to = /總資產從 NT\$[\d,]+ 到 (NT\$[\d,]+)/.exec(within(region).getByRole("img").getAttribute("aria-label")!)![1]!
     expect(money(legend(region, "invested")!.textContent!) + money(gainText)).toBe(money(to))
-    // 滑過：那一天的「賺的」（讀數有日期，不寫「目前」），本金＋賺的＝讀數的總資產
+    // 滑過：那一天的「價差」（讀數有日期，不寫「目前」），本金＋價差＝讀數的總資產
     const g = chart(region)
     act(() => g.focus())
     fireEvent.keyDown(g, { key: "Home" })
     fireEvent.keyDown(g, { key: "ArrowRight" })
-    expect(legend(region, "gain")!.textContent).toMatch(/^賺的 \+NT\$[\d,]+$/)
+    expect(legend(region, "gain")!.textContent).toMatch(/^價差 \+NT\$[\d,]+$/)
     const shown = region.querySelector("[data-readout] p .font-semibold")!.textContent!
     expect(money(legend(region, "invested")!.textContent!) + money(legend(region, "gain")!.textContent!)).toBe(money(shown))
   })
 
-  it("「全部」：圖例寫「賺的」（不寫「目前」）；本金＋賺的＝主數字的總資產，賺的＋全部領過的股利＝主數字的「總損益（含股利）」；圖的說明念資產組成、本金只算還在股票裡的錢", async () => {
+  it("「全部」：圖例寫「價差」（不寫「目前」）；本金＋價差＝主數字的總資產，價差＋全部領過的股利＝主數字的「總損益（含股利）」；畫面上沒有「賺的」；圖的說明念資產組成、本金只算還在股票裡的錢", async () => {
     act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
     renderApp("/")
     const region = await trend()
     expect(sentence(region)).toBeNull()
     const invested = /^本金 (NT\$[\d,]+)$/.exec(legend(region, "invested")!.textContent!)![1]!
-    const profit = /^賺的 \+(NT\$[\d,]+)$/.exec(legend(region, "gain")!.textContent!)![1]!
+    const profit = /^價差 \+(NT\$[\d,]+)$/.exec(legend(region, "gain")!.textContent!)![1]!
+    // 主數字寫「總損益（含股利）」，圖例不再有第二個讀成「賺多少」的「賺的」（2026-11-21 評論）
+    expect(region.querySelector("[data-legend-row], [data-legend-grid]")!.textContent).not.toMatch(/賺的|虧的/)
     expect(legend(region, "total")!.textContent).toBe("總資產")
     const summary = await api.getPortfolioSummary()
     expect(money(invested) + money(profit)).toBe(Math.round(summary.market_value))
@@ -119,7 +121,7 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     // 決定 1：「資產組成」念在圖的說明裡；決定 5（只算還在股票裡的錢）畫面上不寫、念在這裡
     expect(within(region).queryByText(/只算還在股票裡的錢/)).toBeNull()
     expect(within(region).getByRole("img").getAttribute("aria-label")).toMatch(
-      new RegExp(`，資產組成：最後一天本金 ${invested.replace("$", "\\$")}，賺的 ${profit.replace("$", "\\$")}。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢$`),
+      new RegExp(`，資產組成：最後一天本金 ${invested.replace("$", "\\$")}，價差賺 ${profit.replace("$", "\\$")}。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢$`),
     )
   })
 
@@ -179,7 +181,7 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     expect(within(region).queryByText("股利")).toBeNull()
   })
 
-  it("虧損、整段都是估計的：圖例「虧的」（跌的顏色）、整條是細線、只塗虧的", async () => {
+  it("虧損、整段都是估計的：圖例「價差 −NT$…」（跌的顏色）、整條是細線、只塗虧的", async () => {
     const days = ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12"]
     const series: PerformancePoint[] = days.map((t, i) => ({ t, market_value: 1_000_000 - i * 20_000, net_invested: 1_050_000, twr_index: 1 - i * 0.02, benchmark_index: null }))
     await withPerformance((p) => ({ ...p, series, notes: [], reference_until: null, composition: { dividends: [], estimated: [{ from: "2026-01-01", until: "2026-11-12" }], months: [], months_estimated: 1 } }))
@@ -193,7 +195,7 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     expect(region.querySelectorAll('[data-series="total"] path')).toHaveLength(1)
     expect(region.querySelector('[data-band="loss"]')).not.toBeNull()
     expect(region.querySelector('[data-band="gain"]')).toBeNull()
-    expect(legend(region, "gain")!.textContent).toBe("虧的 −NT$210,000")
+    expect(legend(region, "gain")!.textContent).toBe("價差 −NT$210,000")
     expect(legend(region, "gain")!.querySelector(".text-fall")).not.toBeNull()
     expect(legend(region, "gain")!.querySelector(".bg-fall-tint")).not.toBeNull()
   })

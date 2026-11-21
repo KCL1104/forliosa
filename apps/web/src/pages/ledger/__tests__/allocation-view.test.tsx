@@ -128,10 +128,14 @@ describe("配置分段", () => {
     expect((await api.getAllocation("acc_01JSINOPAC")).fx).toEqual({})
   })
 
-  it("每一檔的說明寫「最大產業不含 ETF」（手機的集中度格子沒地方寫）", async () => {
+  it("「最大產業不含 ETF」只說一次：桌面在集中度的格子裡，清單下面那一句只給手機（手機的格子沒地方寫）", async () => {
     renderApp("/?view=allocation")
     await list()
-    expect(screen.getByText("最大產業不含 ETF。ETF 算一檔，不拆成分股。")).toBeInTheDocument()
+    const note = screen.getByText(/ETF 算一檔，不拆成分股。/)
+    expect(note).toHaveTextContent("最大產業不含 ETF。ETF 算一檔，不拆成分股。")
+    expect(within(note).getByText("最大產業不含 ETF。")).toHaveClass("lg:hidden")
+    // 格子裡的「・不含 ETF」反過來只給桌面
+    expect(within(screen.getByText("最大產業").closest("div")!).getByText("・不含 ETF")).toHaveClass("max-lg:hidden")
   })
 
   it("最大一檔是 ETF、超過的是別的個股：「超過上限」不接在 ETF 底下，放在你設定的上限那裡", async () => {
@@ -171,7 +175,8 @@ describe("配置分段", () => {
     vi.spyOn(api, "getAllocation").mockResolvedValue(none)
     renderApp("/?view=allocation")
     expect(await screen.findByText("目前沒有持股", undefined, T)).toBeInTheDocument()
-    expect(screen.getByText("記下持股後，這裡會列出每一檔佔多少。")).toBeInTheDocument()
+    // 只有標題和動作，不敘述介面（「這裡會列出…」）
+    expect(screen.queryByText(/這裡會列出/)).toBeNull()
     expect(within(document.getElementById("ledger-view")!).getByRole("button", { name: "記一筆" })).toBeInTheDocument()
     await userEvent.click(screen.getByRole("combobox", { name: "帳戶" }))
     await userEvent.click(await screen.findByRole("option", { name: "永豐・一般" }, T))

@@ -56,6 +56,14 @@ export function codeOf(symbol: string): string {
 }
 
 /**
+ * 只有代號、不知道 `type` 的地方（觀察清單、AI 草稿、相關股票）：台股 ETF 的代號都是 00 開頭（DESIGN.md〈The Tick Decimal Rule〉）。
+ * 美股的小數位不看 `type`。代號或 symbol 都可以（「0050」「0050.TW」）。
+ */
+export function typeFromCode(code: string): InstrumentType {
+  return codeOf(code).startsWith("00") ? "etf" : "stock"
+}
+
+/**
  * 報價的小數位數（依升降單位）：
  * - 升降單位 ≥ 1（≥ 500 元的股票）→ 0 位：1,085、932
  * - 升降單位 0.1／0.5 → 1 位，整數時不帶小數：236.5、398
