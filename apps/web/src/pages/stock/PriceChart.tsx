@@ -423,7 +423,7 @@ function NoHistory({ notes }: { notes: string[] }) {
   return (
     <NotYet title="走勢資料累積中">
       <DataNotes notes={notes} className="text-md" />
-      <p className="mt-1">要有兩個交易日的收盤價才畫得出走勢。</p>
+      <p className="mt-1">要有兩個交易日的收盤價</p>
     </NotYet>
   )
 }
