@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from forliosa.marketdata.archive_provider import ArchiveProvider
 from forliosa.marketdata.base import BaseProvider, DividendEvent
-from forliosa.marketdata.service import NOTICES_FRESH_SECONDS, MarketData
+from forliosa.marketdata.service import MarketData, notices_trusted_since
 from forliosa.models import DatasetStatus, MarketEvent, PriceDaily
 from forliosa.timeutil import today_taipei
 
@@ -83,10 +83,14 @@ def test_a_recent_archive_run_answers_dividends_without_the_live_file(archive_db
     assert md.dividends("2308.TW").source == "twse-openapi" and twse.calls == []
 
 
-@pytest.mark.parametrize("hours_ago", [None, NOTICES_FRESH_SECONDS / 3600 + 1])
-def test_without_a_recent_run_the_live_file_is_asked_as_before(archive_db, hours_ago):
-    if hours_ago is not None:
-        archived(archive_db, "twse-openapi/price", hours_ago=hours_ago)
+@pytest.mark.parametrize("stale", [False, True])
+def test_without_a_recent_run_the_live_file_is_asked_as_before(archive_db, stale):
+    if stale:
+        # an hour before the archive stops being trusted (``notices_trusted_since``): 12 hours on a trading day, the
+        # last scheduled run on a weekend or holiday — a fixed 13 hours still counted as fresh on a Saturday
+        now = datetime.now(UTC)
+        trusted_hours = (now - notices_trusted_since(now)).total_seconds() / 3600
+        archived(archive_db, "twse-openapi/price", hours_ago=trusted_hours + 1)
     md, twse, _ = facade(archive_db)
     assert ex_dates(md) == [EX_ARCHIVED, EX_LIVE_ONLY] and twse.calls == [("dividends", "2308.TW")]
 
