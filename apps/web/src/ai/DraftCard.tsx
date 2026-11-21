@@ -7,19 +7,29 @@ import { Masked } from "@/components/finance"
 import { Button } from "@/components/ui/button"
 import { formatDateShort, formatMoney, formatNumber, formatPercent, formatPrice, formatQuantity } from "@/lib/format"
 import { usd } from "@/lib/labels"
+import { typeFromCode } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import type { Draft } from "./types"
 
-/** 成交價和那天的收盤價差這麼多（10%，台股一天的漲跌幅上限）以上時，草稿上多寫一行（多半是打錯價格或日期） */
+/**
+ * 成交價和那天的收盤價差這麼多（10%，台股一天的漲跌幅上限）以上時，草稿上多寫一行（多半是打錯價格或日期）：
+ * 那一行在合計的上面、差多少是粗體，焦點先到「修改」（不是簽名格；2026-11-21 評論）
+ */
 const FAR_FROM_CLOSE = 0.1
+
+/** 和收盤價差很多的那一行：前半是哪一天、哪一種收盤價與價格（「比 11/12 收盤價 72.40」），後半是差多少（「低 27.6%」，粗體） */
+interface FarFromClose {
+  base: string
+  gap: string
+}
 
 /**
  * 成交價和那天的收盤價差很多時的一行事實（產品負責人 2026-11-21；不寫建議）：「比 11/12 收盤價 72.40 低 27.6%」。
  * 美股寫紐約的交易日與 US$（「比 11/13（美東）收盤價 US$356.27 高 12.3%」）；存檔以前的日子是 Yahoo 參考價，寫「參考收盤」。
  * 收盤價和記一筆的「那天收盤」同一個查詢（`getDailyClose`，同一個快取）；那天沒有收盤價（假日、還沒收盤、太早）就不寫。
  */
-function useFarFromClose(draft: Draft): string | null {
+function useFarFromClose(draft: Draft): FarFromClose | null {
   const { input, instrument } = draft
   const priced = (input.type === "buy" || input.type === "sell") && input.price != null && input.price > 0
   const q = useQuery({
@@ -36,8 +46,26 @@ function useFarFromClose(draft: Draft): string | null {
   const us = instrument.market === "US"
   const day = `${formatDateShort(q.data?.date ?? input.trade_date, false)}${us ? "（美東）" : " "}`
   const what = q.data?.reference ? "參考收盤" : "收盤價"
-  const price = us ? usd(close) : formatPrice(close, instrument.market)
-  return `比 ${day}${what} ${price} ${diff < 0 ? "低" : "高"} ${formatPercent(Math.abs(diff), { decimals: 1, signed: false })}`
+  const price = us ? usd(close) : formatPrice(close, instrument.market, typeFromCode(instrument.code))
+  return { base: `比 ${day}${what} ${price}`, gap: `${diff < 0 ? "低" : "高"} ${formatPercent(Math.abs(diff), { decimals: 1, signed: false })}` }
+}
+
+/** 已經把焦點移到「修改」的草稿（每份草稿只移一次：重開對話、換頁回來時不再搶焦點） */
+const focusedFar = new Set<string>()
+/** 「剛出現」的草稿：建立後這麼久以內才移焦點（重新整理後還原的舊草稿不搶焦點） */
+const FRESH_MS = 5 * 60_000
+
+/**
+ * 焦點可不可以移到草稿卡上：使用者正在別的輸入框打字（裡面有字）、或焦點在另一個對話框裡時不搶。
+ * 剛送出的輸入框是空的，焦點在 body 或面板裡的按鈕上，都可以移。
+ */
+function canTakeFocus(target: HTMLElement): boolean {
+  const a = document.activeElement
+  if (!(a instanceof HTMLElement) || a === document.body) return true
+  if ((a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement) && a.value.trim() !== "") return false
+  if (a.isContentEditable) return false
+  const dialog = a.closest('[role="dialog"], [role="alertdialog"]')
+  return !dialog || dialog.contains(target)
 }
 
 const VERBS: Record<string, string> = {
@@ -66,6 +94,8 @@ interface Props {
  * 交易草稿（石墨灰虛線、尚未生效）。
  * 「怎麼算的 ⌄」展開稅費規則；「修改」原地改股數、價格、日期；方形「簽名｜確認入帳」才會真的入帳。
  * 簽名後格子留下使用者名字的第一個字（墨色 Noto Sans：這是使用者的字，不是模型寫的），草稿變成實線。
+ * 成交價和那天的收盤價差 10% 以上：那一行事實在格子與合計之間（差多少是粗體），草稿剛出現時焦點移到「修改」，
+ * 按 Enter 是修改、不是簽名（`修改` 的說明念那一行）。
  */
 export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused }: Props) {
   const privacy = usePrefs((s) => s.privacyMode)
@@ -75,6 +105,8 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
   const ref = useRef<HTMLElement>(null)
   const titleId = useId()
   const howId = useId()
+  const farId = useId()
+  const editRef = useRef<HTMLButtonElement>(null)
   const [howOpen, setHowOpen] = useState(false)
   const { input, instrument, preview, status } = draft
   const isDividend = input.type === "cash_dividend"
@@ -89,6 +121,7 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
   const sameCurrency = (accounts.data ?? []).filter((a) => a.currency === currency)
   const signature = (me.data?.display_name ?? "我").slice(0, 1)
   const farFromClose = useFarFromClose(draft)
+  const far = farFromClose !== null && !signed
   // 買賣的手續費（與賣出的交易稅）：不自動算（2026-11-14），但卡片上一定有這一格（2026-11-21）——沒填（試算也是 0）就寫「沒填」，
   // 合計就是不含它的金額；填了、或試算裡有（定期定額的扣款）寫金額，和合計同一個數字
   const trade = input.type === "buy" || input.type === "sell"
@@ -98,6 +131,17 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
   useEffect(() => {
     if (focused) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
   }, [focused])
+
+  // 和收盤價差很多：草稿剛出現時焦點先到「修改」（每份草稿一次；剛建立的才移，使用者在別處打字時不搶）
+  useEffect(() => {
+    if (!far || editing || status !== "pending" || focusedFar.has(draft.id)) return
+    const born = Date.parse(draft.createdAt)
+    if (!Number.isFinite(born) || Date.now() - born > FRESH_MS) return
+    const el = editRef.current
+    if (!el || !canTakeFocus(el)) return
+    focusedFar.add(draft.id)
+    el.focus()
+  }, [far, editing, status, draft.id, draft.createdAt])
 
   // 美股的金額每一格都寫 US$（只有「實拿」有幣別的話，2.60 看不出是哪一種錢）；新台幣照舊不加
   const money = (n: number) => (privacy ? <Masked /> : formatMoney(n, { currency, bare: currency !== "USD" }))
@@ -166,7 +210,7 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
                     ? "—"
                     : input.type === "stock_dividend"
                       ? formatPrice(input.price, instrument.market)
-                      : `${formatPrice(input.price, instrument.market)} ${currency === "USD" ? "美元" : "元"}`
+                      : `${formatPrice(input.price, instrument.market, typeFromCode(instrument.code))} ${currency === "USD" ? "美元" : "元"}`
                 }
                 right
               />
@@ -182,31 +226,36 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
                 ))}
             </>
           )}
-          <div className="col-span-2 flex items-center justify-between border-b border-rule px-4 py-3">
-            <dt className="font-bold text-ink">{isDividend ? "實拿" : input.type === "sell" ? "實收" : isCash ? "金額" : "合計"}</dt>
-            <dd className="num text-xl font-bold text-ai" aria-live="polite">
-              {status === "loading" || total === null ? (
-                <span className="text-base font-normal text-ink-2">計算中…</span>
-              ) : privacy ? (
-                <Masked />
-              ) : (
-                formatMoney(total, { currency })
-              )}
-            </dd>
-          </div>
         </dl>
       )}
 
-      {(draft.notes.length > 0 || farFromClose) && !signed && (
+      {/* 和那天的收盤價差 10% 以上：格子和合計之間一行事實，差多少是粗體（只有事實，不寫「請確認」）。修改時也在，改了價格馬上重算 */}
+      {farFromClose && !signed && (
+        <p id={farId} className="num border-b border-rule px-4 py-2.5 text-base text-ink" data-far-from-close>
+          {farFromClose.base} <b className="font-bold">{farFromClose.gap}</b>
+        </p>
+      )}
+
+      {!(editing && !signed) && (
+        <dl className="flex items-center justify-between border-b border-rule px-4 py-3">
+          <dt className="font-bold text-ink">{isDividend ? "實拿" : input.type === "sell" ? "實收" : isCash ? "金額" : "合計"}</dt>
+          <dd className="num text-xl font-bold text-ai" aria-live="polite">
+            {status === "loading" || total === null ? (
+              <span className="text-base font-normal text-ink-2">計算中…</span>
+            ) : privacy ? (
+              <Masked />
+            ) : (
+              formatMoney(total, { currency })
+            )}
+          </dd>
+        </dl>
+      )}
+
+      {draft.notes.length > 0 && !signed && (
         <ul className="flex flex-col gap-1 border-b border-rule px-4 py-2.5 text-sm text-ink">
           {draft.notes.map((n) => (
             <li key={n}>{n}</li>
           ))}
-          {farFromClose && (
-            <li className="num" data-far-from-close>
-              {farFromClose}
-            </li>
-          )}
         </ul>
       )}
       {status === "error" && (
@@ -241,7 +290,15 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
             </Button>
           </>
         ) : (
-          <Button variant="outline" size="sm" className="h-9 pointer-coarse:h-11" onClick={() => setEditing(true)} disabled={status === "loading"}>
+          <Button
+            ref={editRef}
+            variant="outline"
+            size="sm"
+            className="h-9 pointer-coarse:h-11"
+            onClick={() => setEditing(true)}
+            disabled={status === "loading"}
+            aria-describedby={far ? farId : undefined}
+          >
             修改
           </Button>
         )}
