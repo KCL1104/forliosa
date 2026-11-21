@@ -361,6 +361,8 @@ describe("記一筆：每一筆買進可以填手續費（產品負責人 2026-1
     const fee = within(dialog).getByRole("textbox", { name: "手續費（美元）" })
     expect(fee).toHaveAttribute("placeholder", "選填")
     expect(within(dialog).getByRole("textbox", { name: "買進價格（美元）" })).toBeInTheDocument()
+    // 選好股票 80ms 後焦點會移到第一筆的股數（QuickAdd）：先等它，不然在忙的機器上「1」之後的「.5」會打進股數（CI 偶爾 1.5 變 1）
+    await waitFor(() => expect(document.activeElement?.id).toBe("lot-qty-0"))
     await user.type(fee, "1.5")
     await user.click(within(dialog).getByRole("button", { name: "賣出、股利或其他" }))
     const full = await screen.findByRole("dialog", { name: "記一筆交易" }, T)

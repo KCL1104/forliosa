@@ -94,10 +94,12 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
     expect([...within(region).getByRole("img").querySelectorAll("text")].map((t) => t.textContent)).toContain("10/12")
     // 首頁的走勢只問「全部」一次（不帶基準），不再另外問 1M；本月（MTD）是分享卡問的（有加入群組時帳本也放，2026-11-21）
     expect(spy.mock.calls.filter(([q]) => (q.range !== "ALL" || q.benchmark) && q.range !== "MTD")).toEqual([])
-    const before = spy.mock.calls.length
+    // 只數走勢自己的請求：分享卡的本月（MTD）可能比這裡晚送出，數進去就會偶爾多 1（CI 2026-11-21）
+    const trendCalls = () => spy.mock.calls.filter(([q]) => q.range !== "MTD").length
+    const before = trendCalls()
     await userEvent.click(within(chips).getByRole("radio", { name: "3月" }))
     expect(within(region).getByText("近 3 個月")).toBeInTheDocument()
-    expect(spy.mock.calls.length).toBe(before)
+    expect(trendCalls()).toBe(before)
     expect(useLedgerPrefs.getState().trendRange).toBe("3M")
   })
 
