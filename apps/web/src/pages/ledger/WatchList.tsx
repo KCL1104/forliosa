@@ -7,7 +7,7 @@ import { DemoTag } from "@/components/section"
 import { Sparkline } from "@/components/sparkline"
 import { EmptyState, ErrorState } from "@/components/states"
 import { textAction } from "@/components/text-action"
-import { Tray, type TrayTint } from "@/components/tray"
+import { Tray } from "@/components/tray"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction } from "@/lib/format"
 import { codeOf, formatQuote, marketOf } from "@/lib/tick"
@@ -18,7 +18,7 @@ import { codeOf, formatQuote, marketOf } from "@/lib/tick"
  * 手機與桌面同一個樣子（和手機的持倉列同一套）。整列連到個股頁。名稱不截斷：放不下就換行。
  * 查看別人的資產時不放（觀察清單是自己的）。
  */
-export function WatchList({ tint }: { tint: TrayTint }) {
+export function WatchList() {
   const watch = useWatchlist()
   const items = watch.data ?? []
   const demo = items.some((w) => w.quote?.is_demo ?? w.is_demo)
@@ -27,7 +27,6 @@ export function WatchList({ tint }: { tint: TrayTint }) {
       title="觀察清單"
       meta={watch.data ? <>{items.length} 檔</> : undefined}
       action={demo ? <DemoTag /> : undefined}
-      tint={tint}
       className="h-full"
     >
       {watch.isError ? (

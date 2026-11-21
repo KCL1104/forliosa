@@ -249,26 +249,20 @@
 
   /*
    * 托盤（產品負責人 2026-11-21：帳本、個股、市場採方向 C「圓桌」的結構；見 DESIGN.md〈托盤〉與 `.tray`）。
-   * 三種底色只為了讓相鄰的兩盤分得開，不代表任何意思。沒有框線、沒有陰影；圓角是方肩的 8px（不是 C 的 24px）。
-   * 對比（WCAG，字對托盤／對托盤裡的 hover 列）：
-   *   tray-1 #ffffff：墨 14.3、淡墨與印刷藍 5.9（hover 5.0）、漲跌 5.6（hover 4.7）
-   *   tray-2 #f3efe6：墨 12.4、淡墨與印刷藍 5.2（hover 4.8）、漲跌 4.9（hover 4.5）
-   *   tray-3 #ecf0f6：墨 12.5、淡墨與印刷藍 5.2（hover 4.8）、漲跌 4.9（hover 4.6）
-   * 托盤要放漲跌的字，所以不能比 tray-2 更深（#ebe5d9 的漲跌只剩 4.49:1）。tray-3 是印刷藍的淡底，
-   * 比 AI 的石墨淡底（#f1f2f4）藍；AI 的草稿另有石墨灰虛線框，兩者靠框分開。
-   * 托盤裡的格線、控制項的框、圖表格線用托盤自己的一組（`.tray` 換掉 --rule、--ctl、--chart-grid）：
-   *   控制項的框 #7c8599 對三種托盤 3.7／3.2／3.2:1（原本的 --ctl 在 tray-2 只有 2.9:1）；
-   *   格線 #cfd7e2 對托盤 1.45／1.26／1.27:1（和紙上的格線 1.26:1 同一個份量）；圖表格線 #dde3ea 1.29／1.13／1.13:1。
+   * 托盤只留一種底色（產品負責人 2026-11-21）：每一盤都是白紙，不代表任何意思。沒有框線、沒有陰影；圓角是方肩的 8px（不是 C 的 24px）。
+   * 白紙是和紙分得最開的一種：對紙 1.08:1（OKLCH 明度 0.973 → 1.000）；以前的沙 #f3efe6、印刷藍的淡底 #ecf0f6 只有 1.06:1。
+   * 比紙深的底分不了更開：要讓托盤裡 hover 列上的漲跌 ≥ 4.5:1，深的那一邊最多只到 1.09:1，hover 還幾乎看不出來。
+   * 對比（WCAG，字對托盤／對托盤裡的 hover 列）：墨 14.3／12.0、淡墨 5.9／5.0、印刷藍 6.0／5.0、漲跌 5.6／4.7、AI 7.9。
+   * 托盤裡的格線、控制項的框、圖表格線、印刷線用托盤自己的一組（`.tray` 換掉 --rule、--ctl、--chart-grid、--print）：
+   *   格線 #cfd7e2 對托盤 1.45:1（紙上的格線 1.26:1）；控制項的框 #7c8599 3.7:1；圖表格線 #dde3ea 1.29:1；
+   *   印刷線和紙上同一條（#7f95ba，對托盤 3.0:1）。
    */
-  --tray-1: #ffffff;
-  --tray-1-hov: #efebe2;
-  --tray-2: #f3efe6;
-  --tray-2-hov: #ebe6db;
-  --tray-3: #ecf0f6;
-  --tray-3-hov: #e2e8f1;
+  --tray: #ffffff;
+  --tray-hov: #efebe2;
   --tray-rule: #cfd7e2;
   --tray-ctl: #7c8599;
   --tray-grid: #dde3ea;
+  --tray-print: #7f95ba;
   --tray-radius: 8px;
   /* 托盤的內距與托盤之間的距離：手機 16／12px，≥ 768px 24／16px */
   --tray-pad: 1rem;
@@ -367,22 +361,22 @@
   --band-5: #afaba4;
 
   /*
-   * 托盤：石墨（深色維持石墨，不用 C 的藍黑）。三盤都是同一個暖灰色相，一盤比一盤亮一階；沒有藍色的底。
-   * 對比（字對托盤／對托盤裡的 hover 列）：
-   *   tray-1 #191714：墨 14.2、淡墨與印刷字 7.1（hover 6.6）、漲 6.5（hover 6.0）、跌 8.1
-   *   tray-2 #1e1b18：墨 13.6、淡墨 6.8（hover 6.2）、漲 6.2（hover 5.6）、跌 7.7
-   *   tray-3 #23201c：墨 12.9、淡墨 6.5（hover 5.8）、漲 5.8（hover 5.3）、跌 7.3
-   * 控制項的框 #75726c 對托盤 3.7／3.6／3.4:1；格線 #4f4c47 1.9–2.1:1（深色的格線保持 1.9:1 以上）；圖表格線 #2d2a26 1.14–1.25:1。
+   * 托盤：石墨（深色維持石墨，不用 C 的藍黑）。一種底色，和紙同一個暖灰色相（OKLCH 0.282／0.006／78），沒有藍色的底。
+   * 對紙 1.31:1：以前的三種只有 1.04–1.17:1，晚上用手機看等於沒有；紙上的 hover 列是 1.11:1，托盤要比它高一大階才看得出是「一盤」。
+   * 上限是托盤裡 hover 列上的漲（#ff6b6b）要 ≥ 4.5:1：hover 對托盤 1.10:1 時，托盤對紙最多約 1.36:1。
+   * 對比（字對托盤／對托盤裡的 hover 列）：墨 11.5／10.4、淡墨與印刷字 5.8／5.2、漲 5.2／4.7、跌 6.6／5.9、AI 7.7／7.0。
+   * 托盤裡的線與框照紙上的份量重配：格線 #5b5853 2.05:1（紙上 1.93）、印刷線 #76736d 3.07:1（紙上 3.12；
+   * 原本的 #65625c 在托盤上只有 2.39:1，和格線分不開）、控制項的框 #7e7b75 3.44:1（紙上 3.32）、圖表格線 #383531 1.19:1（紙上 1.11）。
+   * 選取的格子與實心記號（on-bg、fill-bg）在紙上是 #2a2723，放到托盤上會和托盤一樣亮：托盤裡換成 --tray-on #3d3a36
+   * （對托盤 1.28:1，和紙上的 #2a2723 對紙同一階；墨 9.0:1、內框 #96938e 3.7:1）。
    */
-  --tray-1: #191714;
-  --tray-1-hov: #211e1b;
-  --tray-2: #1e1b18;
-  --tray-2-hov: #26231f;
-  --tray-3: #23201c;
-  --tray-3-hov: #2b2824;
-  --tray-rule: #4f4c47;
-  --tray-ctl: #75726c;
-  --tray-grid: #2d2a26;
+  --tray: #2b2926;
+  --tray-hov: #32302d;
+  --tray-rule: #5b5853;
+  --tray-ctl: #7e7b75;
+  --tray-grid: #383531;
+  --tray-print: #76736d;
+  --tray-on: #3d3a36;
 
   --scrim: rgb(0 0 0 / 0.6);
   color-scheme: dark;
@@ -435,10 +429,6 @@
   --color-chart-blue: var(--chart-blue);
   --color-chart-ochre: var(--chart-ochre);
   --color-chart-grid: var(--chart-grid);
-  /* 托盤的底色（一般用 `<Tray tint>`；`bg-tray-*` 只給不是托盤、但要和托盤同色的東西） */
-  --color-tray-1: var(--tray-1);
-  --color-tray-2: var(--tray-2);
-  --color-tray-3: var(--tray-3);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -702,38 +692,34 @@
 
   /*
    * 托盤（`components/tray.tsx`）：一組內容放在一塊有底色、有圓角的面上——沒有框線、沒有陰影，托盤不疊托盤。
-   * 三種底色（data-tint 1–3）只為了讓相鄰的兩盤分得開，不代表任何意思。
-   * 托盤裡，托盤就是紙：紙色、hover、格線、控制項的框、圖表格線換成托盤的版本，裡面的元件不用另外改——
+   * 只有一種底色（`--tray`，產品負責人 2026-11-21），不代表任何意思；盤與盤之間靠間距分開。
+   * 托盤裡，托盤就是紙：紙色、hover、格線、印刷線、控制項的框、圖表格線換成托盤的版本，裡面的元件不用另外改——
    * `bg-paper` 的遮擋（圖表的紙色線、虛線上的標籤、sticky 的表頭）和托盤同色；hover 列、分段的軌道、骨架比托盤深一階；
    * 控制項的框對托盤仍 ≥ 3:1。canvas 圖表（lightweight-charts）讀顏色時要把托盤裡的元素傳給 `cssVarColor(name, a, el)`，
    * 預設讀的是 <html>，會拿到托盤外面的紙色與格線。
    */
   .tray {
-    --tray-bg: var(--tray-1);
-    --tray-hov-bg: var(--tray-1-hov);
-    --paper: var(--tray-bg);
-    --background: var(--tray-bg);
-    --hov: var(--tray-hov-bg);
-    --muted: var(--tray-hov-bg);
+    --paper: var(--tray);
+    --background: var(--tray);
+    --hov: var(--tray-hov);
+    --muted: var(--tray-hov);
     /* 次要按鈕滑過、程式碼底：墨色 8%（淺色和紙上的 --sel 同值；深色在托盤上才看得出來） */
     --sel: color-mix(in srgb, var(--ink) 8%, transparent);
     --rule: var(--tray-rule);
     --border: var(--tray-rule);
+    --print: var(--tray-print);
     --ctl: var(--tray-ctl);
     --input: var(--tray-ctl);
     --chart-grid: var(--tray-grid);
     min-width: 0;
     padding: var(--tray-pad);
     border-radius: var(--tray-radius);
-    background: var(--tray-bg);
+    background: var(--tray);
   }
-  .tray[data-tint="2"] {
-    --tray-bg: var(--tray-2);
-    --tray-hov-bg: var(--tray-2-hov);
-  }
-  .tray[data-tint="3"] {
-    --tray-bg: var(--tray-3);
-    --tray-hov-bg: var(--tray-3-hov);
+  /* 深色：選取的格子與實心記號在紙上的暖灰底（#2a2723）和托盤一樣亮，托盤裡亮一階（淺色的白底、墨色實底不用換） */
+  .dark .tray {
+    --on-bg: var(--tray-on);
+    --fill-bg: var(--tray-on);
   }
 
   /* 格線列：整列可點、hover 是淡墨底 */
