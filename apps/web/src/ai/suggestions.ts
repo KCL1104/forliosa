@@ -166,10 +166,9 @@ export function ledgerSuggestions({ holdings, summary }: LedgerData, today: stri
   if (holdings.length === 0) {
     return [{ kind: "onboard", text: "怎麼記第一筆？" }]
   }
+  // 「誰拖累／誰賺最多」不再當建議問題：帳本的「今日損益」中線橫條已經回答（產品負責人 2026-11-21 照建議）；
+  // 使用者自己問時照樣回答（`intent.ts` 的 drag／lift）
   const out: Suggestion[] = []
-  const { lead: day, movers } = ledgerDay({ holdings, summary }, today)
-  if (movers.some((h) => h.day_change < 0)) out.push({ kind: "drag", text: `${day}誰拖累了我的報酬？` })
-  else if (movers.some((h) => h.day_change > 0)) out.push({ kind: "lift", text: `${day}誰幫我賺最多？` })
   const soon = (summary?.upcoming_dividends ?? []).filter((d) => daysBetween(today, d.ex_dividend_date) <= 31)
   if (soon.length > 0) out.push({ kind: "dividends_next", text: "下個月我能領多少股利？" })
   if (isConcentrated(holdings, summary)) out.push({ kind: "concentration", text: "我的持股會不會太集中？" })

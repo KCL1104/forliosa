@@ -4,7 +4,7 @@ import { appToday } from "@/api"
 import { useChips, useCompany, useEvents, useNews, useOverview, useRevenue, useValuation } from "@/api/queries"
 import type { InstrumentDetail, InstrumentOverview, MonthlyRevenue, Position, Quote, Valuation } from "@/api/types"
 import { useReadOnly, useWho } from "@/api/view-as"
-import { Section } from "@/components/section"
+import { Tray } from "@/components/tray"
 import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSourceNote } from "@/hooks/use-source-note"
@@ -26,31 +26,36 @@ import { Fig, KeyGrid, NotYet, type KeyItem } from "./kit"
 
 /**
  * 總覽：三層。
- * 1. 分頁列正下方：一條密的格線鍵值帶——估值位置（股票）、行情與基本數字、月營收、籌碼（ETF 換成淨值與折溢價）。
- * 2. 事件：接下來的除息、營收、法說會與最近的官方公告，依日期排成一張聯絡簿。
- * 3. 安靜的參考：法人觀點（收合）、新聞報導（先 3 則）、關於〈公司〉、相關股票。
+ * 1. 分頁托盤裡（分頁列正下方）：一條密的格線鍵值帶——估值位置（股票）、行情與基本數字、月營收、籌碼（ETF 換成淨值與折溢價）。
+ * 2. 事件托盤：接下來的除息、營收、法說會與最近的官方公告，依日期排成一張聯絡簿；旁邊（寬的時候）是相關股票。
+ * 3. 安靜的參考：法人觀點（收合）、新聞報導（先 3 則）、關於〈公司〉——各自一盤。
+ * 第二、三層是分頁托盤的兄弟（`OverviewTrays`，由 StockPage 放在分頁托盤後面），托盤不疊托盤。
  * 資料來源不在各區塊寫，登記到頁尾（useSourceNote）。
  */
 export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
-  const readOnly = useReadOnly()
   const band = useKeyBand(inst, quote)
   const company = useCompany(inst.symbol)
   // 只剩一兩格（例如還沒有收盤價的美股只有近四季 EPS）：不在分頁列下面單獨畫一條兩條線夾著的細帶，併進「關於」的鍵值格。
   // 「關於」沒有資料可放時（公司資料載入失敗）才留在這裡寫成一行。
   const folded = band.sparse && (company.isLoading || !!company.data)
+  return <KeyBand inst={inst} band={band} position={position} folded={folded} />
+}
+
+/** 總覽在分頁托盤後面的托盤：事件＋相關股票（寬的時候並排）、法人觀點、新聞報導、關於〈公司〉 */
+export function OverviewTrays({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
+  const readOnly = useReadOnly()
+  const band = useKeyBand(inst, quote)
+  const company = useCompany(inst.symbol)
+  const folded = band.sparse && (company.isLoading || !!company.data)
   return (
-    <div className="flex flex-col">
-      <KeyBand inst={inst} band={band} position={position} folded={folded} />
-      {/* 鍵值帶整個沒有東西時（併到「關於」了），事件就是第一塊，上面不留 48px */}
-      <Events inst={inst} position={position} className={band.empty || (folded && !band.notes) ? undefined : "mt-12"} />
-      <div className="mt-14 flex flex-col gap-10">
-        {/* 第三方的評等與目標價：個股才有（ETF 沒有分析師評等）；預設收合，展開才查 */}
-        {inst.type === "stock" && !readOnly && <AnalystViewsCard key={inst.symbol} inst={inst} />}
-        <NewsCoverage key={`news-${inst.symbol}`} inst={inst} />
-        <AboutCompany key={`about-${inst.symbol}`} inst={inst} extra={folded ? band.cells : undefined} />
-        <RelatedStocks key={`related-${inst.symbol}`} inst={inst} />
-      </div>
-    </div>
+    <>
+      <Events inst={inst} position={position} />
+      <RelatedStocks key={`related-${inst.symbol}`} inst={inst} />
+      {/* 第三方的評等與目標價：個股才有（ETF 沒有分析師評等）；預設收合，展開才查 */}
+      {inst.type === "stock" && !readOnly && <AnalystViewsCard key={inst.symbol} inst={inst} />}
+      <NewsCoverage key={`news-${inst.symbol}`} inst={inst} />
+      <AboutCompany key={`about-${inst.symbol}`} inst={inst} extra={folded ? band.cells : undefined} />
+    </>
   )
 }
 
@@ -112,7 +117,8 @@ function KeyBand({ inst, band, position, folded }: { inst: InstrumentDetail; ban
       {band.loading ? (
         <Skeleton className="h-56 w-full rounded-sm" />
       ) : cells.length >= 3 ? (
-        <KeyGrid items={cells} />
+        // 分頁列下面第一塊就是格子時，分頁列的格線就是它的上緣，不再畫一條
+        <KeyGrid items={cells} className={band.showValuation ? undefined : "border-t-0"} />
       ) : (
         // 只剩一兩格、而且「關於」放不了（公司資料沒有載入）：寫成一行，不在 3 欄格線裡留一格孤零零的
         cells.length > 0 &&
@@ -305,7 +311,7 @@ function ValuationStrip({
   if (pe === null) {
     if (eps !== null && eps <= 0) {
       return (
-        <p className="border-t border-rule py-3 text-base text-ink">
+        <p className="pb-3 text-base text-ink">
           近四季虧損，本益比沒有意義，改看
           <Link to="/stock/$symbol" params={{ symbol: inst.symbol }} search={{ tab: "valuation" }} resetScroll={false} className="underline decoration-ctl underline-offset-3 hover:decoration-ink">
             股價淨值比
@@ -320,20 +326,24 @@ function ValuationStrip({
   const history = v.series.map((p) => p.per).filter((x): x is number => x !== null && x > 0).sort((a, b) => a - b)
   const costPe = position && !privacy && eps !== null && eps > 0 ? position.avg_cost / eps : null
   const costPct = costPe !== null && history.length ? history.filter((x) => x <= costPe).length / history.length : null
-  // 成本比這段期間最便宜的那天還低（或比最貴的還高）時，點停在尺的端點，標籤要說清楚
-  const costLabel =
-    costPe === null || history.length === 0
+  // 空心點的標籤只有名詞和數字（「你的成本 13.2 倍」，產品負責人 2026-11-21：頁面不寫句子、不加括號）。
+  // 成本比這段期間最便宜的那天還低（或比最貴的還高）時點停在尺的端點：看得出來（標籤的倍數比端點的刻度小／大），
+  // 螢幕閱讀器另外念「低於 6/1 以來最低」
+  const costLabel = costPe === null || history.length === 0 ? null : `${you}的成本 ${costPe.toFixed(1)} 倍`
+  const costSpoken =
+    costLabel === null
       ? null
-      : costPe < history[0]!
-        ? `${you}的成本 ${costPe.toFixed(1)} 倍，低於${beforeSpan(span.label)}最低`
-        : costPe > history.at(-1)!
-          ? `${you}的成本 ${costPe.toFixed(1)} 倍，高於${beforeSpan(span.label)}最高`
-          : `${you}的成本 ${costPe.toFixed(1)} 倍`
+      : costPe! < history[0]!
+        ? `${costLabel}，低於${beforeSpan(span.label)}最低`
+        : costPe! > history.at(-1)!
+          ? `${costLabel}，高於${beforeSpan(span.label)}最高`
+          : costLabel
   const scale = pct !== null && history.length >= 2
   const ticks = scale ? TICKS.map((q) => quantile(history, q)) : []
   const accumulating = span.full ? null : (v.notes.find(isCoverageNote) ?? null)
   return (
-    <div className="border-t border-rule pt-3 pb-4">
+    // 分頁托盤裡的第一塊：上面已經是分頁列的格線，不再畫一條
+    <div className="pb-4">
       <p className="text-base text-ink">
         本益比 <Fig>{pe.toFixed(1)}</Fig> 倍
         {pct !== null && (
@@ -347,7 +357,7 @@ function ValuationStrip({
             {span.label}最低 {ticks[0]!.toFixed(1)} 倍、最高 {ticks.at(-1)!.toFixed(1)} 倍。
           </span>
         )}
-        {costLabel && <span className="sr-only">{costLabel}。</span>}
+        {costSpoken && <span className="sr-only">{costSpoken}。</span>}
       </p>
       {scale && <PercentileScale now={pct} cost={costPct} costLabel={costLabel} ticks={ticks} />}
       {accumulating && <p className="mt-1 text-sm text-ink-2">{accumulating}</p>}
@@ -414,7 +424,7 @@ const official = (e: TimelineRow) => e.type === "announcement" || e.type === "ma
  * 一張依日期排的表：最近 3 則官方公告（重大訊息、證交所公告、SEC 申報，連到原文）在前，接下來的 4 件事在後。
  * 日期格是聯絡簿的日期格；右欄是相對天數，持有時除息列寫可領金額。
  */
-function Events({ inst, position, className }: { inst: InstrumentDetail; position: Position | null; className?: string }) {
+function Events({ inst, position }: { inst: InstrumentDetail; position: Position | null }) {
   const you = useWho("你")
   const events = useEvents(inst.symbol)
   const news = useNews(inst.symbol)
@@ -434,40 +444,40 @@ function Events({ inst, position, className }: { inst: InstrumentDetail; positio
   useSourceNote(sourceNotes([...new Set(shown.flatMap((e) => e.sources ?? []))]))
 
   return (
-    <Section
+    // 寬的時候（主欄 ≥ 56rem）和後面的相關股票並排：8＋4 欄；沒有相關股票時撐滿一列
+    <Tray
       title="事件"
-      titleId="ov-events"
-      className={className}
+      className="@4xl:col-span-12 @4xl:[&:has(+#ov-related)]:col-span-8"
+      bodyClassName="@container"
       action={
         <Link
           to="/stock/$symbol"
           params={{ symbol: inst.symbol }}
           search={{ tab: "events" }}
           resetScroll={false}
-          className="inline-flex h-8 items-center rounded-sm px-1 text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:h-11"
+          className="inline-flex h-8 items-center rounded-sm px-1 text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink -my-0.5 pointer-coarse:-my-2 pointer-coarse:h-11"
         >
           所有事件
         </Link>
       }
-      bodyClassName="pt-0"
     >
       {events.isLoading ? (
-        <Skeleton className="mt-3 h-40 w-full rounded-sm" />
+        <Skeleton className="h-40 w-full rounded-sm" />
       ) : events.isError ? (
-        <ErrorState className="mt-3" error={events.error} onRetry={() => void events.refetch()} />
+        <ErrorState error={events.error} onRetry={() => void events.refetch()} />
       ) : shown.length === 0 ? (
-        <NotYet className="border-t-0" title="目前沒有事件">
+        <NotYet title="目前沒有事件">
           {inst.market === "US" ? "沒有已公告的除息，最近也沒有 SEC 申報。" : "沒有已公告的除息、營收公布或法說會，最近 90 天也沒有官方公告。"}
         </NotYet>
       ) : (
-        <ol>
+        <ol className="border-t border-rule">
           {shown.map((e) => (
             <EventRow key={`${e.date}-${e.type}-${e.title}`} e={e} today={today} amount={e.amount_estimate !== null && position ? `${you}可領約 ${privacy ? "••••" : formatMoney(e.amount_estimate)}` : null} />
           ))}
         </ol>
       )}
       {news.isError && !news.data && <ErrorState className="mt-3" title="公告沒有載入" error={news.error} onRetry={() => void news.refetch()} />}
-    </Section>
+    </Tray>
   )
 }
 
@@ -478,10 +488,11 @@ function EventRow({ e, today, amount }: { e: TimelineRow; today: string; amount:
   // 類別欄已經寫了「除息」，標題就不再重複（「除息 每股 5 元」→「每股 5 元」）；標題就是類別時寫說明，沒有說明就不寫類別
   const { title, kind } = withoutKind(eventTitle(e), label, e.detail)
   return (
-    <li className={cn("grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule sm:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]", e.url && "relative hover:bg-hov")}>
+    // 欄位跟著托盤的寬度排（@container）：事件托盤在寬的主欄只有 8／12 欄
+    <li className={cn("grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule last:border-b-0 @lg:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]", e.url && "relative hover:bg-hov")}>
       <DateCell date={e.date} pad="py-3" inline />
-      <span className="py-3 pl-3 text-md text-ink-2 max-sm:hidden">{kind}</span>
-      <span className="min-w-0 py-3 pl-3 sm:pl-0">
+      <span className="py-3 pl-3 text-md text-ink-2 @max-lg:hidden">{kind}</span>
+      <span className="min-w-0 py-3 pl-3 @lg:pl-0">
         {e.url ? (
           // 有原文的列：常駐的底線；連結撐滿整列（手機上整列都按得到，不只是字）
           <a href={e.url} target="_blank" rel="noreferrer" className="underline decoration-ctl underline-offset-3 after:absolute after:inset-0 hover:decoration-ink">
@@ -496,12 +507,12 @@ function EventRow({ e, today, amount }: { e: TimelineRow; today: string; amount:
             預估
           </span>
         )}
-        <span className="mt-0.5 block text-sm text-ink-2 sm:hidden">
+        <span className="mt-0.5 block text-sm text-ink-2 @lg:hidden">
           {kind && `${kind}・`}
           {amount ? <span className="num text-ink">{amount}</span> : when}
         </span>
       </span>
-      <span className={cn("num py-3 pl-3 text-right whitespace-nowrap max-sm:hidden", amount ? "text-md text-ink" : "text-sm text-ink-2")}>{amount ?? when}</span>
+      <span className={cn("num py-3 pl-3 text-right whitespace-nowrap @max-lg:hidden", amount ? "text-md text-ink" : "text-sm text-ink-2")}>{amount ?? when}</span>
     </li>
   )
 }

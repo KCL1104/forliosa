@@ -484,7 +484,8 @@ describe("「本金」開關（使用者 2026-11-19）", { timeout: 20_000 }, ()
     const readout = region.querySelector<HTMLElement>("[data-readout]")!
     expect(readout).toContainElement(toggle(region))
     expect(readout).toHaveClass("h-11")
-    expect(region.querySelector("[data-legend-grid]")).toHaveClass("h-10")
+    // 至少兩行（2026-11-21：托盤裡 320px、金額上千億時第二欄換到下一行，不撐出畫面；高度照最寬的金額定，滑過時不跳）
+    expect(region.querySelector("[data-legend-grid]")).toHaveClass("min-h-10")
     expect(toggle(region)).toHaveAttribute("data-size", "sm")
     expect(toggle(region).closest("label")!.textContent).toBe("本金")
     cleanup()

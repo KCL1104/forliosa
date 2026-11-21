@@ -42,13 +42,14 @@ export function ClosedRounds() {
           aria-expanded={open}
           aria-controls="closed-list"
           onClick={() => setOpen(!open)}
-          className="flex min-h-[52px] w-full items-end gap-2 border-b border-print pb-2 text-left hover:text-ink"
+          className="flex min-h-[52px] w-full flex-wrap items-end gap-x-2 border-b border-print pb-2 text-left hover:text-ink"
         >
-          <span className="text-lg font-bold md:text-base">已出清</span>
-          <span className="num text-sm font-normal text-ink-2">
+          {/* 托盤裡 320px 只剩 248px：每一塊自己不換行，放不下時「已實現」整塊換到下一行 */}
+          <span className="text-lg font-bold whitespace-nowrap md:text-base">已出清</span>
+          <span className="num text-sm font-normal whitespace-nowrap text-ink-2">
             {totals.symbols} 檔{rounds.length > totals.symbols && `・${rounds.length} 回合`}
           </span>
-          <span className="num ml-auto text-sm font-normal text-ink-2">
+          <span className="num ml-auto text-sm font-normal whitespace-nowrap text-ink-2">
             已實現
             <span className={cn("ml-1.5", toneClass(d))}>
               {privacy ? <Masked /> : formatMoney(totals.realized, { signed: true })}
@@ -220,8 +221,9 @@ function ClosedList({ years, isOpen, onToggle, accounts, multiAccount }: YearPro
                     const period = holdingPeriod(r)
                     return (
                       <li key={`${r.account_id}-${r.symbol}-${r.opened_at}`}>
-                        <Link to="/stock/$symbol" params={{ symbol: r.symbol }} className="ruled-row grid grid-cols-[1fr_auto] content-center gap-x-3 gap-y-0.5 py-3">
-                          <span className="truncate text-lg leading-6 font-medium">{r.name}</span>
+                        <Link to="/stock/$symbol" params={{ symbol: r.symbol }} className="ruled-row grid grid-cols-[minmax(0,1fr)_auto] content-center gap-x-3 gap-y-0.5 py-3">
+                          {/* 名稱不截斷：放不下就換行 */}
+                          <span className="min-w-0 text-lg leading-6 font-medium [overflow-wrap:anywhere]">{r.name}</span>
                           <span className={cn("num text-right text-lg leading-6", toneClass(direction(r.realized_pnl)))}>{privacy ? <Masked /> : formatMoney(r.realized_pnl, { signed: true })}</span>
                           <span className="num text-sm leading-5 text-ink-2">
                             {codeOf(r.symbol)} ・ {period.days}

@@ -1,3 +1,4 @@
+import { Tray } from "@/components/tray"
 import { cn } from "@/lib/utils"
 
 /**
@@ -69,17 +70,28 @@ function lastRowSpans(items: KeyItem[], cols: 2 | 3): string[] {
   return spans
 }
 
-/** 鍵值格：格線分隔，3 欄（手機 2 欄），數字等寬靠右；`wide` 的格子在手機佔滿一列（值比較長時）；最後一列不留孤格 */
+/**
+ * 鍵值格：格線分隔，3 欄（手機 2 欄），數字等寬靠右；`wide` 的格子在手機佔滿一列（值比較長時）；最後一列不留孤格。
+ * 格子很窄的時候（這張格子 < 24rem：手機上放在分頁托盤裡，393px 的手機只有 321px）標籤在上、數字在下、靠左，
+ * 不讓「3 個月均量」「52 週區間」這種標籤被數字擠成兩行；數字放不下時換行，不撐出托盤。
+ */
 export function KeyGrid({ items, className, cols = 3 }: { items: KeyItem[]; className?: string; cols?: 2 | 3 }) {
   const ordered = arrange(items)
   const spans = lastRowSpans(ordered, cols)
   return (
-    // 窄於 360px 排一欄（320 寬兩欄時長標籤把值擠出格子：殖利率只看得到「0.8」；2026-11-14 第七次評分）
-    <dl className={cn("grid grid-cols-2 gap-x-8 border-t border-rule max-[359px]:grid-cols-1 max-[359px]:*:col-span-1!", cols === 3 && "lg:grid-cols-6", className)}>
+    <dl className={cn("@container grid grid-cols-2 gap-x-8 border-t border-rule @max-sm:gap-x-5", cols === 3 && "lg:grid-cols-6", className)}>
       {ordered.map((it, i) => (
-        <div key={it.label} className={cn("flex min-h-11 items-baseline justify-between gap-3 border-b border-rule py-2.5", it.wide && "max-lg:col-span-2", spans[i])} title={it.title}>
+        <div
+          key={it.label}
+          className={cn(
+            "flex min-h-11 items-baseline justify-between gap-3 border-b border-rule py-2.5 @max-sm:flex-col @max-sm:justify-start @max-sm:gap-0.5",
+            it.wide && "max-lg:col-span-2",
+            spans[i],
+          )}
+          title={it.title}
+        >
           <dt className="min-w-0 text-md text-ink-2">{it.label}</dt>
-          <dd className="num text-right text-base whitespace-nowrap text-ink">{it.value}</dd>
+          <dd className="num max-w-full text-right text-base whitespace-nowrap text-ink @max-sm:text-left @max-sm:whitespace-normal @max-sm:[overflow-wrap:anywhere]">{it.value}</dd>
         </div>
       ))}
     </dl>
@@ -102,32 +114,26 @@ export function NotYet({ title, children, action, className }: { title: string; 
 }
 
 /**
- * 總覽第三層（新聞、關於、相關股票、法人觀點）的區塊：標題 17px、底下一條格線，比第二層安靜。
- * 沒有說明段落；動作放右邊。
+ * 總覽第三層（新聞報導、關於〈公司〉、相關股票）的托盤：名詞標題、沒有說明段落；動作放右邊。
+ * 是分頁托盤的兄弟（托盤不疊托盤）；寬的時候預設撐滿一列（`@4xl:col-span-12`），`className` 可以改。
  */
 export function QuietSection({
   title,
-  titleId,
+  id,
   action,
   children,
   className,
 }: {
   title: React.ReactNode
-  titleId: string
+  /** section 的 id（相關股票是 `ov-related`：事件托盤靠它決定要不要並排） */
+  id?: string
   action?: React.ReactNode
   children: React.ReactNode
   className?: string
 }) {
   return (
-    <section aria-labelledby={titleId} className={cn("flex min-w-0 flex-col", className)}>
-      <header className="flex min-h-10 items-end gap-3 border-b border-rule pb-2">
-        <h2 id={titleId} className="min-w-0 text-lg font-bold">
-          {title}
-        </h2>
-        {action && <div className="ml-auto flex shrink-0 items-center">{action}</div>}
-      </header>
-      <div className="pt-1">{children}</div>
-    </section>
+    <Tray title={title} id={id} action={action} className={cn("@4xl:col-span-12", className)}>
+      {children}
+    </Tray>
   )
 }
-

@@ -122,9 +122,11 @@ describe("帳本主數字與分段", () => {
   it("手機主數字是平的：沒有卡片、沒有展開鈕，今日與總損益直接看得到；本週事項的第一格是日期格", async () => {
     renderApp("/")
     expect(await screen.findByText("總損益（含股利）", undefined, T)).toBeInTheDocument()
-    expect(screen.getByText("今日")).toBeInTheDocument()
+    // 2026-11-21 起總資產是一盤托盤（有底色、沒有框線與陰影，不是卡片）；今日與總損益直接看得到
+    const hero = screen.getByRole("region", { name: "總資產" })
+    expect(hero).toHaveClass("tray")
+    expect(within(hero).getByText("今日")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /總損益與走勢/ })).toBeNull()
-    expect(screen.queryByRole("region", { name: "總資產" })).toBeNull()
     const week = await screen.findByRole("link", { name: /^本週 \d+ 件事，查看全部$/ }, T)
     expect(week.firstElementChild).toHaveClass("date-cell")
     expect(week.querySelector("svg")).toBeNull()

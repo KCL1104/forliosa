@@ -13,15 +13,15 @@ const summary = (upcoming: PortfolioSummary["upcoming_dividends"] = []): Portfol
   ({ as_of: "2026-11-12T13:30:00+08:00", upcoming_dividends: upcoming, allocation: { by_industry: [{ key: "半導體業", label: "半導體業", value: 1, weight: 0.3 }] } }) as unknown as PortfolioSummary
 
 describe("帳本的建議問題（依資料自動出現，最多 3 個）", () => {
-  it("有下跌的持股 → 誰拖累；有 31 天內除息 → 下個月股利；集中 → 太集中", () => {
+  it("有 31 天內除息 → 下個月股利；集中 → 太集中；「誰拖累／誰賺最多」不再出現（帳本的今日損益橫條已經回答，2026-11-21）", () => {
     const holdings = [h({ weight: 0.4 }), h({ symbol: "6488.TWO", name: "環球晶", day_change: -7500, day_change_pct: -0.0185, weight: 0.1 })]
     const s = ledgerSuggestions({ holdings, summary: summary([{ symbol: "00878.TW", name: "國泰永續高股息", ex_dividend_date: "2026-11-18", cash_dividend: 0.55, estimated_amount: 11000 }]) }, TODAY)
-    expect(s.map((x) => x.kind)).toEqual(["drag", "dividends_next", "concentration"])
+    expect(s.map((x) => x.kind)).toEqual(["dividends_next", "concentration"])
   })
-  it("全部上漲時改問誰賺最多；沒有除息、不集中就不出現", () => {
+  it("全部上漲、沒有除息、不集中：沒有建議問題", () => {
     const holdings = Array.from({ length: 10 }, (_, i) => h({ symbol: `${i}`, weight: 0.1 }))
     const s = ledgerSuggestions({ holdings, summary: { ...summary(), allocation: { by_industry: [{ key: "x", label: "x", value: 1, weight: 0.2 }] } } as PortfolioSummary }, TODAY)
-    expect(s.map((x) => x.kind)).toEqual(["lift"])
+    expect(s.map((x) => x.kind)).toEqual([])
   })
   it("沒有持股：教怎麼記帳", () => {
     expect(ledgerSuggestions({ holdings: [] }, TODAY).map((x) => x.kind)).toEqual(["onboard"])
@@ -200,16 +200,15 @@ describe("規則版回答：只用使用者自己的資料，隱私模式遮金�
   })
 })
 
-describe("帳本的「誰拖累／誰賺最多」說的是哪一天（美股的收盤是紐約另一天的）", () => {
+describe("帳本的「誰拖累／誰賺最多」回答說的是哪一天（美股的收盤是紐約另一天的；自己問時才回答，不再當建議問題）", () => {
   /** 紐約 11/13（五）的收盤：as_of 是紐約 16:00＝台北 11/14 05:00 */
   const usSummary = { ...summary(), as_of: "2026-11-14T05:00:00+08:00" } as PortfolioSummary
   const apple = h({ symbol: "AAPL", code: "AAPL", name: "Apple", market: "US", currency: "USD", price: 356.27, price_date: "2026-11-13", day_change: -4200, day_change_pct: -0.021, weight: 0.1 })
   const nvidia = h({ symbol: "NVDA", code: "NVDA", name: "輝達", market: "US", currency: "USD", price: 190, price_date: "2026-11-13", day_change: 3100, day_change_pct: 0.012, weight: 0.1 })
 
-  it("只有美股：問句與回答寫「11/13（美東）」，不寫「今天」或台北的「11/14」；回答下面不放台北日期的「收盤」", () => {
+  it("只有美股：回答寫「11/13（美東）」，不寫「今天」或台北的「11/14」；回答下面不放台北日期的「收盤」", () => {
     for (const today of ["2026-11-14", "2026-11-16"]) {
-      const s = ledgerSuggestions({ holdings: [apple, nvidia], summary: usSummary }, today)
-      expect(s[0]).toEqual({ kind: "drag", text: "11/13（美東）誰拖累了我的報酬？" })
+      expect(ledgerSuggestions({ holdings: [apple, nvidia], summary: usSummary }, today).some((x) => x.kind === "drag" || x.kind === "lift")).toBe(false)
       const ctx: AiContext = { route: "ledger", ledger: { holdings: [apple, nvidia], summary: usSummary } }
       const a = answerFor("drag", { ctx, privacy: false, today })!
       expect(a.text).toBe("11/13（美東）拖累最多的是 Apple（下跌 2.10%）。")
@@ -219,21 +218,19 @@ describe("帳本的「誰拖累／誰賺最多」說的是哪一天（美股的�
     // 週二早上（台北）：紐約週一 11/16 的收盤，也不是「今天」
     const tue = { ...summary(), as_of: "2026-11-17T05:00:00+08:00" } as PortfolioSummary
     const mon = [{ ...apple, price_date: "2026-11-16" }]
-    expect(ledgerSuggestions({ holdings: mon, summary: tue }, "2026-11-17")[0]!.text).toBe("11/16（美東）誰拖累了我的報酬？")
+    const monCtx: AiContext = { route: "ledger", ledger: { holdings: mon, summary: tue } }
+    expect(answerFor("drag", { ctx: monCtx, privacy: false, today: "2026-11-17" })!.text).toBe("11/16（美東）拖累最多的是 Apple（下跌 2.10%）。")
   })
 
   it("台股和美股都有：「今天」只算台股；美股的漲跌是紐約另一天的，不算進這一句", () => {
     const tsmc = h({ day_change: 10_000, day_change_pct: 0.0101 })
-    // 只有美股下跌、台股上漲：問「今天誰幫我賺最多」，不問誰拖累
-    const s = ledgerSuggestions({ holdings: [apple, tsmc], summary: summary() }, TODAY)
-    expect(s[0]).toEqual({ kind: "lift", text: "今天誰幫我賺最多？" })
+    // 只有美股下跌、台股上漲：「今天」只算台股
     const ctx: AiContext = { route: "ledger", ledger: { holdings: [apple, nvidia, tsmc], summary: summary() } }
     const lift = answerFor("lift", { ctx, privacy: false, today: TODAY })!
     expect(lift.text).toBe("今天貢獻最多的是台積電（上漲 1.01%）。")
     expect(lift.rows!.map((r) => r.label)).toEqual(["台積電"])
     expect(answerFor("drag", { ctx, privacy: false, today: TODAY })!.text).toBe("今天沒有持股下跌。")
-    // 只有美股有漲跌：「今天誰…」都不問
-    expect(ledgerSuggestions({ holdings: [apple, h({ day_change: 0, day_change_pct: 0 })], summary: summary() }, TODAY).some((x) => x.kind === "drag" || x.kind === "lift")).toBe(false)
+    expect(ledgerSuggestions({ holdings: [apple, nvidia, tsmc], summary: summary() }, TODAY).some((x) => x.kind === "drag" || x.kind === "lift")).toBe(false)
   })
 
   it("上市今天下午進來了、上櫃要到晚上：每一檔是它自己那天的漲跌，寫「最近」，不說「今天」", () => {
@@ -241,11 +238,11 @@ describe("帳本的「誰拖累／誰賺最多」說的是哪一天（美股的�
     const mon = { ...summary(), as_of: "2026-11-16T13:30:00+08:00" } as PortfolioSummary
     const tsmc = h({ price_date: "2026-11-16", day_change: -8000, day_change_pct: -0.008 })
     const otc = h({ symbol: "6488.TWO", code: "6488", name: "環球晶", market: "TPEX", price_date: "2026-11-13", day_change: 2000, day_change_pct: 0.004 })
-    expect(ledgerSuggestions({ holdings: [tsmc, otc], summary: mon }, "2026-11-16")[0]).toEqual({ kind: "drag", text: "最近誰拖累了我的報酬？" })
     const ctx: AiContext = { route: "ledger", ledger: { holdings: [tsmc, otc], summary: mon } }
     expect(answerFor("drag", { ctx, privacy: false, today: "2026-11-16" })!.text).toBe("最近拖累最多的是台積電（下跌 0.80%）。")
     // 兩個市場都是今天的：「今天」
-    expect(ledgerSuggestions({ holdings: [tsmc, { ...otc, price_date: "2026-11-16" }], summary: mon }, "2026-11-16")[0]!.text).toBe("今天誰拖累了我的報酬？")
+    const both: AiContext = { route: "ledger", ledger: { holdings: [tsmc, { ...otc, price_date: "2026-11-16" }], summary: mon } }
+    expect(answerFor("drag", { ctx: both, privacy: false, today: "2026-11-16" })!.text).toBe("今天拖累最多的是台積電（下跌 0.80%）。")
   })
 })
 

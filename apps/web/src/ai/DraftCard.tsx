@@ -1,12 +1,44 @@
+import { useQuery } from "@tanstack/react-query"
 import { ChevronDownIcon } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
+import { api } from "@/api"
 import { useAccounts, useMe } from "@/api/queries"
 import { Masked } from "@/components/finance"
 import { Button } from "@/components/ui/button"
-import { formatDateShort, formatMoney, formatNumber, formatPrice, formatQuantity } from "@/lib/format"
+import { formatDateShort, formatMoney, formatNumber, formatPercent, formatPrice, formatQuantity } from "@/lib/format"
+import { usd } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import type { Draft } from "./types"
+
+/** 成交價和那天的收盤價差這麼多（10%，台股一天的漲跌幅上限）以上時，草稿上多寫一行（多半是打錯價格或日期） */
+const FAR_FROM_CLOSE = 0.1
+
+/**
+ * 成交價和那天的收盤價差很多時的一行事實（產品負責人 2026-11-21；不寫建議）：「比 11/12 收盤價 72.40 低 27.6%」。
+ * 美股寫紐約的交易日與 US$（「比 11/13（美東）收盤價 US$356.27 高 12.3%」）；存檔以前的日子是 Yahoo 參考價，寫「參考收盤」。
+ * 收盤價和記一筆的「那天收盤」同一個查詢（`getDailyClose`，同一個快取）；那天沒有收盤價（假日、還沒收盤、太早）就不寫。
+ */
+function useFarFromClose(draft: Draft): string | null {
+  const { input, instrument } = draft
+  const priced = (input.type === "buy" || input.type === "sell") && input.price != null && input.price > 0
+  const q = useQuery({
+    enabled: priced && draft.status !== "signed" && draft.status !== "discarded",
+    queryKey: ["daily-close", instrument.symbol, input.trade_date],
+    queryFn: () => api.getDailyClose(instrument.symbol, input.trade_date),
+    staleTime: Infinity,
+    retry: false,
+  })
+  const close = q.data?.close
+  if (!priced || close == null || close <= 0) return null
+  const diff = input.price! / close - 1
+  if (Math.abs(diff) < FAR_FROM_CLOSE) return null
+  const us = instrument.market === "US"
+  const day = `${formatDateShort(q.data?.date ?? input.trade_date, false)}${us ? "（美東）" : " "}`
+  const what = q.data?.reference ? "參考收盤" : "收盤價"
+  const price = us ? usd(close) : formatPrice(close, instrument.market)
+  return `比 ${day}${what} ${price} ${diff < 0 ? "低" : "高"} ${formatPercent(Math.abs(diff), { decimals: 1, signed: false })}`
+}
 
 const VERBS: Record<string, string> = {
   buy: "買進",
@@ -56,6 +88,12 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
   const account = accounts.data?.find((a) => a.id === input.account_id)
   const sameCurrency = (accounts.data ?? []).filter((a) => a.currency === currency)
   const signature = (me.data?.display_name ?? "我").slice(0, 1)
+  const farFromClose = useFarFromClose(draft)
+  // 買賣的手續費（與賣出的交易稅）：不自動算（2026-11-14），但卡片上一定有這一格（2026-11-21）——沒填（試算也是 0）就寫「沒填」，
+  // 合計就是不含它的金額；填了、或試算裡有（定期定額的扣款）寫金額，和合計同一個數字
+  const trade = input.type === "buy" || input.type === "sell"
+  const feeValue = (given: number | null | undefined, computed: number | undefined) =>
+    given == null && !computed ? <span className="font-normal text-ink-2">沒填</span> : money(given ?? computed ?? 0)
 
   useEffect(() => {
     if (focused) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
@@ -79,12 +117,20 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
       )}
     >
       <header className="border-b border-rule px-4 pt-3.5 pb-3">
-        <h3 id={titleId} className="flex items-baseline gap-2 text-lg font-bold text-ai">
-          {verb}
-          {!isCash && ` ${instrument.name}`}
-          {!isCash && <span className="num text-sm font-normal">{instrument.code}</span>}
-          <span className="sr-only">{signed ? "，已入帳" : "，草稿，尚未入帳"}</span>
-        </h3>
+        <div className="flex items-start justify-between gap-3">
+          <h3 id={titleId} className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-lg font-bold text-ai [overflow-wrap:anywhere]">
+            {verb}
+            {!isCash && ` ${instrument.name}`}
+            {!isCash && <span className="num text-sm font-normal">{instrument.code}</span>}
+            <span className="sr-only">{signed ? "，已入帳" : "，草稿，尚未入帳"}</span>
+          </h3>
+          {/* 「草稿」標記（標題已經念了「草稿，尚未入帳」）：卡片前面不再寫「幫你寫好了」這類句子 */}
+          {!signed && (
+            <span aria-hidden className="status-tag mt-1 shrink-0 border-ai-rule text-ai">
+              草稿
+            </span>
+          )}
+        </div>
         {/* 帳戶名稱是使用者自己取的（可能含「・」「－」）：和日期之間用空白分開，不再接一個分隔符號 */}
         <p className="mt-0.5 flex flex-wrap gap-x-3 text-sm text-ink-2">
           <span>
@@ -124,7 +170,16 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
                 }
                 right
               />
-              {/* 手續費與稅不自動算（2026-11-14）：卡片上只有股數、成交價與合計 */}
+              {/* 手續費與稅不自動算（2026-11-14），但一定看得到有沒有算進去（2026-11-21）：買進一格手續費，賣出多一格交易稅 */}
+              {trade &&
+                (input.type === "sell" ? (
+                  <>
+                    <Cell label="手續費" value={feeValue(input.fee, preview?.fee)} />
+                    <Cell label="交易稅" value={feeValue(input.tax, preview?.tax)} right />
+                  </>
+                ) : (
+                  <Cell label="手續費" value={feeValue(input.fee, preview?.fee)} wide />
+                ))}
             </>
           )}
           <div className="col-span-2 flex items-center justify-between border-b border-rule px-4 py-3">
@@ -142,11 +197,16 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
         </dl>
       )}
 
-      {draft.notes.length > 0 && !signed && (
+      {(draft.notes.length > 0 || farFromClose) && !signed && (
         <ul className="flex flex-col gap-1 border-b border-rule px-4 py-2.5 text-sm text-ink">
           {draft.notes.map((n) => (
             <li key={n}>{n}</li>
           ))}
+          {farFromClose && (
+            <li className="num" data-far-from-close>
+              {farFromClose}
+            </li>
+          )}
         </ul>
       )}
       {status === "error" && (
@@ -196,15 +256,10 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
               {privacy ? "••••" : formatNumber(input.quantity, 0)} 股 × {formatPrice(input.price, instrument.market)}
             </li>
           )}
-          {/* 買賣不自動算手續費與稅（2026-11-14）：有填才列；股利的預扣稅、二代健保照常 */}
+          {/* 股利的預扣稅、二代健保照常自動扣；買賣的手續費與交易稅在卡片上（上面的格子），這裡不再列一次 */}
           {preview && isDividend && (
             <li className="num">
               {`預扣稅 ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}、二代健保 ${privacy ? "••••" : formatMoney(preview.health_insurance, { currency, bare: true })}`}
-            </li>
-          )}
-          {preview && !isCash && !isDividend && preview.fee + preview.tax > 0 && (
-            <li className="num">
-              {`手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}、交易稅 ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}`}
             </li>
           )}
           {(preview?.rules ?? []).map((r) => (
@@ -217,9 +272,9 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
   )
 }
 
-function Cell({ label, value, right }: { label: string; value: React.ReactNode; right?: boolean }) {
+function Cell({ label, value, right, wide }: { label: string; value: React.ReactNode; right?: boolean; wide?: boolean }) {
   return (
-    <div className={cn("flex items-baseline justify-between gap-3 border-b border-rule px-4 py-2.5", !right && "border-r")}>
+    <div className={cn("flex items-baseline justify-between gap-3 border-b border-rule px-4 py-2.5", wide ? "col-span-2" : !right && "border-r")}>
       <dt className="text-sm text-ink-2">{label}</dt>
       <dd className="num text-base font-medium text-ai">{value}</dd>
     </div>
