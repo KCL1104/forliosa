@@ -129,10 +129,10 @@ function EmptyAllocation({ account, onAll }: { account?: string; onAll: () => vo
   }
   if (readOnly) return <EmptyState className={className} title="目前沒有持股" />
   return (
+    // 只有標題和動作（2026-11-21 評論：「這裡會列出…」是在敘述介面）
     <EmptyState
       className={className}
       title="目前沒有持股"
-      description="記下持股後，這裡會列出每一檔佔多少。"
       action={
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
           <Button onClick={() => ask.action("form")}>記一筆</Button>
@@ -518,8 +518,8 @@ function Bar({ weight, limit }: { weight: number; limit: number | null }) {
 }
 
 /**
- * 清單下面的說明：直線的圖例、ETF 不算產業（每一檔：最大產業不含 ETF，手機的集中度格子沒地方寫）、未分類、
- * 沒有收盤價照成本算、美股的匯率（後端給的、和持倉同一個；這個範圍裡有美元持股才寫）
+ * 清單下面的說明：直線的圖例、ETF 不算產業、未分類、沒有收盤價照成本算、美股的匯率（後端給的、和持倉同一個；這個範圍裡有美元持股才寫）。
+ * 「最大產業不含 ETF」只說一次（2026-11-21 評論）：桌面寫在集中度的格子裡（「半導體業・不含 ETF」），這裡只有手機寫（`lg:hidden`）。
  */
 function Notes({ alloc, grouping }: { alloc: PortfolioAllocation; grouping: AllocationGrouping }) {
   const who = useWho("你")
@@ -531,7 +531,13 @@ function Notes({ alloc, grouping }: { alloc: PortfolioAllocation; grouping: Allo
   const rate = alloc.groups.currency.some((s) => s.key === "USD") ? alloc.fx.USD : undefined
   const notes: React.ReactNode[] = []
   if (grouping === "industry" && hasEtf) notes.push("ETF 不算進產業，也不拆成分股。")
-  if (grouping === "holding" && hasEtf) notes.push(`${alloc.concentration.top_industry ? "最大產業不含 ETF。" : ""}ETF 算一檔，不拆成分股。`)
+  if (grouping === "holding" && hasEtf)
+    notes.push(
+      <>
+        {alloc.concentration.top_industry && <span className="lg:hidden">最大產業不含 ETF。</span>}
+        ETF 算一檔，不拆成分股。
+      </>,
+    )
   if (grouping === "industry" && unclassified) notes.push(`${nameList(unclassified.symbols)}還沒有產業資料，列在「未分類」。`)
   if (alloc.valued_at_cost.length > 0) notes.push(`${nameList(alloc.valued_at_cost)}還沒有收盤價，先照成本算。`)
   const meta: string[] = []

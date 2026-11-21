@@ -297,7 +297,6 @@ function TopicForm({ user, groups, origin }: { user: User; groups: GroupSummary[
           ) : (
             <p className="text-sm text-ink-2">最多標記 {TOPIC_SYMBOLS_MAX} 檔</p>
           )}
-          <p className="text-base text-ink">也會出現在個股的「討論」分頁</p>
         </div>
 
         {errors.form && (
