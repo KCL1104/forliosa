@@ -17,7 +17,7 @@ import { Segmented } from "@/components/segmented"
 import { ShareCopyButton, ShareSlip } from "@/components/share-card"
 import { useShareCard } from "@/components/use-share-card"
 import { ErrorState } from "@/components/states"
-import { Tray, type TrayTint } from "@/components/tray"
+import { Tray } from "@/components/tray"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, directionGlyph, formatMoney, formatPercent, toneClass } from "@/lib/format"
@@ -59,12 +59,6 @@ const SEGMENT_KEYS: readonly Segment[] = ["holdings", "records", "performance", 
 const SEGMENT_TITLE: Record<Segment, string> = { holdings: "持倉", records: "紀錄", performance: "績效", allocation: "配置" }
 const segmentOf = (view: LedgerView): Segment => (view === "transactions" || view === "dividends" ? "records" : view)
 const viewOf = (segment: Segment): LedgerView => (segment === "records" ? "transactions" : segment)
-
-/**
- * 托盤的底色照順序 1 → 2 → 3 輪流（DESIGN.md〈托盤〉：底色不代表意思，只讓相鄰的兩盤分得開）。
- * 並排的兩盤（分享卡、觀察清單）各拿一個，下一盤再接著輪：上下、左右相鄰的托盤都不同色。
- */
-const tintAfter = (t: TrayTint): TrayTint => ((t % 3) + 1) as TrayTint
 
 /**
  * 帳本（首頁）。內頁重新設計（產品負責人 2026-11-21 選方向 C「圓桌」的結構，不要它的旁白）：一組一組放在托盤裡，
@@ -127,18 +121,10 @@ export function LedgerPage() {
     return () => window.removeEventListener("keydown", onKey)
   }, [navigate])
 
-  // 托盤的底色：照畫面上真的放出來的順序輪流（並排的分享卡、觀察清單各拿一個）
+  // 哪幾盤放出來：手機的總資產走勢自己一盤；今日損益、分享卡、觀察清單只在持倉分段
   const phoneTrend = !isDesktop && view !== "performance" && trendShown
   const todayShown = holdingsTab && (holdings.data ?? []).some((h) => h.price !== null)
   const lowerShown = holdingsTab && !readOnly
-  let tint: TrayTint = 1
-  const heroTint = tint
-  const contentTint = (tint = tintAfter(tint))
-  const trendTint = phoneTrend ? (tint = tintAfter(tint)) : tint
-  const todayTint = todayShown ? (tint = tintAfter(tint)) : tint
-  const shareTint = lowerShown && shareShown ? (tint = tintAfter(tint)) : tint
-  const watchTint = lowerShown ? (tint = tintAfter(tint)) : tint
-  const weekTint = tintAfter(tint)
 
   const toolbar = (
     <div className="flex w-full min-w-0 items-center gap-4">
@@ -205,7 +191,7 @@ export function LedgerPage() {
             <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
           ) : (
             // 第一行是印好的「總資產」：標題只給螢幕閱讀器
-            <Tray title="總資產" titleHidden tint={heroTint}>
+            <Tray title="總資產" titleHidden>
               <Hero summary={heroReady ? summary.data : undefined} />
               {/* 總資產走勢（產品負責人 2026-11-17 選方案 B；「自訂」可以整塊關掉）：桌面在主數字正下方、同一盤 */}
               {isDesktop && heroReady && <HeroTrend view={view} className="lg:mt-4" />}
@@ -213,7 +199,7 @@ export function LedgerPage() {
           )}
 
           {/* 分段與內容：分頁列在標題列的動作位置、撐滿整列（標題只給螢幕閱讀器，就是現在這一段的名稱） */}
-          <Tray title={SEGMENT_TITLE[segment]} titleHidden action={toolbar} tint={contentTint} className="[&>header>div]:ml-0 [&>header>div]:flex-1">
+          <Tray title={SEGMENT_TITLE[segment]} titleHidden action={toolbar} className="[&>header>div]:ml-0 [&>header>div]:flex-1">
             {pending > 0 && !readOnly && (
               <button
                 type="button"
@@ -280,21 +266,21 @@ export function LedgerPage() {
 
           {/* 手機：總資產走勢自己一盤，在內容後面（首屏給持倉，2026-11-19） */}
           {phoneTrend && (
-            <Tray title="總資產走勢" tint={trendTint}>
+            <Tray title="總資產走勢">
               <HeroTrend view={view} titled className="mt-0" />
             </Tray>
           )}
 
-          {todayShown && <TodayPnl tint={todayTint} />}
+          {todayShown && <TodayPnl />}
           {lowerShown && (
             // 寬的時候分享卡與觀察清單並排（分享卡寬一點：三格百分比要放得下「總報酬（含股利）」），同一列等高
             <div className={cn("grid gap-tray-gap", shareShown && "@min-[56rem]:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]")}>
-              {shareShown && <ShareTray tint={shareTint} />}
-              <WatchList tint={watchTint} />
+              {shareShown && <ShareTray />}
+              <WatchList />
             </div>
           )}
           {/* 本週事項：桌面 AI 面板開著時放在面板標題下面（本頁欄位）；面板收著、看對話紀錄、手機時是最後一盤 */}
-          {!panelSlot && <WeekLine tint={weekTint} />}
+          {!panelSlot && <WeekLine />}
         </div>
         {panelSlot && createPortal(<WeekLine variant="panel" />, panelSlot)}
         <SourcesFooter />
@@ -307,10 +293,10 @@ export function LedgerPage() {
 const isBlank = (s: PortfolioSummary) => s.market_value === 0 && s.cost_basis === 0 && s.total_pnl === 0
 
 /** 分享卡（和群組頁同一張，`components/share-card.tsx`）：只有百分比；「複製分享文字」在標題列 */
-function ShareTray({ tint }: { tint: TrayTint }) {
+function ShareTray() {
   const data = useShareCard()
   return (
-    <Tray title="分享卡" tint={tint} action={<ShareCopyButton data={data} size="sm" />} className="h-full">
+    <Tray title="分享卡" action={<ShareCopyButton data={data} size="sm" />} className="h-full">
       <ShareSlip data={data} />
     </Tray>
   )
@@ -444,7 +430,7 @@ function HeroSkeleton() {
  *   左右和面板的內距對齊、只有下緣一條格線（上緣是面板標題的線）。
  * - `inline`：面板收著、看對話紀錄、手機時，帳本的最後一盤（標題「本週事項」只給螢幕閱讀器：那一列自己就寫了「本週 N 件事」）。
  */
-function WeekLine({ variant = "inline", tint = 1 }: { variant?: "inline" | "panel"; tint?: TrayTint }) {
+function WeekLine({ variant = "inline" }: { variant?: "inline" | "panel" }) {
   const upcoming = useUpcoming(7)
   const privacy = usePrefs((s) => s.privacyMode)
   const items = upcoming.data ?? []
@@ -479,7 +465,7 @@ function WeekLine({ variant = "inline", tint = 1 }: { variant?: "inline" | "pane
       </PlainLink>
     )
   return (
-    <Tray title="本週事項" titleHidden tint={tint}>
+    <Tray title="本週事項" titleHidden>
       <PlainLink
         to="/"
         search={{ view: "dividends" }}

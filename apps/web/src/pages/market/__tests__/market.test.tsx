@@ -372,23 +372,21 @@ describe("美股（產品負責人 2026-11-15）", () => {
 describe("托盤（產品負責人 2026-11-21：方向 C 的結構，頁面只有標籤和數字）", () => {
   const sectors = (values: [string, number][]) => ({ date: "2026-11-12", items: values.map(([name, change_pct]) => ({ name, index_name: `${name}類指數`, close: 100, change_pct })) })
 
-  it("每一塊是一盤；底色照出現的順序輪流 1→2→3，相鄰的兩盤不同色", async () => {
+  it("每一塊是一盤；托盤只有一種底色（產品負責人 2026-11-21），不輪流", async () => {
     mount()
     renderApp()
     await screen.findByRole("heading", { name: "重大訊息" }, T)
     const trays = Array.from(document.querySelectorAll<HTMLElement>("section.tray"))
     expect(trays.map((t) => t.querySelector("h2")!.textContent)).toEqual(["指數與匯率", "收盤重點", "類股", "排行", "美股", "重大訊息"])
-    expect(trays.map((t) => t.dataset.tint)).toEqual(["1", "2", "3", "1", "2", "3"])
+    expect(trays.every((t) => !t.hasAttribute("data-tint"))).toBe(true)
   })
 
-  it("沒有收盤重點：類股接在指數後面，底色照樣輪流（類股是 2）", async () => {
+  it("沒有收盤重點：類股接在指數後面，順序不變", async () => {
     mount({}, (o) => ({ ...o, summary: null }))
     renderApp()
     await screen.findByRole("heading", { name: "重大訊息" }, T)
     const trays = Array.from(document.querySelectorAll<HTMLElement>("section.tray"))
-    expect(trays.map((t) => [t.querySelector("h2")!.textContent, t.dataset.tint])).toEqual([
-      ["指數與匯率", "1"], ["類股", "2"], ["排行", "3"], ["美股", "1"], ["重大訊息", "2"],
-    ])
+    expect(trays.map((t) => t.querySelector("h2")!.textContent)).toEqual(["指數與匯率", "類股", "排行", "美股", "重大訊息"])
   })
 
   it("頁面沒有說明句：沒有頁首的一句話、沒有「以 0 為中線」「由漲到跌」這類說明", async () => {

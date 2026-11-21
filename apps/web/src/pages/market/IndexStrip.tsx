@@ -1,7 +1,7 @@
 import type { MarketIndex } from "@/api/types"
 import { Pct } from "@/components/finance"
 import { Sparkline } from "@/components/sparkline"
-import { Tray, type TrayTint } from "@/components/tray"
+import { Tray } from "@/components/tray"
 import { direction, directionGlyph, formatDateShort, formatNumber, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -14,13 +14,13 @@ const DECIMALS: Record<MarketIndex["key"], number> = { taiex: 2, tpex: 2, tx: 0,
  * 其他的是它旁邊（寬的時候）或下面（窄的時候）的兩行列——名稱・日期｜小圖｜數值・漲跌，和持倉表同一種。
  * 每一個都帶自己的日期：上市、上櫃、匯率公布的時間不一樣。走勢小圖是最近 20 個收盤（墨色，不跟著當天漲跌換色）；
  * 不到兩點就不畫。這些不是連結（沒有指數頁）。`note` 是加權指數還沒更新時預計幾點更新的那一行，放在托盤最下面。
- * 一盤裝全部：主角與其他各自一盤的話，手機上「其他」那一盤、收盤重點、類股三盤相鄰，三種底色排不開（見 DESIGN.md〈市場頁〉）。
+ * 一盤裝全部：主角與其他是同一組，不分成兩盤。
  */
-export function IndexStrip({ indices, tint, note, className }: { indices: MarketIndex[]; tint?: TrayTint; note?: React.ReactNode; className?: string }) {
+export function IndexStrip({ indices, note, className }: { indices: MarketIndex[]; note?: React.ReactNode; className?: string }) {
   const [lead, ...rest] = indices
   if (!lead) return null
   return (
-    <Tray title="指數與匯率" titleHidden tint={tint} className={className} bodyClassName="@container">
+    <Tray title="指數與匯率" titleHidden className={className} bodyClassName="@container">
       <ul
         aria-label="指數與匯率"
         style={{ "--rows": Math.max(rest.length, 1) } as React.CSSProperties}

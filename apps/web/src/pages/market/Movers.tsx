@@ -3,7 +3,7 @@ import { useState } from "react"
 import type { MarketMover, MarketMovers } from "@/api/types"
 import { Pct } from "@/components/finance"
 import { RangeChips } from "@/components/segmented"
-import { Tray, type TrayTint } from "@/components/tray"
+import { Tray } from "@/components/tray"
 import { formatDateShort, formatNumber, formatPrice, formatVolume } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -24,13 +24,12 @@ function moverTitle(label: string, count: number): string {
  * 一盤（托盤）：meta 是日期與範圍（「11/12・16 檔普通股，不含 ETF」）。每張表有印好的表頭，寫表的名稱與實際的列數
  * （「跌幅前 6」）。托盤夠寬（≥ 832px）時三張表並排；窄的時候上面一排選項，一次看一張。
  */
-export function Movers({ movers, tint, className }: { movers: MarketMovers; tint?: TrayTint; className?: string }) {
+export function Movers({ movers, className }: { movers: MarketMovers; className?: string }) {
   const [kind, setKind] = useState<Kind>("gainers")
   return (
     <Tray
       title="排行"
       meta={`${formatDateShort(movers.date, false)}・${formatNumber(movers.count)} 檔普通股，不含 ETF`}
-      tint={tint}
       className={className}
       bodyClassName="@container"
     >

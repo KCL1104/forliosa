@@ -162,14 +162,13 @@ describe("<CentreBars>", () => {
 describe("<Tray>", () => {
   it("section＋h2 名詞標題＋meta＋動作；section 以標題命名", () => {
     render(
-      <Tray title="今日損益" meta="11/20 收盤" action={<button type="button">全部</button>} tint={2}>
+      <Tray title="今日損益" meta="11/20 收盤" action={<button type="button">全部</button>}>
         <p>內容</p>
       </Tray>,
     )
     const region = screen.getByRole("region", { name: "今日損益" })
     expect(region.tagName).toBe("SECTION")
     expect(region).toHaveClass("tray")
-    expect(region).toHaveAttribute("data-tint", "2")
     expect(within(region).getByRole("heading", { level: 2, name: "今日損益" })).toBeInTheDocument()
     expect(within(region).getByText("11/20 收盤")).toHaveClass("text-ink-2")
     expect(within(region).getByRole("button", { name: "全部" })).toBeInTheDocument()
@@ -189,14 +188,14 @@ describe("<Tray>", () => {
     expect(heading.contains(screen.getByRole("tablist"))).toBe(false)
   })
 
-  it("預設底色是 1；titleHidden 時標題只給螢幕閱讀器", () => {
+  it("只有一種底色（產品負責人 2026-11-21）：沒有 data-tint；titleHidden 時標題只給螢幕閱讀器", () => {
     render(
       <Tray title="總資產" titleHidden>
         <p>NT$4,107,724</p>
       </Tray>,
     )
     const region = screen.getByRole("region", { name: "總資產" })
-    expect(region).toHaveAttribute("data-tint", "1")
+    expect(region).not.toHaveAttribute("data-tint")
     expect(screen.getByRole("heading", { name: "總資產" })).toHaveClass("sr-only")
   })
 })
