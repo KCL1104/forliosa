@@ -103,11 +103,8 @@ function Discussions() {
           filter={filter}
           origin={{ kind: "list", search: { scope: search.scope, group_id: search.group_id, sort: sortParam } }}
           signedIn={signedIn}
-          empty={
-            filter.scope === "group"
-              ? { title: `${group ? `「${group.name}」` : "這個群組"}還沒有主題`, description: "開新主題時選這個群組，只有成員看得到。" }
-              : { title: "還沒有主題", description: signedIn ? "開第一個主題，問問大家怎麼看。" : "登入後就能開第一個主題。" }
-          }
+          // 空狀態只有標題：動作在頁首（「開新主題」或「登入後發言」），不再說一次
+          empty={{ title: filter.scope === "group" ? `${group ? `「${group.name}」` : "這個群組"}還沒有主題` : "還沒有主題" }}
         />
         <SourcesFooter>
           <GuestLegalLinks />

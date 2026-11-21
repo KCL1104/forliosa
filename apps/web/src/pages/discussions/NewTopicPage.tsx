@@ -181,7 +181,7 @@ function TopicForm({ user, groups, origin }: { user: User; groups: GroupSummary[
     <div className="mt-6 flex flex-col gap-6">
       {restored && (
         <p className="-mb-2 flex flex-wrap items-center gap-x-3 text-md text-ink">
-          這是上次還沒發表的內容。
+          上次的草稿
           <button type="button" onClick={clearAll} className={cn(textAction, "text-ink-2 hover:text-ink")}>
             清除草稿
           </button>
@@ -191,7 +191,7 @@ function TopicForm({ user, groups, origin }: { user: User; groups: GroupSummary[
       <fieldset aria-describedby={errors.dest ? `${id}-dest-error` : undefined}>
         <legend className="mb-1.5 text-sm font-medium">發到哪裡</legend>
         <ul className="border-y border-rule">
-          <DestinationRow name={`${id}-dest`} checked={isPublic} onChange={() => pick("public")} label="公開" detail="所有人都看得到，不用登入也能讀。" />
+          <DestinationRow name={`${id}-dest`} checked={isPublic} onChange={() => pick("public")} label="公開" detail="所有人看得到，不用登入" />
           {groups.map((g) => (
             <DestinationRow
               key={g.id}
@@ -199,7 +199,7 @@ function TopicForm({ user, groups, origin }: { user: User; groups: GroupSummary[
               checked={dest === `group:${g.id}`}
               onChange={() => pick(`group:${g.id}`)}
               label={g.name}
-              detail="只有這個群組的成員看得到。"
+              detail="只有成員看得到"
             />
           ))}
         </ul>
@@ -253,7 +253,7 @@ function TopicForm({ user, groups, origin }: { user: User; groups: GroupSummary[
           />
           {!errors.body && (
             <p id={`${id}-body-help`} className="text-sm text-ink-2">
-              純文字，可以換行；貼上的網址會變成連結。
+              純文字，網址會變成連結
             </p>
           )}
         </Field>
@@ -295,9 +295,9 @@ function TopicForm({ user, groups, origin }: { user: User; groups: GroupSummary[
               rejectReason="已標記"
             />
           ) : (
-            <p className="text-sm text-ink-2">最多標記 {TOPIC_SYMBOLS_MAX} 檔。要換一檔，先移除一個。</p>
+            <p className="text-sm text-ink-2">最多標記 {TOPIC_SYMBOLS_MAX} 檔</p>
           )}
-          <p className="text-base text-ink">標記的主題也會出現在那檔股票的「討論」分頁。</p>
+          <p className="text-base text-ink">也會出現在個股的「討論」分頁</p>
         </div>
 
         {errors.form && (

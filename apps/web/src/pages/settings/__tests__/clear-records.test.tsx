@@ -115,7 +115,7 @@ describe("入口", { timeout: 20_000 }, () => {
     mount()
     renderApp()
     const section = await screen.findByRole("region", { name: "帳號與資料" }, T)
-    expect(section).toHaveTextContent("刪掉一個帳戶或全部帳戶的每一筆紀錄，帳戶留著，可以重新記。")
+    expect(section).toHaveTextContent("刪掉一個或全部帳戶的紀錄，帳戶留著")
     const clear = within(section).getByRole("button", { name: "清除…" })
     const deleteMe = within(section).getByRole("button", { name: "刪除帳號…" })
     expect(clear.compareDocumentPosition(deleteMe) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

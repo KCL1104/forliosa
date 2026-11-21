@@ -115,13 +115,13 @@ function Settings() {
       </Group>
 
       <Group title="隱私">
-        <Row label="開啟時預設隱私模式" description="遮蔽金額與股數，百分比照常顯示。" htmlFor="privacy-default">
+        <Row label="開啟時預設隱私模式" description="遮蔽金額與股數，百分比照常顯示" htmlFor="privacy-default">
           <Switch id="privacy-default" checked={p.privacyDefault} onCheckedChange={(v) => setPref({ privacyDefault: v })} />
         </Row>
       </Group>
 
       <Group title="計算">
-        <Row label="成本計算方式" description="改了會重新計算已實現損益。">
+        <Row label="成本計算方式" description="改了會重新計算已實現損益">
           <RangeChips
             label="成本計算方式"
             value={p.costMethod}
@@ -181,14 +181,14 @@ function PlanSettings() {
                   <Link to="/groups/$groupId" params={{ groupId: p.group.id }} className={cn(textAction, "text-base")}>
                     {p.group.name}
                   </Link>
-                  」。
+                  」
                 </>
               ) : p.attached ? (
-                "用在一個你已經不在的群組。"
+                "用在你已經不在的群組"
               ) : !p.active ? (
-                "沒有用在群組。"
+                "沒有用在群組"
               ) : (
-                "還沒有用在群組。到你擁有的群組的「成員」分頁，在群組設定裡選。"
+                "還沒有用在群組，在群組的「成員」分頁選"
               )
             }
           >
@@ -214,7 +214,7 @@ function AiSettings() {
     <Group title="AI">
       <Row
         label="每日收盤簡報"
-        description={allowed ? "收盤後依你的持股與觀察清單寫一則，在「問 AI」最上面。" : "收盤後依你的持股與觀察清單寫一則。這是會員功能。"}
+        description={allowed ? "收盤後依持股與觀察清單寫一則" : "收盤後依持股與觀察清單寫一則・會員功能"}
         htmlFor="daily-briefing"
       >
         <Switch
@@ -322,7 +322,7 @@ function Accounts() {
       {!accounts.data ? (
         <SkeletonLines rows={3} className="pt-3" />
       ) : accounts.data.length === 0 ? (
-        <EmptyState flush title="還沒有帳戶" description="先新增一個，例如「永豐・一般」。" />
+        <EmptyState flush title="還沒有帳戶" />
       ) : (
         // 標題的印刷線就是清單上面那條線
         <ul className="flex flex-col divide-y divide-rule border-b border-rule">

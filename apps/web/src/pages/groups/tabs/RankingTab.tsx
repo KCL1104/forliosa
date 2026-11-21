@@ -46,6 +46,8 @@ export function RankingTab({ group }: { group: Group }) {
           {b && (
             <p className="num text-sm text-ink-2">
               {formatDateShort(b.start_date, false)} 收盤 → {formatDateShort(b.date, false)} 收盤
+              {/* 不排名次的群組：「不排名次」頁首已經寫了，這裡只標順序 */}
+              {!b.ranked && "・依加入順序"}
               {b.is_demo && <DemoTag className="ml-2" />}
             </p>
           )}
@@ -56,7 +58,6 @@ export function RankingTab({ group }: { group: Group }) {
           <SkeletonLines rows={5} />
         ) : (
           <>
-            {!b.ranked && <p className="text-base text-ink">這個群組不排名次，依加入順序列出。</p>}
             {b.entries.length === 0 ? (
               <EmptyState title="還沒有資料" />
             ) : (

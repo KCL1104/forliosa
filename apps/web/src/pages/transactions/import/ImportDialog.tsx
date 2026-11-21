@@ -345,7 +345,7 @@ function ImportFlow({
   if (accounts.data && accounts.data.length === 0) {
     return (
       <div className={cn(bodyClass(sheet), "flex flex-col items-start gap-3")}>
-        <p className="text-base text-ink">還沒有券商帳戶，先到設定建立一個。</p>
+        <p className="text-base text-ink">還沒有券商帳戶</p>
         <Link to="/settings" onClick={onClose} className={buttonVariants({ variant: "outline" })}>
           到設定
         </Link>
@@ -420,7 +420,7 @@ function ImportFlow({
         />
         {!hasFiles && (
           <div className="flex flex-col items-start gap-3">
-            <p className="text-base text-ink">選一份 PDF 對帳單，或最多 5 張成交明細的截圖、照片。</p>
+            <p className="text-base text-ink">一份 PDF 對帳單，或最多 5 張成交明細的截圖、照片</p>
             <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>
               選檔案
             </Button>

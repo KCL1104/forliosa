@@ -96,7 +96,7 @@ function Gone({ title, body, signedIn }: { title: string; body: string; signedIn
 function SignInFirst({ token }: { token: string }) {
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-base text-ink">加入前先選要分享什麼，預設只有報酬率的百分比。</p>
+      <p className="text-base text-ink">預設只分享報酬率的百分比</p>
       <Link to="/login" search={{ next: `/invite/${token}` }} className={buttonVariants({ size: "lg", className: "w-full" })}>
         登入後加入
       </Link>
@@ -137,10 +137,10 @@ function ChooseAndJoin({ token, groupName }: { token: string; groupName: string 
   return (
     <section aria-labelledby="invite-share" className="flex flex-col gap-4">
       <div>
+        {/* 名詞標題，和群組「分享」分頁同一個名字（不用問句） */}
         <h2 id="invite-share" className="text-lg font-bold">
-          你要在「{groupName}」分享什麼？
+          我在「{groupName}」分享的內容
         </h2>
-        <p className="mt-1 text-base text-ink">只對這個群組有效；加入後在「分享」分頁改。</p>
       </div>
       <ShareToggles value={share} onChange={setShare} idPrefix="invite" />
       {error && (

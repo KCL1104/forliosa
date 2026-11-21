@@ -55,7 +55,7 @@ export function Delegations() {
       }
     >
       {/* 授權是後果重大的選擇：說明留著（在標題的印刷線下面，不夾在標題和線中間） */}
-      <p className="-mb-3 max-w-prose text-base text-ink">同群組的人可以看你的帳本，不能改。可以只開放部分帳戶。</p>
+      <p className="-mb-3 max-w-prose text-base text-ink">同群組的人可以看你的帳本，不能改</p>
       {list.isError ? (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : !list.data ? (
@@ -211,7 +211,7 @@ function GrantDialog({ editing, onClose }: { editing: Delegation | null; onClose
                 { value: "accounts", label: "指定帳戶" },
               ]}
             />
-            <p className="text-base text-ink">{scope === "all" ? "包含之後新增的帳戶。" : "只看得到勾選的帳戶，持股、績效與交易都只算這些帳戶。"}</p>
+            <p className="text-base text-ink">{scope === "all" ? "包含之後新增的帳戶" : "只看得到勾選的帳戶"}</p>
             {scope === "accounts" && (
               <ul className="border-y border-rule">
                 {(accounts.data ?? []).map((a) => (

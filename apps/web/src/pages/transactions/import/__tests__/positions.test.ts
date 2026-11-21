@@ -230,9 +230,9 @@ describe("估計的買入日（資產組成原型；產品負責人 2026-11-21�
     expect(toCommitRow(none, "2026-10-01", IMPORT_DAY)).toMatchObject({ date_basis: "picked", estimated_date: null })
   })
 
-  it("整批日期下面那一句：有估計可以套用時多說估計是什麼、要按「套用」；估不到的、舊版伺服器只有原本那一句", () => {
+  it("整批日期下面那一句：有估計可以套用時多說估計是什麼（不敘述「套用」，按鈕在每一列）；估不到的、舊版伺服器只有原本那一句", () => {
     const none = toDraftPosition(row({ estimated_date: null }))
-    expect(dateHint([est(), none])).toBe(`${BATCH_DATE_HINT}估計買入日是從今天往回，股價最近一次經過均價的那一天；按「套用」才會改成那一天。`)
+    expect(dateHint([est(), none])).toBe(`${BATCH_DATE_HINT}估計買入日是股價最近一次經過均價的那一天。`)
     expect(dateHint([none, none])).toBe(BATCH_DATE_HINT)
     expect(dateHint([toDraftPosition(row())])).toBe(BATCH_DATE_HINT)
     // 改了股票、估計都拿掉了：回到原本那一句

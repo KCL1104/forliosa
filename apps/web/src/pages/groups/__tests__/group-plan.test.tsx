@@ -172,14 +172,14 @@ describe("報告分頁：日報｜週報（不加第九個分頁）", () => {
   it("加值結束的群組：以前的日報照樣看得到，說明不會再有新的；從來沒有日報的群組沒有切換，直接是週報", async () => {
     mount()
     renderApp("/groups/grp_friends?tab=digests")
-    expect(await screen.findByText("這個群組已經沒有加值，不會再有新的日報。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("加值已結束，不再有新的日報", undefined, T)).toBeInTheDocument()
     expect(screen.getAllByRole("article")).toHaveLength(2)
     cleanup()
     mount()
     renderApp("/groups/grp_hiking?tab=digests")
     expect(await screen.findByText("還沒有週報", undefined, T)).toBeInTheDocument()
-    // 2026-11-18：群組週報週日 18:00 出來（和頻道的週報同時）
-    expect(screen.getByText("每週日 18:00 整理好這一週（週一到週五）的群組表現。")).toBeInTheDocument()
+    // 2026-11-18：群組週報週日 18:00 出來（和頻道的週報同時）；只寫時間（標籤，不寫「整理好…表現」）
+    expect(screen.getByText("每週日 18:00 更新")).toBeInTheDocument()
     expect(screen.queryByRole("radiogroup", { name: "報告" })).toBeNull()
   })
 
@@ -200,7 +200,7 @@ describe("頻道沒有「日報」開關（2026-11-18：併進盤前）", () => 
     renderApp("/groups/grp_family?tab=channels")
     const sw = await screen.findByRole("switch", { name: "盤前（交易日 7:30）" }, T)
     expect(sw).toHaveAttribute("aria-checked", "false")
-    expect(screen.getByText("盤前重點，加上昨日你的群組（加值群組）。")).toBeInTheDocument()
+    expect(screen.getByText("盤前重點，加上昨日你的群組（加值群組）")).toBeInTheDocument()
     expect(screen.queryByRole("switch", { name: "日報" })).toBeNull()
     expect(screen.queryByRole("switch", { name: "週報" })).toBeNull()
     await user.click(sw)
@@ -226,8 +226,8 @@ describe("群組設定的方案與人數上限", () => {
     expect(screen.getByText("已經有 5 位成員，上限是 5 人。新的成員不能加入。")).toHaveAttribute("role", "status")
     expect(screen.getByRole("button", { name: "產生邀請連結" })).toBeDisabled()
     // 我的兩個加值：還沒用的（直接用）與用在家族投資的（移過來要先確認）
-    expect(await screen.findByText("你有一個到 12/15 的加值，還沒有用在群組。", undefined, T)).toBeInTheDocument()
-    expect(screen.getByText("你到 12/31 的加值用在「家族投資」。")).toBeInTheDocument()
+    expect(await screen.findByText("加值到 12/15・還沒有用在群組", undefined, T)).toBeInTheDocument()
+    expect(screen.getByText("加值到 12/31・用在「家族投資」")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "用在這個群組" }))
     await waitFor(() => expect(api.attachGroupPass).toHaveBeenCalledWith("grp_hiking", "gps_spare"))
     expect(await screen.findByText("加值到 12/15・上限 50 人", undefined, T)).toBeInTheDocument()
@@ -296,7 +296,7 @@ describe("設定頁的方案（決定 14）", () => {
     expect(within(section).getByText("會員")).toBeInTheDocument()
     expect(within(section).getByRole("link", { name: "家族投資" })).toHaveAttribute("href", "/groups/grp_family")
     expect(within(section).getByText("群組加值，到 12/15")).toBeInTheDocument()
-    expect(within(section).getByText(/還沒有用在群組。到你擁有的群組的「成員」分頁/)).toBeInTheDocument()
+    expect(within(section).getByText("還沒有用在群組，在群組的「成員」分頁選")).toBeInTheDocument()
   })
   it("到期 30 天內的加值照樣列出，寫已到期；更早的不列", async () => {
     mount()

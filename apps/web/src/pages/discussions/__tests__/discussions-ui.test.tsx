@@ -239,11 +239,13 @@ describe("清單：篩選（全部｜公開｜我的群組）與排序", () => {
     expect(router.state.location.search).toMatchObject({ scope: "public", sort: "new" })
   })
 
-  it("空的：一個空狀態（原因＋怎麼開始），沒有表頭、沒有免責", async () => {
+  it("空的：一個空狀態（只有標題，動作在頁首），沒有表頭、沒有免責", async () => {
     mount({ scenario: "empty" })
     renderApp("/discussions")
     expect(await screen.findByText("還沒有主題", undefined, T)).toBeInTheDocument()
-    expect(screen.getByText("開第一個主題，問問大家怎麼看。")).toBeInTheDocument()
+    // 頁面只有標籤（DESIGN.md Copy 第一條）：不寫「開第一個主題，問問大家怎麼看。」，「開新主題」在頁首
+    expect(screen.queryByText(/問問大家/)).toBeNull()
+    expect(screen.getAllByRole("link", { name: "開新主題" })).toHaveLength(1)
     expect(document.querySelector(".form-head")).toBeNull()
     expect(screen.queryByText(DISCLAIMER)).toBeNull()
   })
@@ -1015,7 +1017,7 @@ describe("還沒送出的字：離開再回來還在（這個分頁）", () => {
     expect(window.sessionStorage.getItem(key)).toBeNull()
     await user.type(screen.getByRole("textbox", { name: "標題" }), "年底對帳")
     await user.type(screen.getByRole("textbox", { name: "內文" }), "大家把交易補齊")
-    expect(screen.queryByText("這是上次還沒發表的內容。")).toBeNull()
+    expect(screen.queryByText("上次的草稿")).toBeNull()
     // 取消：是連回清單的連結（不標 aria-current），字留著
     const cancel = screen.getByRole("link", { name: "取消" })
     expect(cancel).toHaveAttribute("href", "/discussions")
@@ -1027,14 +1029,14 @@ describe("還沒送出的字：離開再回來還在（這個分頁）", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "標題" })).toHaveValue("年底對帳"), T)
     expect(screen.getByRole("textbox", { name: "內文" })).toHaveValue("大家把交易補齊")
     expect(screen.getByRole("radio", { name: /大學同學/ })).toBeChecked()
-    expect(screen.getByText("這是上次還沒發表的內容。")).toBeInTheDocument()
+    expect(screen.getByText("上次的草稿")).toBeInTheDocument()
     // 清除草稿：表單回到空白
     await user.click(screen.getByRole("button", { name: "清除草稿" }))
     expect(screen.getByRole("textbox", { name: "標題" })).toHaveValue("")
     expect(screen.getByRole("textbox", { name: "內文" })).toHaveValue("")
     expect(screen.getAllByRole("radio").filter((el) => (el as HTMLInputElement).checked)).toEqual([])
     expect(window.sessionStorage.getItem(key)).toBeNull()
-    expect(screen.queryByText("這是上次還沒發表的內容。")).toBeNull()
+    expect(screen.queryByText("上次的草稿")).toBeNull()
     // 發表成功：草稿清掉
     await user.click(screen.getByRole("radio", { name: /大學同學/ }))
     await user.type(screen.getByRole("textbox", { name: "標題" }), "重新寫一次")

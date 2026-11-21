@@ -34,7 +34,7 @@ export function AccountData() {
         <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <div className="min-w-0">
             <p className="font-medium">匯出我的資料</p>
-            <p className="mt-0.5 text-base text-ink">下載一個 JSON 檔：個人資料、券商帳戶與交易、定期定額、觀察清單、AI 對話，以及你在群組與討論裡寫的內容。</p>
+            <p className="mt-0.5 text-base text-ink">JSON 檔：個人資料、券商帳戶與交易、定期定額、觀察清單、AI 對話、群組與討論裡寫的內容</p>
             {exportMe.isError && <FieldError className="mt-1.5">{exportErrorText(exportMe.error)}</FieldError>}
           </div>
           <Button variant="outline" className="shrink-0 self-start sm:self-auto" disabled={exportMe.isPending} onClick={() => exportMe.mutate()}>
@@ -52,7 +52,7 @@ export function AccountData() {
         <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <div className="min-w-0">
             <p className="font-medium">清除所有持倉</p>
-            <p className="mt-0.5 text-base text-ink">刪掉一個帳戶或全部帳戶的每一筆紀錄，帳戶留著，可以重新記。</p>
+            <p className="mt-0.5 text-base text-ink">刪掉一個或全部帳戶的紀錄，帳戶留著</p>
           </div>
           <Button
             variant="outline"
@@ -69,7 +69,7 @@ export function AccountData() {
         <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <div className="min-w-0">
             <p className="font-medium">刪除帳號</p>
-            <p className="mt-0.5 text-base text-ink">帳本、AI 對話與個人資料會全部刪除，不能復原。要留一份的話，先匯出。</p>
+            <p className="mt-0.5 text-base text-ink">帳本、AI 對話與個人資料全部刪除，不能復原</p>
           </div>
           <Button
             variant="outline"

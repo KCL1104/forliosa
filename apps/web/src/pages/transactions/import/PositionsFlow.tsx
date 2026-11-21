@@ -151,7 +151,7 @@ export function PositionsFlow({
   if (accounts.data && accounts.data.length === 0) {
     return (
       <div className={cn(bodyClass(sheet), "flex flex-col items-start gap-3")}>
-        <p className="text-base text-ink">還沒有券商帳戶，先到設定建立一個。</p>
+        <p className="text-base text-ink">還沒有券商帳戶</p>
         <Link to="/settings" onClick={onClose} className={buttonVariants({ variant: "outline" })}>
           到設定
         </Link>
@@ -243,7 +243,7 @@ export function PositionsFlow({
             <>
               {images.length === 0 && (
                 <div className="flex flex-col items-start gap-3">
-                  <p className="text-base text-ink">選券商 app「庫存」頁的截圖，一次最多 5 張。持股多、要捲動的，分幾張截。</p>
+                  <p className="text-base text-ink">券商 app「庫存」頁的截圖，最多 5 張，持股多的分幾張截</p>
                   <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>
                     選截圖
                   </Button>
@@ -281,7 +281,7 @@ export function PositionsFlow({
                 className="num max-h-[40dvh] min-h-36 text-base md:text-md"
               />
               <p id={textHintId} className="text-sm text-ink-2">
-                從券商網頁或 app 複製庫存表貼上：代號或名稱、股數（或張數）、均價或總成本。
+                要有代號或名稱、股數或張數、均價或總成本
               </p>
               {masked && masked.masked > 0 && <p className="text-base text-ink">送出前會先塗掉 {masked.masked} 處個資。</p>}
             </div>

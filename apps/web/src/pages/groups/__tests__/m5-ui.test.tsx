@@ -53,8 +53,8 @@ describe("分享開關", () => {
       expect(screen.getByRole("switch", { name: "報酬率" })).toHaveAttribute("aria-checked", "true")
       expect(screen.getByRole("switch", { name: "交易動態" })).toHaveAttribute("aria-checked", "false")
       expect(screen.getByRole("switch", { name: "附上成交價" })).toHaveAttribute("data-disabled")
-      expect(screen.getByText(/最近 90 天的買賣也會出現在動態裡/)).toBeInTheDocument()
-      expect(screen.getByText(/要先打開交易動態才會附上/)).toBeInTheDocument()
+      expect(screen.getByText(/最近 90 天的買賣也會出現/)).toBeInTheDocument()
+      expect(screen.getByText("要先打開交易動態")).toBeInTheDocument()
     })
   })
   it("持股與金額都打開時提示可以推算股數；只開一個不提示；推播列出頻道", async () => {
@@ -80,21 +80,21 @@ describe("分享開關", () => {
   it("成員的推播旁說明群組換頻道時會自動關掉；擁有者、還沒有頻道、邀請預覽都不說", async () => {
     const targets = [{ kind: "discord" as const, label: "Discord 頻道" }]
     renderInRouter(<ShareToggles value={DEFAULT_SHARE} onChange={() => {}} pushTargets={targets} pushAutoOff />)
-    const note = await screen.findByText("群組換頻道時會自動關掉。")
+    const note = await screen.findByText("群組換頻道時會自動關掉")
     // 念開關時一起念（aria-describedby）
     expect(screen.getByRole("switch", { name: "推播" }).getAttribute("aria-describedby")).toContain(note.id)
     cleanup()
     renderInRouter(<ShareToggles value={DEFAULT_SHARE} onChange={() => {}} pushTargets={targets} pushAutoOff={false} />)
     await screen.findByText("Discord 頻道")
-    expect(screen.queryByText("群組換頻道時會自動關掉。")).toBeNull()
+    expect(screen.queryByText("群組換頻道時會自動關掉")).toBeNull()
     cleanup()
     renderInRouter(<ShareToggles value={DEFAULT_SHARE} onChange={() => {}} pushTargets={[]} pushAutoOff />)
-    await screen.findByText("這個群組還沒有設定頻道。")
-    expect(screen.queryByText("群組換頻道時會自動關掉。")).toBeNull()
+    await screen.findByText("群組還沒有頻道")
+    expect(screen.queryByText("群組換頻道時會自動關掉")).toBeNull()
     cleanup()
     renderInRouter(<ShareToggles value={DEFAULT_SHARE} onChange={() => {}} pushAutoOff />)
-    await screen.findByText(/群組有設定頻道才會送/)
-    expect(screen.queryByText("群組換頻道時會自動關掉。")).toBeNull()
+    await screen.findByText("群組有頻道才會送")
+    expect(screen.queryByText("群組換頻道時會自動關掉")).toBeNull()
   })
 })
 

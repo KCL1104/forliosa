@@ -291,7 +291,7 @@ function CreatedInvite({ invite }: { invite: GroupInvite }) {
         </Button>
       </div>
       <p className="num text-sm text-ink-2">
-        {invite.multi_use ? "可以多人使用" : "單次使用"}・{formatDateTime(invite.expires_at)} 到期。對方點開後會先選要分享什麼，再加入。
+        {invite.multi_use ? "可以多人使用" : "單次使用"}・{formatDateTime(invite.expires_at)} 到期
       </p>
     </div>
   )
@@ -336,7 +336,7 @@ function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void
             <label htmlFor="group-ranking" className="font-medium">
               排名次
             </label>
-            <p className="text-base text-ink">{isOwner ? "關掉時排行只列出報酬率，依加入順序排列，沒有名次。" : "只有擁有者可以改。"}</p>
+            <p className="text-base text-ink">{isOwner ? "關掉時依加入順序列出，沒有名次" : "只有擁有者可以改"}</p>
           </div>
           <Switch
             id="group-ranking"
@@ -348,7 +348,7 @@ function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void
         <PlanRow group={group} />
         {isOwner && (
           <div className="flex flex-col items-start gap-2 py-4">
-            <p className="text-base text-ink">擁有者要先把群組轉給別人才能離開（成員右邊的選項）。</p>
+            <p className="text-base text-ink">擁有者要先把群組轉給別人，才能離開</p>
             <Button variant="outline" onClick={onDelete}>
               刪除群組
             </Button>
@@ -396,7 +396,7 @@ function PlanRow({ group }: { group: Group }) {
       {usable.map((p) => (
         <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-rule pt-3">
           <p className="num text-base text-ink">
-            {p.attached ? `你到 ${untilDay(p.until!, today)} 的加值用在「${p.group!.name}」。` : `你有一個到 ${untilDay(p.until!, today)} 的加值，還沒有用在群組。`}
+            {p.attached ? `加值到 ${untilDay(p.until!, today)}・用在「${p.group!.name}」` : `加值到 ${untilDay(p.until!, today)}・還沒有用在群組`}
           </p>
           <Button variant="outline" size="sm" disabled={attach.isPending} onClick={() => (p.attached ? setMoving(p) : run(p))}>
             {p.attached ? "移到這個群組" : "用在這個群組"}
