@@ -29,7 +29,8 @@ export function quickActions(ctx: AiContext): QuickAction[] {
  */
 export function composerPlaceholder(ctx: AiContext, variant: "panel" | "screen"): string {
   const screen = variant === "screen"
-  if (ctx.route === "ledger") return screen ? "搜尋，或說：買 0050 2 張" : "問問題，或說：買 0050 2 張 52.4"
+  // 例子不帶價格（2026-11-21 評論）：照著打出來的草稿用那天的收盤價，不會是一個離收盤價很遠的價格
+  if (ctx.route === "ledger") return screen ? "搜尋，或說：買 0050 2 張" : "問問題，或說：買 0050 2 張"
   if (ctx.route === "stock") {
     const s = ctx.stock
     const trade = s.market === "US" ? `買 ${s.code} 10 股` : `買 ${s.code} 1 張`

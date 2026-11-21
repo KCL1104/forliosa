@@ -10,7 +10,7 @@ import { DEFAULT_COLUMNS, useLedgerPrefs } from "../ledger-prefs"
 
 /**
  * 資產組成 v2：本金 ≤ 0（賣股票收到的錢已經和買股票花的一樣多或更多）寫「本金已收回」（使用者 2026-11-19，取代方案 D）。
- * 圖例、滑過的讀數、圖的說明、圖裡那一行不寫金額；賺的照實寫（總資產－本金）；本金線畫在 0、塗色從 0 塗到總資產。
+ * 圖例、滑過的讀數、圖的說明不寫金額；價差照實寫（總資產－本金）；本金線畫在 0、塗色從 0 塗到總資產；0 在圖外時縱軸的記號寫「0」。
  * 每月表格的本金增減照舊寫金額。
  */
 vi.mock("@number-flow/react", () => ({
@@ -106,22 +106,22 @@ describe("本金已收回（本金 ≤ 0）", { timeout: 20_000 }, () => {
     ["剛好是 0", 0, "+NT$508,000", "NT$508,000"],
     ["稍微負的（−1 元）", -1, "+NT$508,001", "NT$508,001"],
     ["很負的（−500 萬）", -5_000_000, "+NT$5,508,000", "NT$5,508,000"],
-  ])("本金%s：圖例寫「本金已收回」、不寫金額；賺的照實寫（總資產－本金）；圖裡那一行寫「本金已收回」；圖的說明念為什麼與本金線畫在 0", async (_, p, gain, gainSpeech) => {
+  ])("本金%s：圖例寫「本金已收回」、不寫金額；價差照實寫（總資產－本金）；縱軸的記號寫「0」（本金線畫在那裡）；圖的說明念為什麼與本金線畫在 0", async (_, p, gain, gainSpeech) => {
     await withSeries(flat(p))
     renderApp("/")
     const region = await trend()
     await waitFor(() => expect(legend(region, "invested")).not.toBeNull(), T)
     expect(legend(region, "invested")!.textContent).toBe("本金已收回")
-    expect(legend(region, "gain")!.textContent).toBe(`賺的 ${gain}`)
-    // 本金線畫在 0，0 在圖的下面（縱軸只跟總資產）：圖裡那一行不寫金額
+    expect(legend(region, "gain")!.textContent).toBe(`價差 ${gain}`)
+    // 本金線畫在 0，0 在圖的下面（縱軸只跟總資產）：縱軸的記號寫「0」，不寫負的金額
     const note = region.querySelector("[data-off-chart]")!
-    expect(note.textContent).toBe("本金已收回")
+    expect(note.textContent).toBe("0")
     expect(note.getAttribute("data-off-chart")).toBe("below")
     // 縱軸不會到負的
     expect(yTicks(region).some((t) => t.textContent!.startsWith("−"))).toBe(false)
     expect(img(region).getAttribute("aria-label")).toMatch(
       new RegExp(
-        `，資產組成：最後一天本金已收回，賺的 ${gainSpeech.replace("$", "\\$")}。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢；賣股票收到的錢已經和買股票花的一樣多或更多，所以本金線畫在 0，在圖的下方$`,
+        `，資產組成：最後一天本金已收回，價差賺 ${gainSpeech.replace("$", "\\$")}。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢；賣股票收到的錢已經和買股票花的一樣多或更多，所以本金線畫在 0，在圖的下方$`,
       ),
     )
     expect(region.textContent).not.toMatch(/本金 −|−NT\$/)
@@ -133,7 +133,7 @@ describe("本金已收回（本金 ≤ 0）", { timeout: 20_000 }, () => {
     const region = await trend()
     await waitFor(() => expect(legend(region, "invested")).not.toBeNull(), T)
     expect(legend(region, "invested")!.textContent).toBe("本金 NT$1")
-    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("本金 1，在圖的下方")
+    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("1")
     expect(region.textContent).not.toMatch(/本金已收回/)
   })
 
@@ -158,10 +158,10 @@ describe("本金已收回（本金 ≤ 0）", { timeout: 20_000 }, () => {
     expect(region.querySelector('[data-band="loss"]')).toBeNull()
     // 圖例（沒有滑過）：最後一天收回了
     expect(legend(region, "invested")!.textContent).toBe("本金已收回")
-    expect(legend(region, "gain")!.textContent).toBe("賺的 +NT$121,000")
+    expect(legend(region, "gain")!.textContent).toBe("價差 +NT$121,000")
   })
 
-  it("滑過（手機的圖例）：每一天各自換「本金 NT$…」與「本金已收回」；賺的照實寫；報讀器念的也一樣", async () => {
+  it("滑過（手機的圖例）：每一天各自換「本金 NT$…」與「本金已收回」；價差照實寫；報讀器念的也一樣", async () => {
     await withSeries(seriesOf(crossing))
     renderApp("/")
     const region = await trend()
@@ -173,21 +173,21 @@ describe("本金已收回（本金 ≤ 0）", { timeout: 20_000 }, () => {
     for (let i = 0; i < 9; i++) {
       if (i > 0) fireEvent.keyDown(g, { key: "ArrowRight" })
       expect(legend(region, "invested")!.textContent, `第 ${i} 天`).toBe(expected[i])
-      expect(legend(region, "gain")!.textContent, `第 ${i} 天`).toBe(`賺的 +NT$${gains[i]!.toLocaleString("en-US")}`)
+      expect(legend(region, "gain")!.textContent, `第 ${i} 天`).toBe(`價差 +NT$${gains[i]!.toLocaleString("en-US")}`)
       const money = crossing[i]![1] > 0 ? `本金 NT\\$${crossing[i]![1].toLocaleString("en-US")}` : "本金已收回"
-      expect(live(region), `第 ${i} 天`).toMatch(new RegExp(`，總資產 NT\\$${crossing[i]![0].toLocaleString("en-US")}，${money}，賺的 NT\\$${gains[i]!.toLocaleString("en-US")}，報酬`))
+      expect(live(region), `第 ${i} 天`).toMatch(new RegExp(`，總資產 NT\\$${crossing[i]![0].toLocaleString("en-US")}，${money}，價差賺 NT\\$${gains[i]!.toLocaleString("en-US")}，報酬`))
     }
     // 11/4（第 2 天）：念的是「本金已收回」，不念負的金額
     fireEvent.keyDown(g, { key: "Home" })
     fireEvent.keyDown(g, { key: "ArrowRight" })
     fireEvent.keyDown(g, { key: "ArrowRight" })
-    expect(live(region)).toMatch(/^11\/4（三）收盤，總資產 NT\$60,000，本金已收回，賺的 NT\$110,000，報酬/)
-    // 手機圖例的第一欄：撐寬用的有本金的金額、「本金已收回」與賺的（一樣寬的金額取第一個）
+    expect(live(region)).toMatch(/^11\/4（三）收盤，總資產 NT\$60,000，本金已收回，價差賺 NT\$110,000，報酬/)
+    // 手機圖例的第一欄：撐寬用的有本金的金額、「本金已收回」與價差（一樣寬的金額取第一個）
     const sizers = [...region.querySelectorAll<HTMLElement>("[data-legend-col] [data-legend-sizer]")].map((s) => s.textContent)
-    expect(sizers).toEqual(["本金 NT$200,000", "本金已收回", "賺的 +NT$100,000"])
+    expect(sizers).toEqual(["本金 NT$200,000", "本金已收回", "價差 +NT$100,000"])
   })
 
-  it("滑過（寬的時候，圖例那一列）：收回的那一天寫「本金已收回」「賺的 +NT$…」，讀數第二行是報酬", async () => {
+  it("滑過（寬的時候，圖例那一列）：收回的那一天寫「本金已收回」「價差 +NT$…」，讀數第二行是報酬", async () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000)
     await withSeries(seriesOf(crossing))
     renderApp("/")
@@ -199,30 +199,30 @@ describe("本金已收回（本金 ≤ 0）", { timeout: 20_000 }, () => {
     fireEvent.keyDown(g, { key: "Home" })
     const second = () => readout.querySelectorAll(":scope > p")[1]!.textContent
     const shown = () => [legend(region, "invested")!.textContent, legend(region, "gain")!.textContent]
-    expect(shown()).toEqual(["本金 NT$200,000", "賺的 +NT$100,000"])
+    expect(shown()).toEqual(["本金 NT$200,000", "價差 +NT$100,000"])
     expect(second()).toMatch(/^報酬 /)
     fireEvent.keyDown(g, { key: "ArrowRight" })
     fireEvent.keyDown(g, { key: "ArrowRight" })
-    expect(shown()).toEqual(["本金已收回", "賺的 +NT$110,000"])
+    expect(shown()).toEqual(["本金已收回", "價差 +NT$110,000"])
     fireEvent.keyDown(g, { key: "ArrowRight" })
     fireEvent.keyDown(g, { key: "ArrowRight" })
     fireEvent.keyDown(g, { key: "ArrowRight" })
-    expect(shown()).toEqual(["本金 NT$50,000", "賺的 +NT$114,000"])
+    expect(shown()).toEqual(["本金 NT$50,000", "價差 +NT$114,000"])
   })
 
-  it("圖裡兩個角都放不下（倒 U）：改寫在圖例，圖例就是「本金已收回」（不加在哪一邊）；手機圖例照兩行兩欄", async () => {
+  it("倒 U（以前圖裡兩個角都放不下）：縱軸的記號照樣在縱軸那一欄（「0」）；圖例就是「本金已收回」（不加在哪一邊）；手機圖例照兩行兩欄", async () => {
     const arch = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => [Math.round(4_000_000 + 520_000 * Math.sin((Math.PI * i) / 8)), -100_000] as [number, number])
     await withSeries(seriesOf(arch))
     renderApp("/")
     const region = await trend()
     await waitFor(() => expect(legend(region, "invested")).not.toBeNull(), T)
-    expect(region.querySelector("[data-off-chart]")).toBeNull()
+    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("0")
     expect(legend(region, "invested")!.textContent).toBe("本金已收回")
     expect(region.querySelector("[data-legend-col]")).not.toBeNull()
-    expect(img(region).getAttribute("aria-label")).toMatch(/，資產組成：最後一天本金已收回，賺的 NT\$4,100,000。.*所以本金線畫在 0，在圖的下方$/)
+    expect(img(region).getAttribute("aria-label")).toMatch(/，資產組成：最後一天本金已收回，價差賺 NT\$4,100,000。.*所以本金線畫在 0，在圖的下方$/)
   })
 
-  it("隱私模式：還是寫「本金已收回」（沒有金額），圖裡那一行也是；圖的說明不念金額", async () => {
+  it("隱私模式：還是寫「本金已收回」（沒有金額），縱軸的記號只有箭頭；圖的說明不念金額", async () => {
     act(() => usePrefs.setState({ privacyMode: true }))
     await withSeries(flat(-200_000))
     renderApp("/")
@@ -230,15 +230,15 @@ describe("本金已收回（本金 ≤ 0）", { timeout: 20_000 }, () => {
     await waitFor(() => expect(legend(region, "invested")).not.toBeNull(), T)
     expect(legend(region, "invested")!.textContent).toBe("本金已收回")
     expect(legend(region, "gain")!.textContent).not.toMatch(/NT\$/)
-    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("本金已收回")
+    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("")
     const label = img(region).getAttribute("aria-label")!
     expect(label).not.toMatch(/NT\$|萬/)
-    expect(label).toMatch(/，資產組成：最後一天賺，本金已收回。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢；賣股票收到的錢已經和買股票花的一樣多或更多，所以本金線畫在 0，在圖的下方$/)
+    expect(label).toMatch(/，資產組成：最後一天價差賺，本金已收回。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢；賣股票收到的錢已經和買股票花的一樣多或更多，所以本金線畫在 0，在圖的下方$/)
     // 滑過也一樣
     const g = chart(region)
     act(() => g.focus())
     fireEvent.keyDown(g, { key: "End" })
-    expect(live(region)).toMatch(/，總資產 已隱藏，本金已收回，賺的 已隱藏，/)
+    expect(live(region)).toMatch(/，總資產 已隱藏，本金已收回，價差賺 已隱藏，/)
   })
 
   it("本金開關關掉：沒有本金那一層，也沒有「本金已收回」", async () => {

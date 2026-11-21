@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { api } from "@/api"
 import { DraftCard } from "@/ai/DraftCard"
@@ -75,5 +75,62 @@ describe("草稿卡：手續費、和收盤價差很多、草稿標記", { timeo
     expect(within(signed).queryByText("草稿")).toBeNull()
     await new Promise((r) => setTimeout(r, 300))
     expect(within(signed).queryByText(/^比 .*收盤/)).toBeNull()
+  })
+})
+
+/**
+ * 和收盤價差 10% 以上（2026-11-21 評論，產品負責人決定）：那一行在格子與合計之間、差多少是粗體；
+ * 草稿剛出現時焦點先到「修改」（不是簽名格），「修改」的說明念那一行。差不到 10%、舊的草稿、使用者在別處打字時不移焦點。
+ */
+describe("草稿卡：和收盤價差很多時醒目、焦點先到「修改」", { timeout: 20_000 }, () => {
+  const fresh = (id: string, p: Partial<Draft["input"]> = {}): Draft => ({ ...draft(p), id, createdAt: new Date().toISOString() })
+
+  it("那一行在合計上面、差多少是粗體；焦點在「修改」，「修改」的說明是那一行", async () => {
+    renderCard(fresh("dft_far_1"))
+    const card = screen.getByRole("article")
+    const line = await within(card).findByText(/^比 11\/12 收盤價/, undefined, T)
+    const gap = line.querySelector("b")!
+    expect(gap.textContent).toMatch(/^低 \d+\.\d%$/)
+    expect(gap).toHaveClass("font-bold")
+    // 在格子（成交價）之後、合計之前
+    const total = within(card).getByText("合計")
+    const price = within(card).getByText("成交價")
+    expect(price.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(line.compareDocumentPosition(total) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const edit = within(card).getByRole("button", { name: "修改" })
+    await waitFor(() => expect(edit).toHaveFocus(), T)
+    expect(within(card).getByRole("button", { name: "簽名：確認入帳" })).not.toHaveFocus()
+    expect(edit).toHaveAccessibleDescription(line.textContent!)
+  })
+
+  it("差不到 10%：沒有那一行，焦點不動，「修改」沒有說明", async () => {
+    const close = (await api.getDailyClose("0050.TW", "2026-11-12")).close!
+    renderCard(fresh("dft_far_2", { price: close * 1.05 }))
+    const card = screen.getByRole("article")
+    await new Promise((r) => setTimeout(r, 300))
+    expect(within(card).queryByText(/^比 .*收盤/)).toBeNull()
+    const edit = within(card).getByRole("button", { name: "修改" })
+    expect(edit).not.toHaveFocus()
+    expect(edit).not.toHaveAttribute("aria-describedby")
+  })
+
+  it("使用者正在別的輸入框打字（裡面有字）：不搶焦點；重新整理後還原的舊草稿也不搶", async () => {
+    const box = document.createElement("textarea")
+    box.value = "台積電今天"
+    document.body.appendChild(box)
+    box.focus()
+    renderCard(fresh("dft_far_3"))
+    const card = screen.getByRole("article")
+    await within(card).findByText(/^比 11\/12 收盤價/, undefined, T)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(box).toHaveFocus()
+    box.remove()
+    cleanup()
+    // 舊的草稿（建立超過幾分鐘，例如重新整理後從紀錄還原）：照樣有那一行，但不移焦點
+    renderCard({ ...draft(), id: "dft_far_4" })
+    const old = screen.getByRole("article")
+    await within(old).findByText(/^比 11\/12 收盤價/, undefined, T)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(within(old).getByRole("button", { name: "修改" })).not.toHaveFocus()
   })
 })

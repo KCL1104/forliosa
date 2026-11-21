@@ -64,8 +64,14 @@ const trend = () => screen.findByRole("region", { name: "總資產走勢" }, T)
 const chart = (region: HTMLElement) => within(region).getByRole("group", { name: /^總資產走勢：/ })
 const img = (region: HTMLElement) => within(region).getByRole("img")
 const legend = (region: HTMLElement, item: "invested" | "gain" | "dividend" | "total") => region.querySelector<HTMLElement>(`[data-legend="${item}"]`)
-/** 縱軸的刻度字（不含橫軸的日期、圖裡的小字） */
-const yLabels = (region: HTMLElement) => [...img(region).querySelectorAll("text[text-anchor='end'][dominant-baseline='central']")].map((t) => t.textContent)
+/** 縱軸的刻度字（不含橫軸的日期、本金線在圖外的記號） */
+const yLabels = (region: HTMLElement) =>
+  [...img(region).querySelectorAll("text[text-anchor='end'][dominant-baseline='central']")].filter((t) => !t.closest("[data-off-chart]")).map((t) => t.textContent)
+/** 畫圖的範圍（塗色切在這裡）：x、y、寬、高 */
+const plotBox = (region: HTMLElement) => {
+  const r = region.querySelector("clipPath rect")!
+  return { x: Number(r.getAttribute("x")), y: Number(r.getAttribute("y")), w: Number(r.getAttribute("width")), h: Number(r.getAttribute("height")) }
+}
 
 const nineDays = ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12"]
 const comp0 = { dividends: [], estimated: [], months: [], months_estimated: 0 }
@@ -98,8 +104,7 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     expect(img(region).getAttribute("height")).toBe("114")
   })
 
-  it("1 個月：本金離太遠（總資產的起伏不到兩條線範圍的 35%），縱軸只跟總資產；圖裡寫「本金 288萬，在圖的下方」；滑過時縱軸不跳", async () => {
-    // 桌面（120px）：圖裡放得下那一行（手機加高到 114px 也放得下，見下一個測試）
+  it("1 個月：本金離太遠（總資產的起伏不到兩條線範圍的 35%），縱軸只跟總資產；縱軸那一欄的下面一個記號（鉛筆灰箭頭＋「288萬」），不寫句子；滑過時縱軸不跳", async () => {
     asDesktop()
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(900)
     renderApp("/")
@@ -107,9 +112,21 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     expect(img(region).getAttribute("height")).toBe("120")
     await waitFor(() => expect(region.querySelector("[data-off-chart]")).not.toBeNull(), T)
     const note = region.querySelector("[data-off-chart]")!
-    expect(note.textContent).toBe("本金 288萬，在圖的下方")
+    // 只有約略金額（2026-11-21 評論：不寫「本金 288萬，在圖的下方」這種句子）
+    expect(note.textContent).toBe("288萬")
+    expect(img(region).textContent).not.toMatch(/在圖的/)
     expect(note.getAttribute("data-off-chart")).toBe("below")
-    expect(note.getAttribute("fill")).toBe("var(--muted-foreground)")
+    const label = note.querySelector("text")!
+    expect(label.getAttribute("fill")).toBe("var(--muted-foreground)")
+    // 箭頭是本金線的顏色、朝下
+    const arrow = note.querySelector("g")!
+    expect(arrow.getAttribute("stroke")).toBe("var(--chart-bench)")
+    const head = arrow.querySelector("polyline")!.getAttribute("points")!.split(" ").map((p) => Number(p.split(",")[1]))
+    expect(head[1]).toBeGreaterThan(head[0]!)
+    // 在縱軸那一欄（畫圖範圍的左邊）、圖的下緣下面：碰不到總資產線
+    const box = plotBox(region)
+    expect(Number(label.getAttribute("x"))).toBeLessThan(box.x)
+    expect(Number(label.getAttribute("y"))).toBeGreaterThan(box.y + box.h)
     // 縱軸只跟總資產：刻度都在 380 萬上下，不會到 288 萬
     const ticks = yLabels(region)
     expect(ticks.every((t) => Number(t!.replace(/[^\d.]/g, "")) >= 370)).toBe(true)
@@ -121,42 +138,50 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     expect(yLabels(region)).toEqual(ticks)
     for (let i = 0; i < 10; i++) fireEvent.keyDown(g, { key: "ArrowRight" })
     expect(yLabels(region)).toEqual(ticks)
-    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("本金 288萬，在圖的下方")
+    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("288萬")
   })
 
-  it("手機（114px，畫圖的範圍和 main 一樣 66px）：同一個 1 個月，圖裡也放得下「本金 288萬，在圖的下方」（48px 時放不下、退回圖例），圖例不再重複", async () => {
+  it("手機（114px，畫圖的範圍和 main 一樣 66px）：同一個 1 個月，縱軸的記號一樣；圖例不寫在哪一邊；圖的說明念本金線在圖的下方", async () => {
     renderApp("/")
     const region = await trend()
     expect(img(region).getAttribute("height")).toBe("114")
     expect(region.querySelector("clipPath rect")!.getAttribute("height")).toBe("66")
     await waitFor(() => expect(region.querySelector("[data-off-chart]")).not.toBeNull(), T)
-    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("本金 288萬，在圖的下方")
+    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("288萬")
     expect(legend(region, "invested")!.textContent).toMatch(/^本金 NT\$[\d,]+$/)
-    expect(img(region).getAttribute("aria-label")).toContain("，本金 288萬，在圖的下方")
+    expect(region.textContent).not.toMatch(/在圖的/)
+    expect(img(region).getAttribute("aria-label")).toContain("，本金線在圖的下方。")
   })
 
-  it("本金在總資產上面而且離太遠（虧很多）：圖裡寫「在圖的上方」", async () => {
+  it("本金在總資產上面而且離太遠（虧很多）：記號在縱軸那一欄的最上面、箭頭朝上；碰到的刻度字不寫", async () => {
     await withSeries(seriesOf([[1_000_000, 2_000_000], [1_010_000, 2_000_000], [990_000, 2_000_000], [1_020_000, 2_000_000], [1_030_000, 2_000_000], [1_000_000, 2_000_000], [1_040_000, 2_000_000], [1_050_000, 2_000_000], [1_060_000, 2_000_000]]))
     act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
     renderApp("/")
     const region = await trend()
     const note = await waitFor(() => region.querySelector("[data-off-chart]")!, T)
-    expect(note.textContent).toBe("本金 200萬，在圖的上方")
+    expect(note.textContent).toBe("200萬")
     expect(note.getAttribute("data-off-chart")).toBe("above")
+    const head = note.querySelector("polyline")!.getAttribute("points")!.split(" ").map((p) => Number(p.split(",")[1]))
+    expect(head[1]).toBeLessThan(head[0]!)
+    const cueY = Number(note.querySelector("text")!.getAttribute("y"))
+    const tickYs = [...img(region).querySelectorAll("text[text-anchor='end'][dominant-baseline='central']")].filter((t) => !t.closest("[data-off-chart]")).map((t) => Number(t.getAttribute("y")))
+    expect(tickYs.length).toBeGreaterThan(0)
+    expect(tickYs.every((y) => Math.abs(y - cueY) >= 13)).toBe(true)
+    expect(img(region).getAttribute("aria-label")).toContain("，本金線在圖的上方。")
     expect(region.querySelector('[data-band="loss"]')!.getAttribute("fill")).toBe("var(--fall-tint)")
     expect(region.querySelector('[data-band="gain"]')).toBeNull()
   })
 
-  it("賺轉虧：兩種顏色都有；圖例跟著滑到的那一天換「賺的」「虧的」；圖的說明用字說有賺有虧（不靠顏色）", async () => {
+  it("賺轉虧：兩種顏色都有；圖例的價差跟著滑到的那一天換正負號與顏色；圖的說明用字說有賺有虧（不靠顏色）", async () => {
     await withSeries(seriesOf([[100_000, 100_000], [110_000, 100_000], [120_000, 100_000], [105_000, 100_000], [95_000, 100_000], [90_000, 100_000], [100_000, 100_000], [96_000, 100_000], [94_000, 100_000]]))
     act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
     renderApp("/")
     const region = await trend()
     await waitFor(() => expect(region.querySelector('[data-band="loss"]')).not.toBeNull(), T)
     expect(region.querySelector('[data-band="gain"]')).not.toBeNull()
-    expect(img(region).getAttribute("aria-label")).toContain("，資產組成：最後一天本金 NT$100,000，虧的 NT$6,000，這段期間有賺有虧。本金是買股票花的錢")
+    expect(img(region).getAttribute("aria-label")).toContain("，資產組成：最後一天本金 NT$100,000，價差虧 NT$6,000，這段期間有賺有虧。本金是買股票花的錢")
     // 沒有滑過：最後一天（虧）
-    expect(legend(region, "gain")!.textContent).toBe("虧的 −NT$6,000")
+    expect(legend(region, "gain")!.textContent).toBe("價差 −NT$6,000")
     expect(legend(region, "gain")!.querySelector(".text-fall")).not.toBeNull()
     const g = chart(region)
     act(() => g.focus())
@@ -164,27 +189,30 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     fireEvent.keyDown(g, { key: "ArrowRight" })
     fireEvent.keyDown(g, { key: "ArrowRight" })
     // 11/4：總資產 120,000、本金 100,000
-    expect(legend(region, "gain")!.textContent).toBe("賺的 +NT$20,000")
+    expect(legend(region, "gain")!.textContent).toBe("價差 +NT$20,000")
     expect(legend(region, "gain")!.querySelector(".bg-rise-tint")).not.toBeNull()
     expect(legend(region, "invested")!.textContent).toBe("本金 NT$100,000")
-    expect(region.querySelector('[aria-live="polite"]')!.textContent).toMatch(/^11\/4（三）收盤，總資產 NT\$120,000，本金 NT\$100,000，賺的 NT\$20,000，報酬上漲/)
+    expect(region.querySelector('[aria-live="polite"]')!.textContent).toMatch(/^11\/4（三）收盤，總資產 NT\$120,000，本金 NT\$100,000，價差賺 NT\$20,000，報酬上漲/)
     fireEvent.keyDown(g, { key: "ArrowRight" })
     fireEvent.keyDown(g, { key: "ArrowRight" })
-    expect(legend(region, "gain")!.textContent).toBe("虧的 −NT$5,000")
-    expect(region.querySelector('[aria-live="polite"]')!.textContent).toContain("，虧的 NT$5,000，")
+    expect(legend(region, "gain")!.textContent).toBe("價差 −NT$5,000")
+    expect(region.querySelector('[aria-live="polite"]')!.textContent).toContain("，價差虧 NT$5,000，")
     // v2 圖下面沒有句子（使用者只要圖）
     expect(within(region).queryByText(/^這段期間總資產/)).toBeNull()
   })
 
-  it("隱私模式：圖例、圖裡那一行、圖的說明都不寫金額；塗色照畫", async () => {
+  it("隱私模式：圖例、縱軸的記號、圖的說明都不寫金額（價差留著正負號）；塗色照畫", async () => {
     act(() => usePrefs.setState({ privacyMode: true }))
     renderApp("/")
     const region = await trend()
-    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("本金在圖的下方")
+    // 縱軸的記號只有箭頭
+    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("")
+    expect(region.querySelector("[data-off-chart] polyline")).not.toBeNull()
     expect(legend(region, "invested")!.textContent).not.toMatch(/NT\$/)
     expect(legend(region, "gain")!.textContent).not.toMatch(/NT\$/)
+    expect(legend(region, "gain")!.textContent).toBe("目前價差 +••••")
     expect(img(region).getAttribute("aria-label")).not.toMatch(/NT\$|萬/)
-    expect(img(region).getAttribute("aria-label")).toMatch(/，資產組成：最後一天賺，本金在圖的下方。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢$/)
+    expect(img(region).getAttribute("aria-label")).toMatch(/，資產組成：最後一天價差賺，本金線在圖的下方。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢$/)
     expect(region.querySelector('[data-band="gain"]')).not.toBeNull()
   })
 
@@ -218,7 +246,7 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     const second = readout.querySelectorAll(":scope > p")[1]!
     expect(second.textContent).toMatch(/^報酬 /)
     expect(legend(region, "invested")!.textContent).not.toBe(endInvested)
-    expect(legend(region, "gain")!.textContent).toMatch(/^(賺的|虧的) [+−]NT\$[\d,]+$/)
+    expect(legend(region, "gain")!.textContent).toMatch(/^價差 [+−]NT\$[\d,]+$/)
     expect(readout).toHaveClass("h-11")
   })
 
@@ -276,24 +304,25 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     expect(region.querySelector('[data-series="total"]')!.getAttribute("d")).not.toMatch(/V/)
   })
 
-  it("（第二審 3）倒 U（兩個角落都碰到總資產線或最後一點）：本金在圖外那一行不放進圖裡，改寫在圖例「本金 NT$…（在圖的下方）」；手機的圖例改成兩行（本金一行、其他一行）", async () => {
+  it("（第二審 3）倒 U（兩個角落都碰到總資產線或最後一點）：本金線在圖外的記號在縱軸那一欄，碰不到線；圖例不另外寫在哪一邊，手機照常兩欄", async () => {
     const arch = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => [Math.round(4_000_000 + 520_000 * Math.sin((Math.PI * i) / 8)), 2_900_000] as [number, number])
     await withSeries(seriesOf(arch))
     act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
     renderApp("/")
     const region = await trend()
     await waitFor(() => expect(legend(region, "invested")).not.toBeNull(), T)
-    expect(region.querySelector("[data-off-chart]")).toBeNull()
-    expect(legend(region, "invested")!.textContent).toBe("本金 NT$2,900,000（在圖的下方）")
+    const note = region.querySelector("[data-off-chart]")!
+    expect(note.textContent).toBe("290萬")
+    expect(Number(note.querySelector("text")!.getAttribute("x"))).toBeLessThan(plotBox(region).x)
+    expect(legend(region, "invested")!.textContent).toBe("本金 NT$2,900,000")
     const grid = region.querySelector<HTMLElement>("[data-legend-grid]")!
     expect(grid.children).toHaveLength(2)
-    expect(grid.children[0]!.querySelector("[data-legend]")!.getAttribute("data-legend")).toBe("invested")
-    expect([...grid.children[1]!.querySelectorAll("[data-legend]")].map((c) => c.getAttribute("data-legend"))).toEqual(["gain", "total"])
-    // 圖的說明照樣念本金在下面
-    expect(img(region).getAttribute("aria-label")).toContain("，本金 290萬，在圖的下方")
+    expect([...grid.children[0]!.querySelectorAll("[data-legend]")].map((c) => c.getAttribute("data-legend"))).toEqual(["invested", "gain"])
+    // 圖的說明照樣念本金線在下面
+    expect(img(region).getAttribute("aria-label")).toContain("，本金線在圖的下方。")
   })
 
-  it("（第二審 3）倒 U 在桌面也一樣：寫在圖例那一排", async () => {
+  it("（第二審 3）倒 U 在桌面也一樣：記號在縱軸那一欄，圖例不另外寫", async () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000)
     const arch = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => [Math.round(4_000_000 + 520_000 * Math.sin((Math.PI * i) / 8)), 2_900_000] as [number, number])
     await withSeries(seriesOf(arch))
@@ -301,25 +330,25 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     renderApp("/")
     const region = await trend()
     await waitFor(() => expect(region.querySelector("[data-legend-row]")).not.toBeNull(), T)
-    expect(region.querySelector("[data-off-chart]")).toBeNull()
-    expect(legend(region, "invested")!.textContent).toBe("本金 NT$2,900,000（在圖的下方）")
+    expect(region.querySelector("[data-off-chart]")!.textContent).toBe("290萬")
+    expect(legend(region, "invested")!.textContent).toBe("本金 NT$2,900,000")
   })
 
-  it("（第二審 4）沒有滑過、不是「全部」：圖例寫「目前賺的」（累積到最後一天）；「全部」與滑過時寫「賺的」", async () => {
+  it("（第二審 4）沒有滑過、不是「全部」：圖例寫「目前價差」（累積到最後一天）；「全部」與滑過時寫「價差」", async () => {
     renderApp("/")
     const region = await trend()
-    expect(legend(region, "gain")!.textContent).toMatch(/^目前賺的 \+NT\$[\d,]+$/)
+    expect(legend(region, "gain")!.textContent).toMatch(/^目前價差 \+NT\$[\d,]+$/)
     const g = chart(region)
     act(() => g.focus())
     fireEvent.keyDown(g, { key: "End" })
-    expect(legend(region, "gain")!.textContent).toMatch(/^賺的 \+NT\$[\d,]+$/)
+    expect(legend(region, "gain")!.textContent).toMatch(/^價差 \+NT\$[\d,]+$/)
     fireEvent.keyDown(g, { key: "Escape" })
-    expect(legend(region, "gain")!.textContent).toMatch(/^目前賺的 /)
+    expect(legend(region, "gain")!.textContent).toMatch(/^目前價差 /)
     fireEvent.click(within(region).getByRole("radio", { name: "全部" }))
-    expect(legend(region, "gain")!.textContent).toMatch(/^賺的 \+NT\$[\d,]+$/)
+    expect(legend(region, "gain")!.textContent).toMatch(/^價差 \+NT\$[\d,]+$/)
   })
 
-  it("（第二審 7）鍵盤：讀數寫那一天的總資產、本金、賺的與報酬；日期太長時截斷的是日期、金額一定完整；Esc 收起、報讀器不再念；上面的大數字不變", async () => {
+  it("（第二審 7）鍵盤：讀數寫那一天的總資產、本金、價差與報酬；日期太長時截斷的是日期、金額一定完整；Esc 收起、報讀器不再念；上面的大數字不變", async () => {
     renderApp("/")
     const region = await trend()
     const g = chart(region)
@@ -331,7 +360,7 @@ describe("資產組成 v2：一張圖，本金線＋賺虧塗色", { timeout: 20
     const amount = region.querySelector<HTMLElement>("[data-readout] p .font-semibold")!
     expect(amount.textContent).toMatch(/^NT\$[\d,]+$/)
     expect(amount).toHaveClass("shrink-0")
-    expect(region.querySelector('[aria-live="polite"]')!.textContent).toMatch(/^11\/12（四）收盤，總資產 NT\$[\d,]+，本金 NT\$[\d,]+，賺的 NT\$[\d,]+，報酬/)
+    expect(region.querySelector('[aria-live="polite"]')!.textContent).toMatch(/^11\/12（四）收盤，總資產 NT\$[\d,]+，本金 NT\$[\d,]+，價差賺 NT\$[\d,]+，報酬/)
     fireEvent.keyDown(g, { key: "ArrowLeft" })
     expect(within(region).getByText(/^11\/11（三）收盤$/)).toBeInTheDocument()
     expect(document.querySelector(".hero-figure")!.textContent).toBe(big)

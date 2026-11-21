@@ -141,9 +141,9 @@ function StockPageInner() {
       )}
 
       {/* 托盤：寬的時候（主欄 ≥ 56rem）事件和相關股票並排（8＋4 欄），其他一盤一列；窄的時候一盤一列。
-          底色照出現的順序輪流（TRAY_CYCLE） */}
+          每一盤同一種底色，盤與盤之間靠間距分開 */}
       <div className="@container mt-4 lg:mt-5">
-        <div className={cn("grid grid-cols-1 gap-tray-gap @4xl:grid-cols-12", TRAY_CYCLE)}>
+        <div className="grid grid-cols-1 gap-tray-gap @4xl:grid-cols-12">
           {inst && <QuoteTray inst={inst} quote={quote.data} missing={noQuote} held={!!position.data} />}
           {inst &&
             (position.data ? (
@@ -214,18 +214,6 @@ function StockPageInner() {
     </div>
   )
 }
-
-/**
- * 托盤的底色照出現的順序輪流 1→2→3（`:nth-child(… of .tray)`）。哪幾盤會出現看資料（持有、走勢、相關股票…），
- * 寫死的 `tint` 會讓相鄰的兩盤撞色；照順序輪流的話，相鄰的兩盤——上下或並排（事件＋相關股票）——一定不同色。
- * 底色不代表任何意思（DESIGN.md〈托盤〉）。
- */
-const TRAY_CYCLE = [
-  "[&>.tray:nth-child(3n+2_of_.tray)]:[--tray-bg:var(--tray-2)]",
-  "[&>.tray:nth-child(3n+2_of_.tray)]:[--tray-hov-bg:var(--tray-2-hov)]",
-  "[&>.tray:nth-child(3n_of_.tray)]:[--tray-bg:var(--tray-3)]",
-  "[&>.tray:nth-child(3n_of_.tray)]:[--tray-hov-bg:var(--tray-3-hov)]",
-].join(" ")
 
 function HeaderSkeleton() {
   return (

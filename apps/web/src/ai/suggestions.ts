@@ -319,8 +319,8 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
     }
     case "onboard":
       return {
-        text: "直接打，例如「買 0050 2 張 52.4」。",
-        followUps: ["買 0050 2 張 52.4"],
+        text: "直接打，例如「買 0050 2 張」。",
+        followUps: ["買 0050 2 張"],
       }
     default:
       return null

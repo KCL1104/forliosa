@@ -1,7 +1,7 @@
 import { useRef, useState } from "react"
 import type { MarketOverview } from "@/api/types"
 import { CentreBars, type CentreBarRow } from "@/components/centre-bars"
-import { Tray, type TrayTint } from "@/components/tray"
+import { Tray } from "@/components/tray"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useWidth } from "./use-width"
@@ -27,7 +27,7 @@ function sectorMeta(sectors: NonNullable<MarketOverview["sectors"]>): string {
  * 托盤裡放得下幾欄就分幾欄（一欄至少 300px，最多三欄；一欄讀完接下一欄），每欄一張 `CentreBars`、共用同一個比例。
  * 只放得下一欄時（手機）先列漲最多與跌最多的各 5 個，文字鈕「全部 N 個類股」展開。
  */
-export function SectorList({ sectors, tint, className }: { sectors: NonNullable<MarketOverview["sectors"]>; tint?: TrayTint; className?: string }) {
+export function SectorList({ sectors, className }: { sectors: NonNullable<MarketOverview["sectors"]>; className?: string }) {
   const [bodyRef, width] = useWidth<HTMLDivElement>()
   const trayRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
@@ -45,7 +45,7 @@ export function SectorList({ sectors, tint, className }: { sectors: NonNullable<
   }
   return (
     <div ref={trayRef} className={cn("min-w-0 scroll-mt-(--sticky-top)", className)}>
-      <Tray title="類股" meta={sectorMeta(sectors)} tint={tint} className="h-full">
+      <Tray title="類股" meta={sectorMeta(sectors)} className="h-full">
         <div ref={bodyRef} className={cn("grid gap-x-8", columns === 2 && "grid-cols-2", columns === 3 && "grid-cols-3")}>
           {chunks.map((c, n) => (
             <CentreBars key={n} rows={c} unit="pct" scale={scale} />

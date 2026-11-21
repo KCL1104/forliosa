@@ -80,8 +80,9 @@ export function ImportDialog() {
     kind === "choose"
       ? "選要匯入現有持股（庫存），還是交易明細（對帳單）。"
       : kind === "positions"
-        ? "選券商 app 庫存頁的截圖，或貼上庫存的文字，AI 讀成一張表，你核對過、簽名之後，每一檔記成一筆買進。"
-        : "選一份 PDF 對帳單或成交明細的截圖，AI 讀成一張表，你核對過、簽名之後才寫進帳本。"
+        ? // 對話框的說明（報讀器念）只留可以匯入什麼（2026-11-21 評論：「AI 讀成一張表…簽名之後」是在敘述流程，簽名格在畫面上）
+          "券商 app 庫存頁的截圖，或庫存的文字"
+        : "PDF 對帳單，或成交明細的截圖"
   const width = kind === "choose" ? "sm:max-w-[520px]" : !wide ? "sm:max-w-[560px]" : kind === "positions" ? "sm:max-w-[min(880px,calc(100%-4rem))]" : "sm:max-w-[min(1000px,calc(100%-4rem))]"
 
   const doneStatement = (res: TransactionBatchResult, count: number) => {

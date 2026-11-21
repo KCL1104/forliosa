@@ -3,7 +3,7 @@ import { kaiSize } from "@/ai/kai-size"
 import { KaiText } from "@/ai/kai-text"
 import { CitedSources } from "@/components/cited-sources"
 import { Disclaimer } from "@/components/disclaimer"
-import { Tray, type TrayTint } from "@/components/tray"
+import { Tray } from "@/components/tray"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -12,9 +12,9 @@ import { cn } from "@/lib/utils"
  * 和對話裡的回答同一套排法）；每一點下面列出它依據的報導（媒體名稱，連到原文），最後一句免責（`ai`）。沒有就整塊不出現。
  * 一盤（托盤），標題與標示照舊（「收盤重點」「AI 整理・11/12」）；寬的時候在類股的左邊，閱讀寬度最多 46rem。
  */
-export function SummaryBlock({ summary, tint, className }: { summary: MarketSummary; tint?: TrayTint; className?: string }) {
+export function SummaryBlock({ summary, className }: { summary: MarketSummary; className?: string }) {
   return (
-    <Tray title="收盤重點" meta={`AI 整理・${formatDateShort(summary.date, false)}`} tint={tint} className={className} bodyClassName="max-w-[46rem]">
+    <Tray title="收盤重點" meta={`AI 整理・${formatDateShort(summary.date, false)}`} className={className} bodyClassName="max-w-[46rem]">
       {summary.headline && (
         <p className={cn("ai-voice pb-1", kaiSize.line)}>
           <KaiText text={summary.headline} />

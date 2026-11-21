@@ -423,7 +423,7 @@ function NoHistory({ notes }: { notes: string[] }) {
   return (
     <NotYet title="走勢資料累積中">
       <DataNotes notes={notes} className="text-md" />
-      <p className="mt-1">要有兩個交易日的收盤價才畫得出走勢。</p>
+      <p className="mt-1">要有兩個交易日的收盤價</p>
     </NotYet>
   )
 }
@@ -436,14 +436,14 @@ function usClose(quote: Quote): string {
 
 /**
  * 1 日（盤中）走勢：沒有。Forliosa 沒有盤中即時報價（合法取得要付費授權），價格都是收盤後公布的收盤價——
- * 和報價下面那一行、資料來源頁的說法一致；不承諾「加入觀察就會記錄盤中走勢」。給一個現在能看的（5 日）。
- * 後端的說明（notes）和標題是同一句話，不再印一次。
+ * 為什麼只在資料來源頁講（2026-11-21 評論：講事實，不講機制）；這裡只有標題、收盤價與一個現在能看的（5 日）。
+ * 不承諾「加入觀察就會記錄盤中走勢」。後端的說明（notes）和標題是同一件事，不再印一次。
  */
 function NoIntraday({ inst, quote, onFiveDays }: { inst: InstrumentDetail; quote?: Quote; onFiveDays: () => void }) {
   return (
     <NotYet
       className="h-full justify-center"
-      title="沒有盤中走勢：價格是收盤後公布的收盤價"
+      title="沒有盤中走勢"
       action={
         <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={onFiveDays}>
           看 5 日走勢

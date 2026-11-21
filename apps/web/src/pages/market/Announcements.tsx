@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import type { MarketOverview } from "@/api/types"
-import { Tray, type TrayTint } from "@/components/tray"
+import { Tray } from "@/components/tray"
 import { formatDateShort, formatNumber } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -14,14 +14,14 @@ const FIRST = 6
  * 最新的一天是週末或放假日時，後端往前一起列到最後一個交易日（產品負責人 2026-11-15：週日不要只看到週六的幾則）：
  * meta 寫期間（「11/13–11/14・共 N 則」），每一列的時間上面多一行日期。
  */
-export function Announcements({ announcements, tint, className }: { announcements: NonNullable<MarketOverview["announcements"]>; tint?: TrayTint; className?: string }) {
+export function Announcements({ announcements, className }: { announcements: NonNullable<MarketOverview["announcements"]>; className?: string }) {
   const [open, setOpen] = useState(false)
   const { items, total, date, start_date: start } = announcements
   const shown = open ? items : items.slice(0, FIRST)
   const more = items.length - FIRST
   const days = start === date ? formatDateShort(date, false) : `${formatDateShort(start, false)}–${formatDateShort(date, false)}`
   return (
-    <Tray title="重大訊息" meta={`${days}・共 ${formatNumber(total)} 則`} tint={tint} className={className} bodyClassName="max-w-[46rem]">
+    <Tray title="重大訊息" meta={`${days}・共 ${formatNumber(total)} 則`} className={className} bodyClassName="max-w-[46rem]">
       <ul>
         {shown.map((a, n) => (
           <li key={`${a.symbol}-${a.time}-${n}`}>

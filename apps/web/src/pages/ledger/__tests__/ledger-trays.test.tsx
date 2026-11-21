@@ -44,14 +44,14 @@ function renderLedger(path = "/") {
 const trayNames = () => [...document.querySelectorAll<HTMLElement>("section.tray")].map((s) => s.querySelector("h2")!.textContent)
 
 describe("帳本的托盤", { timeout: 20_000 }, () => {
-  it("順序：總資產 → 持倉 → 總資產走勢（手機）→ 今日損益 → 分享卡 → 觀察清單 → 本週事項；相鄰的托盤不同色", async () => {
+  it("順序：總資產 → 持倉 → 總資產走勢（手機）→ 今日損益 → 分享卡 → 觀察清單 → 本週事項；托盤只有一種底色", async () => {
     renderLedger()
     await screen.findByRole("list", { name: "觀察清單" }, T)
     await screen.findByRole("region", { name: "分享卡" }, T)
     await screen.findByRole("region", { name: "本週事項" }, T)
     expect(trayNames()).toEqual(["總資產", "持倉", "總資產走勢", "今日損益", "分享卡", "觀察清單", "本週事項"])
-    const tints = [...document.querySelectorAll<HTMLElement>("section.tray")].map((s) => s.dataset.tint)
-    for (let i = 1; i < tints.length; i++) expect(tints[i]).not.toBe(tints[i - 1])
+    // 產品負責人 2026-11-21：托盤只留一種底色——不再照順序輪流
+    expect([...document.querySelectorAll<HTMLElement>("section.tray")].every((s) => !s.hasAttribute("data-tint"))).toBe(true)
     // 已出清在持倉那一盤裡（不另外一盤）
     expect(await within(screen.getByRole("region", { name: "持倉" })).findByText("已出清", undefined, T)).toBeInTheDocument()
   })

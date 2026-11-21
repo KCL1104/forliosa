@@ -2,10 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router"
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, beforeAll, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { api, appToday } from "@/api"
 import { usd, usDay } from "@/lib/labels"
 import { useViewAs } from "@/api/view-as"
+import { useAi } from "@/ai/store"
 import { useUi } from "@/app/ui-store"
 import { createAppRouter } from "@/router"
 
@@ -320,5 +321,34 @@ describe("減少持股（賣出不用開表單）", () => {
     expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["加碼", "減少持股", "全部賣出", "刪除這檔"])
     await userEvent.click(within(menu).getByRole("menuitem", { name: "全部賣出" }))
     expect(useUi.getState().reduce).toMatchObject({ open: true, symbol: "2317.TW", all: true })
+  })
+})
+
+describe("2026-11-21 評論：記一筆的價格位數、空帳本的 AI 入口", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("選股票的清單：價格照升降單位（鴻海 236.5、環球晶 398，不是 236.50、398.00）", async () => {
+    renderApp("/")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    await userEvent.click(screen.getAllByRole("button", { name: "記一筆" })[0]!)
+    const dialog = await screen.findByRole("dialog", {}, T)
+    const row = (name: string) => within(dialog).getByText(name).closest("[cmdk-item]")!
+    await within(dialog).findByText("鴻海", undefined, T)
+    expect(row("鴻海")).toHaveTextContent("236.5")
+    expect(row("鴻海")).not.toHaveTextContent("236.50")
+    expect(row("環球晶")).toHaveTextContent(/398(?!\.)/)
+    expect(row("元大台灣50")).toHaveTextContent("72.40")
+  })
+
+  it("空帳本：「用一句話記一筆」打開 AI 問買賣了什麼（例子不帶價格），不先替使用者做一份草稿；沒有「試試」", async () => {
+    vi.spyOn(api, "getHoldings").mockResolvedValue([])
+    renderApp("/")
+    expect(await screen.findByText("帳本還是空的", undefined, T)).toBeInTheDocument()
+    expect(screen.queryByText(/試試/)).toBeNull()
+    const before = Object.keys(useAi.getState().drafts).length
+    await userEvent.click(screen.getByRole("button", { name: "用一句話記一筆" }))
+    expect(await screen.findByText("買賣了什麼？例如「買 0050 2 張」。", undefined, T)).toBeInTheDocument()
+    expect(Object.keys(useAi.getState().drafts)).toHaveLength(before)
+    expect(document.body.textContent).not.toContain("52.4")
   })
 })

@@ -195,7 +195,8 @@ function NotEnough({ p, blocked, account, accounts, holdings, onAccount }: { p: 
                 {n}
               </span>
             ))
-          : "至少需要兩個交易日的持股資料。記下交易後，隔一個交易日就會出現。"
+          : // 只留要知道的那個條件，短的寫法（2026-11-21 評論：「記下交易後，隔一個交易日就會出現」是在敘述介面）
+            "要有兩個交易日的持股"
       }
       action={
         other ? (

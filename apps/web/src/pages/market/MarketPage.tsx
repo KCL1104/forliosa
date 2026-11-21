@@ -10,7 +10,6 @@ import { DataNotes } from "@/components/data-notes"
 import { DemoTag, PageHeader } from "@/components/section"
 import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { EmptyState, ErrorState } from "@/components/states"
-import type { TrayTint } from "@/components/tray"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useIndexCloseNote, useMarketCloseNote } from "@/hooks/use-close"
 import { useSourceNote } from "@/hooks/use-source-note"
@@ -112,28 +111,24 @@ function IndexCloseNote() {
  * 行情：一盤一盤的托盤（產品負責人 2026-11-21 採方向 C 的結構）。主欄 ≥ 1024px 時排成 12 欄的格子：
  *   指數（整列）→ 收盤重點（4）＋類股（8）→ 排行（整列）→ 美股（7）＋重大訊息（5）。
  * 並排的兩盤只有一盤時，那一盤佔整列；更窄時一盤一列，順序不變（DOM 的順序就是讀的順序）。
- * 托盤的底色照出現的順序輪流 1→2→3→1…，底色不代表任何意思。這樣排相鄰的兩盤一定不同色：一盤一列時前後是相鄰的號碼；
- * 並排的兩盤是相鄰的號碼，上一列（整列一盤，或並排的兩盤）是緊接在前面的一兩個號碼，三色輪流不會撞色
- * （沒有排行時，4＋8 的下面是 7＋5：美股只碰到收盤重點與類股、重大訊息只碰到類股，照樣不同色）。
+ * 每一盤同一種底色（產品負責人 2026-11-21：托盤只留一種底色），盤與盤之間靠間距分開。
  */
 function MarketBody({ data }: { data: MarketOverview }) {
   useSourceNote(data.sources)
   const us = data.us && (data.us.items.length > 0 || data.us.news.length > 0) ? data.us : null
   const empty = data.indices.length === 0 && !data.sectors && !data.movers && !data.announcements && !data.summary && !us
   if (empty) return <EmptyState title="還沒有資料" />
-  let n = 0
-  const tint = () => ((n++ % 3) + 1) as TrayTint
   const top = !!data.summary && !!data.sectors
   const bottom = !!us && !!data.announcements
   return (
     <div className="@container">
       <div className="grid grid-cols-1 gap-tray-gap @5xl:grid-cols-12">
-        {data.indices.length > 0 && <IndexStrip indices={data.indices} tint={tint()} note={<IndexCloseNote />} className="@5xl:col-span-12" />}
-        {data.summary && <SummaryBlock summary={data.summary} tint={tint()} className={top ? "@5xl:col-span-4" : "@5xl:col-span-12"} />}
-        {data.sectors && <SectorList sectors={data.sectors} tint={tint()} className={top ? "@5xl:col-span-8" : "@5xl:col-span-12"} />}
-        {data.movers && <Movers movers={data.movers} tint={tint()} className="@5xl:col-span-12" />}
-        {us && <UsBlock us={us} tint={tint()} className={bottom ? "@5xl:col-span-7" : "@5xl:col-span-12"} />}
-        {data.announcements && <Announcements announcements={data.announcements} tint={tint()} className={bottom ? "@5xl:col-span-5" : "@5xl:col-span-12"} />}
+        {data.indices.length > 0 && <IndexStrip indices={data.indices} note={<IndexCloseNote />} className="@5xl:col-span-12" />}
+        {data.summary && <SummaryBlock summary={data.summary} className={top ? "@5xl:col-span-4" : "@5xl:col-span-12"} />}
+        {data.sectors && <SectorList sectors={data.sectors} className={top ? "@5xl:col-span-8" : "@5xl:col-span-12"} />}
+        {data.movers && <Movers movers={data.movers} className="@5xl:col-span-12" />}
+        {us && <UsBlock us={us} className={bottom ? "@5xl:col-span-7" : "@5xl:col-span-12"} />}
+        {data.announcements && <Announcements announcements={data.announcements} className={bottom ? "@5xl:col-span-5" : "@5xl:col-span-12"} />}
       </div>
       <DataNotes notes={data.notes} className="mt-4" />
     </div>
@@ -143,12 +138,12 @@ function MarketBody({ data }: { data: MarketOverview }) {
 function MarketSkeleton() {
   return (
     <div aria-busy="true" aria-label="市場資料載入中" className="flex flex-col gap-tray-gap">
-      <div className="tray flex flex-col gap-2" data-tint="1">
+      <div className="tray flex flex-col gap-2">
         <Skeleton className="h-5 w-28" />
         <Skeleton className="h-10 w-44" />
         <Skeleton className="h-5 w-36" />
       </div>
-      <div className="tray flex flex-col gap-3" data-tint="2">
+      <div className="tray flex flex-col gap-3">
         <Skeleton className="h-6 w-28" />
         {Array.from({ length: 6 }, (_, i) => (
           <Skeleton key={i} className="h-9 w-full" />

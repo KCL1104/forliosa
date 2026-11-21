@@ -1,5 +1,5 @@
 import NumberFlow from "@number-flow/react"
-import type { Currency, Market, QuantityUnit, TransactionSource } from "@/api/types"
+import type { Currency, InstrumentType, Market, QuantityUnit, TransactionSource } from "@/api/types"
 import {
   direction,
   directionGlyph,
@@ -69,12 +69,13 @@ export function Pct({ value, className, glyph = true, decimals = 2 }: { value: n
 }
 
 /** 價格（公開資訊，不遮蔽）；美股前面寫 US$（「US$356.27」）；沒有報價時顯示「—」（不寫「US$—」） */
-export function Price({ value, market, className }: { value: number | null | undefined; market: Market; className?: string }) {
+/** 價格：小數位照升降單位（`formatPrice`）；知道股票還是 ETF 時一定傳 `type`（236.5、398，不是 236.50、398.00） */
+export function Price({ value, market, type, className }: { value: number | null | undefined; market: Market; type?: InstrumentType; className?: string }) {
   const priced = value !== null && value !== undefined && !Number.isNaN(value)
   return (
     <span className={cn("num whitespace-nowrap", className)}>
       {market === "US" && priced && "US$"}
-      {formatPrice(value, market)}
+      {formatPrice(value, market, type)}
     </span>
   )
 }

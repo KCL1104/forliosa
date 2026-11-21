@@ -288,7 +288,7 @@ describe("邀請：群組滿了", () => {
 })
 
 describe("設定頁的方案（決定 14）", () => {
-  it("站方管理員：「會員」；我的群組加值一個一列（用在哪個群組、還沒選的到哪裡選）", async () => {
+  it("站方管理員：「會員」；我的群組加值一個一列（用在哪個群組、還沒用的只寫狀態，不教去哪裡按）", async () => {
     mount()
     renderApp("/settings")
     const section = (await screen.findByRole("heading", { name: "方案" }, T)).closest("section")!
@@ -296,7 +296,8 @@ describe("設定頁的方案（決定 14）", () => {
     expect(within(section).getByText("會員")).toBeInTheDocument()
     expect(within(section).getByRole("link", { name: "家族投資" })).toHaveAttribute("href", "/groups/grp_family")
     expect(within(section).getByText("群組加值，到 12/15")).toBeInTheDocument()
-    expect(within(section).getByText("還沒有用在群組，在群組的「成員」分頁選")).toBeInTheDocument()
+    expect(within(section).getByText("還沒有用在群組")).toBeInTheDocument()
+    expect(section.textContent).not.toMatch(/分頁選/)
   })
   it("到期 30 天內的加值照樣列出，寫已到期；更早的不列", async () => {
     mount()

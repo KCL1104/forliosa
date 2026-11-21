@@ -4,7 +4,7 @@ import type { MarketUs, MarketUsEtf } from "@/api/types"
 import { Pct } from "@/components/finance"
 import { NewsRow } from "@/components/news-row"
 import { Sparkline } from "@/components/sparkline"
-import { Tray, type TrayTint } from "@/components/tray"
+import { Tray } from "@/components/tray"
 import { inText } from "@/lib/cjk"
 import { direction, directionGlyph, formatDateShort, formatPrice, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -25,7 +25,7 @@ function usCloseLabel(date: string): string {
  * 是兩行列（代號・追蹤｜小圖｜收盤價・漲跌）。
  * 價格前面一律是 US$；走勢小圖是最近 20 個收盤，墨色。沒有收盤價、只有新聞時只列新聞；都沒有時整塊不出現。
  */
-export function UsBlock({ us, tint, className }: { us: MarketUs; tint?: TrayTint; className?: string }) {
+export function UsBlock({ us, className }: { us: MarketUs; className?: string }) {
   const news = us.news.slice(0, NEWS_MAX)
   const etfs = us.items
   if (etfs.length === 0 && news.length === 0) return null
@@ -34,7 +34,6 @@ export function UsBlock({ us, tint, className }: { us: MarketUs; tint?: TrayTint
     <Tray
       title="美股"
       meta={us.date && etfs.length > 0 ? usCloseLabel(us.date) : undefined}
-      tint={tint}
       className={className}
       bodyClassName="@container"
     >

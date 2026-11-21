@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useHoldings, useSummary } from "@/api/queries"
 import { CentreBars, type CentreBarRow } from "@/components/centre-bars"
-import { Tray, type TrayTint } from "@/components/tray"
+import { Tray } from "@/components/tray"
 import { textAction } from "@/components/text-action"
 import { withDayWord } from "@/lib/as-of"
 import { cn } from "@/lib/utils"
@@ -20,7 +20,7 @@ const FOLD_KEEP = 5
  * - 數字由 `CentreBars` 印（+NT$75,000、−NT$7,500，隱私模式遮蔽；橫條照樣畫，和總資產走勢在隱私模式照樣畫線一樣）。
  * - 名稱不截斷：放不下就換行，這張圖窄於 18rem（320px 的手機）時換成代號、全名給螢幕閱讀器。
  */
-export function TodayPnl({ tint }: { tint: TrayTint }) {
+export function TodayPnl() {
   const holdings = useHoldings()
   const summary = useSummary()
   const { day } = useHeroClose()
@@ -37,7 +37,6 @@ export function TodayPnl({ tint }: { tint: TrayTint }) {
     <Tray
       title={title}
       meta={pnlDates(priced, summary.data?.as_of)}
-      tint={tint}
       action={
         fold ? (
           <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className={cn(textAction, "num")}>
