@@ -150,8 +150,10 @@ function EmptyLedgerState({ canImport, onImport, ask }: { canImport: boolean; on
       action={
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
           <Button onClick={() => ask.action("form")}>記第一筆</Button>
-          <Button variant="outline" onClick={() => ask.submit("買 0050 2 張 52.4")}>
-            試試「買 0050 2 張 52.4」
+          {/* 用一句話記（2026-11-21 評論）：打開 AI、問買賣了什麼（例子不帶價格），使用者自己說那一句、草稿出來再簽名。
+              以前是「試試「買 0050 2 張 52.4」」——一按就是一份真的草稿，價格還比收盤價低 27.6% */}
+          <Button variant="outline" onClick={() => ask.action("trade")}>
+            用一句話記一筆
           </Button>
           {canImport && (
             <button type="button" onClick={onImport} className={textAction}>

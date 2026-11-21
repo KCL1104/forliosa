@@ -272,7 +272,8 @@ describe("沒有建議的頁面（設定、資料來源、紀錄）：輸入框�
 
 describe("輸入框的提示字依頁面：只有帳本與個股頁給交易的例子，美股用「股」", () => {
   it("帳本、台股、美股、其他頁", () => {
-    expect(composerPlaceholder({ route: "ledger", ledger: { holdings: [] } }, "panel")).toBe("問問題，或說：買 0050 2 張 52.4")
+    // 例子不帶價格（照著打出來的草稿用那天的收盤價）
+    expect(composerPlaceholder({ route: "ledger", ledger: { holdings: [] } }, "panel")).toBe("問問題，或說：買 0050 2 張")
     expect(composerPlaceholder(stock({}), "panel")).toBe("問台積電的事，或說：買 2330 1 張")
     const aapl = stock({ symbol: "AAPL", code: "AAPL", name: "Apple", market: "US" })
     expect(composerPlaceholder(aapl, "panel")).toBe("問 AAPL 的事，或說：買 AAPL 10 股")

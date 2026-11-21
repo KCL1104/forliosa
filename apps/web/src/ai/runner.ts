@@ -359,7 +359,7 @@ export function useAiRunner(ctx: AiContext) {
       case "trade":
         push({ role: "user", text: opts.code ? `記一筆 ${opts.code}` : "記一筆交易" }, { title: "記一筆交易" })
         say({
-          text: `買賣了什麼？例如「${opts.code ? `買 ${opts.code} 1 張` : "買 0050 2 張 52.4"}」。`,
+          text: `買賣了什麼？例如「${opts.code ? `買 ${opts.code} 1 張` : "買 0050 2 張"}」。`,
           links: [{ label: "改用表單填", to: "#trade-form" }],
           instruction: true,
         })
