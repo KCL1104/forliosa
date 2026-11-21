@@ -208,9 +208,11 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
     const img = within(region).getByRole("img", { name: /^近 1 個月，總資產報酬/ })
     expect(img.getAttribute("aria-label")).not.toMatch(/NT\$/)
     expect(region.querySelector('[data-series="total"]')).not.toBeNull()
-    // 只剩橫軸的日期（資產組成：1 月的本金在圖外，圖裡那一行不寫金額）
-    expect([...img.querySelectorAll("text:not([data-off-chart])")].map((t) => t.textContent).every((s) => /^\d+\/\d+$/.test(s ?? ""))).toBe(true)
-    expect(img.querySelector("[data-off-chart]")!.textContent).toBe("本金在圖的下方")
+    // 只剩橫軸的日期（資產組成：1 月的本金線在圖外，縱軸的記號只有箭頭、不寫金額）
+    expect([...img.querySelectorAll("text")].map((t) => t.textContent).every((s) => /^\d+\/\d+$/.test(s ?? ""))).toBe(true)
+    const cue = img.querySelector("[data-off-chart]")!
+    expect(cue.textContent).toBe("")
+    expect(cue.querySelector("polyline")).not.toBeNull()
     const g = chart(region)
     act(() => g.focus())
     fireEvent.keyDown(g, { key: "End" })

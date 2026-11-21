@@ -26,25 +26,9 @@ import {
 import { cn } from "@/lib/utils"
 import type { LedgerView } from "@/router"
 import { usePrefs } from "@/stores/prefs"
-import { INVESTED_RECOVERED, isRecovered, offChartText, trendEstimatedText } from "./composition-text"
+import { GAIN_LABEL, gainSpeech, INVESTED_RECOVERED, isRecovered, offChartCue, offChartSpeech, trendEstimatedText } from "./composition-text"
 import { useLedgerPrefs } from "./ledger-prefs"
-import {
-  AXIS,
-  type Box,
-  COMP_TICKS,
-  COMP_TOP,
-  DIVIDEND_SNAP,
-  DRAG_SLOP,
-  flowPathOf,
-  indexes,
-  pathOf,
-  retSpeech,
-  segmentHitsBox,
-  textWidth,
-  TICK_FONT,
-  TOP,
-  useWidth,
-} from "./trend-chart"
+import { AXIS, COMP_TICKS, COMP_TOP, DIVIDEND_SNAP, DRAG_SLOP, flowPathOf, indexes, pathOf, retSpeech, textWidth, TICK_FONT, TOP, useWidth } from "./trend-chart"
 import { trendClipNote, trendMissingReason, trendReferenceLine } from "./trend-reason"
 import { TrendReturn as Ret } from "./TrendReturn"
 import { useTrendRange } from "./use-trend-range"
@@ -80,12 +64,15 @@ import { useTrendRange } from "./use-trend-range"
  *   - 買進、賣出那一天，總資產線和本金線一起垂直跳一樣的金額（`flowPathOf`、`totalPreFlow`）：斜的部分只有價格的漲跌，
  *     每一個收盤日左邊塗的顏色就是那天收盤的賺或虧。
  *   - 縱軸：總資產自己的起伏夠大（至少是兩條線都放得下的範圍的 35%）時貼著兩條線；不然縱軸只跟總資產（和以前一樣），
- *     本金線超出圖的部分切掉、塗色畫到圖的邊緣，圖裡靠那一邊寫一行「本金 296萬，在圖的下方」（`compositionAxis`）；
- *     那一行在兩個角落都會碰到總資產線或最後一點時，改寫在圖例（「— 本金 NT$…（在圖的下方）」）。不為了從 0 開始而從 0 開始。
- *   - 圖例兼金額（「— 本金 NT$…」「■ 目前賺的 +NT$…」「❙ 股利」「— 總資產」；「全部」寫「賺的」）：沒有滑過時是最後一天，
+ *     本金線超出圖的部分切掉、塗色畫到圖的邊緣（`compositionAxis`）。本金線在圖外：縱軸那一欄靠那一邊多一個記號——
+ *     鉛筆灰的箭頭（本金線的顏色，朝圖外）＋本金的約略金額（「↓ 288萬」，和刻度同一種寫法），不寫句子（2026-11-21 評論）。
+ *     下方的記號在圖的下緣下面（縱軸那一欄的這個位置是空的）；上方的記號在最上面，碰到的刻度字不寫（格線照畫）。不為了從 0 開始而從 0 開始。
+ *   - 圖例兼金額（「— 本金 NT$…」「■ 目前價差 +NT$…」「❙ 股利」「— 總資產」；「全部」寫「價差」）：沒有滑過時是最後一天，
  *     滑過時是那一天；每一項的寬度撐到這段期間最寬的金額（滑過時不左右跳）。讀數第一行是日期與總資產，第二行是報酬。
- *   - 本金 ≤ 0（賣股票收到的錢已經和買股票花的一樣多或更多）：圖例、讀數、圖的說明寫「本金已收回」，不寫金額；賺的照實寫（總資產－本金）。
- *     本金線畫在 0、塗色從 0 塗到總資產（`profitBands` 的 `floor`）；那幾天塗的高度比賺的少（提案附錄 A）。0 在圖外時圖裡那一行寫「本金已收回」。
+ *     **價差**＝總資產－本金＝未實現＋已實現損益，不含股利（2026-11-21 評論：原本寫「賺的」，和上面的「總損益（含股利）」
+ *     兩個都讀成「賺多少」、差的就是股利；改用台股的說法「價差」，和旁邊的「股利」一起就是總損益）。
+ *   - 本金 ≤ 0（賣股票收到的錢已經和買股票花的一樣多或更多）：圖例、讀數、圖的說明寫「本金已收回」，不寫金額；價差照實寫（總資產－本金）。
+ *     本金線畫在 0、塗色從 0 塗到總資產（`profitBands` 的 `floor`）；那幾天塗的高度比價差少（提案附錄 A）。0 在圖外時縱軸的記號寫「0」。
  *   - 領到股利的日子在橫軸上一個短直線（不疊進圖裡）；滑過那一天時讀數寫「領股利 NT$3,200」。
  *   - 照估計的買入日畫的那一段：線改成細線，上面一條標「估計」的括線，區間按鈕下面一行「… 用估計的買入日計算」；塗色照常。
  *     不用虛線（虛線是 AI 的草稿與比較基準）。
@@ -93,9 +80,11 @@ import { useTrendRange } from "./use-trend-range"
 
 /** 窄於這個寬度時圖例排成兩行兩欄（一行放不下四個圖例與開關）；本金開關也改放在讀數第二行的右邊 */
 const STACK_BELOW = 640
-/** 本金在圖外時圖裡那一行字：離總資產線（2px，中心線外 1px）至少 4px、離最後一點的圓點（半徑 4＋外圈 1）至少 4px */
-const NOTE_LINE_CLEAR = 5
-const NOTE_DOT_CLEAR = 9
+/** 本金線在圖外的記號：箭頭的寬（含和金額之間的空隙）；金額和刻度字一樣靠右對齊在 `left − 8` */
+const CUE_ARROW = 10
+/** 記號的中心：下方的在圖的下緣下面 13px（刻度字最低到下緣下面 6px，不會碰到）；上方的固定在 12px */
+const CUE_BELOW = 13
+const CUE_ABOVE_Y = 12
 
 /**
  * 走勢畫不出來、而且後端說了原因時：一行淡墨原因，連到績效（手機也看得到；觸控 44px）。
@@ -247,9 +236,9 @@ function TrendBand({
 
   // 資產組成：股利（每天一筆）、估計的那一段在這幾天裡的位置
   const comp = composition
-  // 本金那一層（本金線、塗色、本金與賺的圖例、圖裡那一行字）：有資產組成而且開關打開
+  // 本金那一層（本金線、塗色、本金與價差的圖例、縱軸的記號）：有資產組成而且開關打開
   const inv = !!comp && investedOn
-  // 「全部」與區間比資料長：從 0 起算（和報酬的分母同一個規則，`fromZero`）——圖例寫「賺的」，其他區間寫「目前賺的」
+  // 「全部」與區間比資料長：從 0 起算（和報酬的分母同一個規則，`fromZero`）——圖例寫「價差」，其他區間寫「目前價差」
   const whole = fromZero(win, range)
   // 股利對到收盤日（週末、假日領的算在下一個收盤日）。從基準收盤起算的區間，基準收盤那天的股利不算進區間（記號、圖例、讀數都不放）
   const markFrom = whole ? 0 : 1
@@ -268,19 +257,27 @@ function TrendBand({
   const stacked = !!comp && width < STACK_BELOW
 
   const model = useMemo(() => {
-    // 資產組成：金額先四捨五入到元（圖例的本金＋賺的＝讀數的總資產）
+    // 資產組成：金額先四捨五入到元（圖例的本金＋價差＝讀數的總資產）
     const vp = slice.map((p) => ({ v: Math.round(p.market_value), p: Math.round(p.net_invested) }))
-    // 本金線畫在哪裡：本金已收回（≤ 0）的日子畫在 0（縱軸、圖裡那一行也看這條線）
+    // 本金線畫在哪裡：本金已收回（≤ 0）的日子畫在 0（縱軸、縱軸的記號也看這條線）
     const floor = vp.map((q) => Math.max(q.p, 0))
     const axisMode = inv ? compositionAxis(vp.map((q, i) => ({ v: q.v, p: floor[i]! }))).mode : "total"
     const { ticks, min, max } = trendDomain(axisMode === "both" ? [...vp.map((q) => q.v), ...floor] : slice.map((p) => p.market_value))
     const labels = comp ? signedTicks(ticks) : compactTicks(ticks)
-    const left = privacy ? 4 : Math.max(...labels.map(textWidth)) + 10
+    // 縱軸只跟總資產、最後一天的本金線在圖外：寫在哪一邊（縱軸那一欄多一個記號：箭頭＋約略金額，隱私模式只有箭頭）
+    const lastP = floor[n - 1]!
+    const offChart: "above" | "below" | null = inv && axisMode === "total" ? (lastP < min ? "below" : lastP > max ? "above" : null) : null
+    const cueText = offChart && !privacy ? offChartCue(lastP) : ""
+    const cueW = offChart ? CUE_ARROW + (cueText ? textWidth(cueText) + 2 : 0) : 0
+    const left = privacy ? (offChart ? 14 : 4) : Math.max(...labels.map(textWidth), cueW) + 10
     const right = 6
     const plotW = Math.max(40, width - left - right)
     const top = bracketRow ? COMP_TOP : TOP
     const plotH = height - top - (dividendRow ? COMP_TICKS : 0) - AXIS
     const y = (v: number) => top + (1 - (v - min) / (max - min || 1)) * plotH
+    const cueY = offChart === "below" ? top + plotH + CUE_BELOW : CUE_ABOVE_Y
+    // 上方的記號碰到的刻度字不寫（格線照畫）；下方的記號在圖的下緣下面，碰不到
+    const tickShown = ticks.map((v) => offChart !== "above" || Math.abs(y(v) - cueY) >= 13)
     // 每個收盤日等寬，週末與假日不留空（和個股走勢圖一樣）；塗色的交會點在兩個收盤日之間，所以位置可以是小數
     const x = (i: number) => left + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW)
     // 本金那一層開著：總資產線在買賣那一天和本金一起垂直跳（先斜到買賣以前的值）；其他時候和以前一樣的折線
@@ -309,18 +306,13 @@ function TrendBand({
     const polygon = (pts: [number, number][]) => pts.map(([i, v], k) => `${k === 0 ? "M" : "L"}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join("") + "Z"
     const gain = bands.filter((b) => b.side === "gain").map((b) => polygon(b.points)).join("")
     const loss = bands.filter((b) => b.side === "loss").map((b) => polygon(b.points)).join("")
-    // 縱軸只跟總資產、最後一天的本金線在圖外：寫在哪一邊
-    const lastP = floor[n - 1]!
-    const offChart: "above" | "below" | null = inv && axisMode === "total" ? (lastP < min ? "below" : lastP > max ? "above" : null) : null
-    // 總資產線經過的點（含買賣那一天的垂直跳）：圖裡那一行字要避開
-    const trace: [number, number][] = []
-    for (let i = 0; i < n; i++) {
-      if (pre && i > 0 && pre[i] !== vp[i]!.v) trace.push([x(i), y(pre[i]!)])
-      trace.push([x(i), y(vp[i]!.v)])
-    }
-    return { ticks, labels, left, plotW, plotH, top, y, x, line, area, totalPath, invested, runs, gain, loss, offChart, vp, trace }
+    // 本金線在圖外的記號：金額靠右對齊在刻度字的右緣（`left − 8`），箭頭在金額左邊；隱私模式只有箭頭
+    const cue = offChart
+      ? { side: offChart, text: cueText, x: left - 8, y: cueY, ax: cueText ? left - 8 - textWidth(cueText) - 2 - CUE_ARROW / 2 : left - 7 }
+      : null
+    return { ticks, labels, tickShown, left, plotW, plotH, top, y, x, line, area, totalPath, invested, runs, gain, loss, offChart, cue, vp }
   }, [slice, n, width, height, privacy, comp, inv, est, bracketRow, dividendRow])
-  const { ticks, labels, left, plotW, plotH, top, y, x, runs } = model
+  const { ticks, labels, tickShown, left, plotW, plotH, top, y, x, runs } = model
 
   // 橫軸：短區間只標起訖（起始日和讀數第二行同一天，基準收盤那一點不標）；三個月以上每月第一個交易日，放不下的跳過
   const axis = dateAxis(days)
@@ -381,14 +373,13 @@ function TrendBand({
   const activeRet = active !== null ? rangeReturn(win, active) : null
   // 資產組成：滑過那一天的股利（日期已對到收盤日；從基準收盤起算的區間不含基準收盤那天）
   const activeDividend = a ? (divs.get(a.t) ?? 0) : 0
-  // 圖例的金額：沒有滑過時是區間的最後一天，滑過時是那一天。賺的＝總資產－本金（不含股利）
+  // 圖例的金額：沒有滑過時是區間的最後一天，滑過時是那一天。價差＝總資產－本金（未實現＋已實現，不含股利）
   const shownAt = model.vp[active ?? n - 1]!
   const shownGain = shownAt.v - shownAt.p
-  const gainWord = shownGain >= 0 ? "賺的" : "虧的"
   // 本金已收回（≤ 0）：不寫金額，寫「本金已收回」（滑過時看那一天）
   const shownRecovered = isRecovered(shownAt.p)
-  // 沒有滑過、而且不是「全部」：圖例的賺虧是到最後一天累積的，不是這段期間的——寫「目前賺的」（滑過時讀數有日期，不用）
-  const gainLabel = `${!a && !whole ? "目前" : ""}${gainWord}`
+  // 沒有滑過、而且不是「全部」：圖例的價差是到最後一天累積的，不是這段期間的——寫「目前價差」（滑過時讀數有日期，不用）
+  const gainLabel = `${!a && !whole ? "目前" : ""}${GAIN_LABEL}`
   // 有賺有虧：看收盤（有一天總資產在本金上面、有一天在下面），不看塗了哪幾種顏色
   const mixed = model.vp.some((q) => q.v > q.p) && model.vp.some((q) => q.v < q.p)
   const money = (v: number) => (privacy ? "已隱藏" : formatMoney(v))
@@ -396,15 +387,15 @@ function TrendBand({
   const endGain = endAt.v - endAt.p
   const endRecovered = isRecovered(endAt.p)
   const svgTitle = win.exceeds ? `${title}，${period}` : title
-  // 圖的說明：本金那一層開著時念「資產組成」（決定 1 的名字）、最後一天的本金與賺的（或虧的），不靠顏色——有賺有虧、本金在圖外也用字說；
+  // 圖的說明：本金那一層開著時念「資產組成」（決定 1 的名字）、最後一天的本金與價差（賺或虧），不靠顏色——有賺有虧、本金線在圖外也用字說；
   // 「本金只算還在股票裡的錢」（決定 5）畫面上不寫（使用者只要圖），寫在這裡。本金已收回：不念金額，為什麼、本金線畫在哪裡也念在這裡
   const compSpeech = inv
     ? "，資產組成：" +
       (privacy
-        ? `最後一天${endGain >= 0 ? "賺" : "虧"}${endRecovered ? `，${INVESTED_RECOVERED}` : ""}`
-        : `最後一天${endRecovered ? INVESTED_RECOVERED : `本金 ${formatMoney(endAt.p)}`}，${endGain >= 0 ? "賺的" : "虧的"} ${formatMoney(Math.abs(endGain))}`) +
+        ? `最後一天${gainSpeech(endGain, null)}${endRecovered ? `，${INVESTED_RECOVERED}` : ""}`
+        : `最後一天${endRecovered ? INVESTED_RECOVERED : `本金 ${formatMoney(endAt.p)}`}，${gainSpeech(endGain, formatMoney(Math.abs(endGain)))}`) +
       (mixed ? "，這段期間有賺有虧" : "") +
-      (model.offChart && !endRecovered ? `，${offChartText(endAt.p, model.offChart, privacy)}` : "") +
+      (model.offChart && !endRecovered ? `，${offChartSpeech(model.offChart)}` : "") +
       "。本金是買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢" +
       (endRecovered ? `；賣股票收到的錢已經和買股票花的一樣多或更多，所以本金線畫在 0${model.offChart ? "，在圖的下方" : ""}` : "")
     : ""
@@ -415,7 +406,7 @@ function TrendBand({
   // 估計的是哪幾天：含基準收盤（報酬的分母），和績效分段指標下面那一行同一個規則（`trendEstimatedText`）
   const estText = comp ? trendEstimatedText(series, range, comp.estimated) : null
   const hasDividends = divs.size > 0
-  // 資產組成：領到股利的那一天（股利不算在總資產與賺的裡，另外寫）
+  // 資產組成：領到股利的那一天（股利不算在總資產與價差裡，另外寫）
   const dividendItem =
     activeDividend > 0 ? (
       <span className="shrink-0 text-sm" data-dividend>
@@ -438,50 +429,27 @@ function TrendBand({
       if (fits) lastEnd = at + labelW
     }
   }
-  // 本金在圖外：圖裡靠那一邊寫一行，先試右邊的角、再試左邊的角。字的方框要離總資產線（兩個收盤之間的線段、買賣那一天的垂直跳都算）
-  // 與最後一點的圓點至少 4px；兩個角都放不下時不放在圖裡，改寫在圖例「— 本金 NT$…（在圖的下方）」。
-  // 本金已收回（本金線畫在 0，0 在圖外）：那一行寫「本金已收回」；放不下時圖例本來就寫「本金已收回」
-  const note = model.offChart
-    ? (() => {
-        const text = endRecovered ? INVESTED_RECOVERED : offChartText(endAt.p, model.offChart, privacy)
-        const w = textWidth(text)
-        const baseline = model.offChart === "below" ? top + plotH - 6 : top + 14
-        const dotX = x(n - 1)
-        const dotY = y(last.market_value)
-        const fits = (b: Box) => {
-          const t = model.trace
-          for (let i = 0; i < t.length; i++) {
-            const [ax, ay] = t[Math.max(0, i - 1)]!
-            const [bx, by] = t[i]!
-            if (segmentHitsBox(ax, ay, bx, by, b, NOTE_LINE_CLEAR)) return false
-          }
-          return !(dotX >= b.x0 - NOTE_DOT_CLEAR && dotX <= b.x1 + NOTE_DOT_CLEAR && dotY >= b.y0 - NOTE_DOT_CLEAR && dotY <= b.y1 + NOTE_DOT_CLEAR)
-        }
-        const corners = [
-          { x: left + plotW - 4, x0: left + plotW - 4 - w, anchor: "end" as const },
-          { x: left + 4, x0: left + 4, anchor: "start" as const },
-        ]
-        const at = corners.find((c) => fits({ x0: c.x0, x1: c.x0 + w, y0: baseline - 11, y1: baseline + 2 }))
-        return at ? { text, x: at.x, y: baseline, anchor: at.anchor } : null
-      })()
-    : null
-  const noteInLegend = !!model.offChart && !note
-  // 圖例後面寫本金線在哪一邊（「本金 NT$…（在圖的下方）」）；本金已收回時圖例寫「本金已收回」就好，不寫在哪一邊
-  const legendWhere = noteInLegend && !endRecovered
-  const where = model.offChart === "above" ? "在圖的上方" : "在圖的下方"
-
-  // 圖例（資產組成）：線或色塊的樣子＋名稱＋金額（滑過時是那一天的）。字是淡墨，金額墨色；顏色只在賺的、虧的金額上（價格造成的）
+  // 圖例（資產組成）：線或色塊的樣子＋名稱＋金額（滑過時是那一天的）。字是淡墨，金額墨色；顏色只在價差的金額上（價格造成的）
   const legendInvested = inv && (
     <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap" data-legend="invested">
       <span aria-hidden className="inline-block w-3.5 shrink-0 -translate-y-[3px] border-t-[1.5px] border-chart-bench" />
       {shownRecovered ? INVESTED_RECOVERED : <>本金 {privacy ? <Masked /> : <span className="text-ink">{formatMoney(shownAt.p)}</span>}</>}
-      {legendWhere && !shownRecovered && `（${where}）`}
     </span>
   )
+  // 價差的名字不分賺虧：正負號說方向。隱私模式只遮金額、留著正負號（以前的「賺的／虧的」在隱私模式也看得出方向）
+  const gainTone = toneClass(direction(shownGain))
   const legendGain = inv && (
     <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap" data-legend="gain">
       <span aria-hidden className={cn("inline-block size-2.5 shrink-0", shownGain >= 0 ? "bg-rise-tint" : "bg-fall-tint")} />
-      {gainLabel} {privacy ? <Masked /> : <span className={cn("font-medium", toneClass(direction(shownGain)))}>{formatMoney(shownGain, { signed: true })}</span>}
+      {gainLabel}{" "}
+      {privacy ? (
+        <span className="inline-flex items-baseline">
+          <span className={cn("font-medium", gainTone)}>{shownGain < 0 ? "−" : "+"}</span>
+          <Masked />
+        </span>
+      ) : (
+        <span className={cn("font-medium", gainTone)}>{formatMoney(shownGain, { signed: true })}</span>
+      )}
     </span>
   )
   const legendDividend = hasDividends && (
@@ -497,7 +465,7 @@ function TrendBand({
       總資產
     </span>
   )
-  // 本金、賺的那兩項撐到這段期間最寬的金額（看不到、不佔高度）：滑過時金額的位數變了，後面的圖例不會左右跳。
+  // 本金、價差那兩項撐到這段期間最寬的金額（看不到、不佔高度）：滑過時金額的位數變了，後面的圖例不會左右跳。
   // 本金已收回的日子寫「本金已收回」（不寫金額）：有這種日子時也撐一個
   const widest = useMemo(
     () => ({
@@ -507,13 +475,21 @@ function TrendBand({
     }),
     [model.vp],
   )
-  const sizer = (label: string, amount: string) => (
+  const sizer = (label: string, amount: string, signed = false) => (
     <span aria-hidden className="invisible inline-flex h-0 items-baseline gap-1.5 overflow-hidden whitespace-nowrap" data-legend-sizer>
       <span className="inline-block w-3.5 shrink-0" />
-      {label} {privacy ? <Masked /> : <span className="font-medium">{amount}</span>}
+      {label}{" "}
+      {privacy ? (
+        <span className="inline-flex items-baseline">
+          {signed && <span className="font-medium">+</span>}
+          <Masked />
+        </span>
+      ) : (
+        <span className="font-medium">{amount}</span>
+      )}
     </span>
   )
-  const gainSizer = sizer(whole ? "賺的" : "目前賺的", widest.gain)
+  const gainSizer = sizer(`${whole ? "" : "目前"}${GAIN_LABEL}`, widest.gain, true)
   const investedSizers = (
     <>
       {widest.invested && sizer("本金", widest.invested)}
@@ -540,8 +516,8 @@ function TrendBand({
   )
   // 圖例（資產組成）：讀數下面、圖的上面（手指按著圖時擋不到）。桌面橫跨區間按鈕那一欄（格線第二列）
   const legendPlace = "lg:col-span-2 lg:col-start-1 lg:row-start-2"
-  // 窄（手機）：兩行兩欄（本金、賺的｜股利、總資產），金額寫完整；本金開關關掉時只有一行，高度照留（圖不會跳）。
-  // 本金在圖外、圖裡放不下那一行字時：第一行是本金（後面寫在哪一邊），第二行是其他三項
+  // 窄（手機）：兩行兩欄（本金、價差｜股利、總資產），金額寫完整；本金開關關掉時只有一行，高度照留（圖不會跳）。
+  // 本金線在圖外時圖例不另外寫（縱軸那一欄有記號）
   // 2026-11-21：托盤裡 320px 的手機只剩 248px，金額很大（上千億）時一行放不下——第二欄換到下一行（高度照最寬的金額定，滑過時不跳），不撐出畫面
   const gridBox = cn("num min-h-10 text-sm leading-5 text-ink-2", legendPlace)
   const legend = !comp ? null : stacked ? (
@@ -549,18 +525,6 @@ function TrendBand({
       <div className={cn(gridBox, "flex gap-x-4")} data-legend-grid>
         {legendDividend}
         {legendTotal}
-      </div>
-    ) : legendWhere ? (
-      <div className={cn(gridBox, "flex flex-col")} data-legend-grid>
-        <div className="flex">{legendInvested}</div>
-        <div className="flex flex-wrap gap-x-3">
-          <span className="inline-flex flex-col">
-            {legendGain}
-            {gainSizer}
-          </span>
-          {legendDividend}
-          {legendTotal}
-        </div>
       </div>
     ) : (
       <div className={cn(gridBox, "flex flex-wrap gap-x-5")} data-legend-grid>
@@ -617,7 +581,7 @@ function TrendBand({
               {comp && !stacked && dividendItem}
             </p>
             {comp ? (
-              // 資產組成：第二行是報酬（本金、賺的在下面的圖例，跟著這一天）；窄的時候領到的股利也在這一行，右邊留給本金開關
+              // 資產組成：第二行是報酬（本金、價差在下面的圖例，跟著這一天）；窄的時候領到的股利也在這一行，右邊留給本金開關
               <p className={cn("num flex items-baseline gap-x-4 overflow-hidden text-sm leading-5 whitespace-nowrap text-ink-2", stacked && "pr-18")}>
                 <span className="shrink-0">
                   報酬 <Ret value={activeRet} />
@@ -714,8 +678,8 @@ function TrendBand({
           {ticks.map((v, i) => (
             <g key={v}>
               <line x1={left} x2={left + plotW} y1={y(v)} y2={y(v)} stroke="var(--chart-grid)" strokeWidth={1} />
-              {/* 隱私模式：照樣畫線，但不標金額 */}
-              {!privacy && (
+              {/* 隱私模式：照樣畫線，但不標金額。上方的本金記號碰到的刻度字不寫 */}
+              {!privacy && tickShown[i] && (
                 <text x={left - 8} y={y(v)} textAnchor="end" dominantBaseline="central" fontSize={TICK_FONT} fill="var(--muted-foreground)" className="num">
                   {labels[i]}
                 </text>
@@ -771,23 +735,28 @@ function TrendBand({
           <circle cx={x(n - 1)} cy={y(last.market_value)} r={4} fill="var(--chart-mine)" stroke="var(--background)" strokeWidth={2} />
           {a && <circle cx={x(active!)} cy={y(a.market_value)} r={4} fill="var(--chart-mine)" stroke="var(--background)" strokeWidth={2} />}
 
-          {/* 本金在圖外：一行淡墨小字（紙色描邊，蓋在塗色上也讀得到） */}
-          {note && (
-            <text
-              x={note.x}
-              y={note.y}
-              textAnchor={note.anchor}
-              fontSize={TICK_FONT}
-              fill="var(--muted-foreground)"
-              stroke="var(--background)"
-              strokeWidth={3}
-              strokeLinejoin="round"
-              paintOrder="stroke"
-              className="num"
-              data-off-chart={model.offChart}
-            >
-              {note.text}
-            </text>
+          {/* 本金線在圖外：縱軸那一欄靠那一邊一個記號——鉛筆灰的箭頭（本金線的顏色、1.5px，朝圖外）＋約略金額（和刻度字同一種寫法、靠右對齊） */}
+          {model.cue && (
+            <g data-off-chart={model.cue.side}>
+              <g stroke="var(--chart-bench)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" aria-hidden>
+                {model.cue.side === "below" ? (
+                  <>
+                    <line x1={model.cue.ax} x2={model.cue.ax} y1={model.cue.y - 5} y2={model.cue.y + 4.5} />
+                    <polyline points={`${model.cue.ax - 3},${model.cue.y + 1.5} ${model.cue.ax},${model.cue.y + 4.5} ${model.cue.ax + 3},${model.cue.y + 1.5}`} />
+                  </>
+                ) : (
+                  <>
+                    <line x1={model.cue.ax} x2={model.cue.ax} y1={model.cue.y + 5} y2={model.cue.y - 4.5} />
+                    <polyline points={`${model.cue.ax - 3},${model.cue.y - 1.5} ${model.cue.ax},${model.cue.y - 4.5} ${model.cue.ax + 3},${model.cue.y - 1.5}`} />
+                  </>
+                )}
+              </g>
+              {model.cue.text && (
+                <text x={model.cue.x} y={model.cue.y} textAnchor="end" dominantBaseline="central" fontSize={TICK_FONT} fill="var(--muted-foreground)" className="num">
+                  {model.cue.text}
+                </text>
+              )}
+            </g>
           )}
 
           {/* 「估計」括線：每一段估計的頭尾各一個短直線，中間一條 1px 淡墨線（字是 HTML，蓋在線上） */}
@@ -828,7 +797,7 @@ function TrendBand({
         <p className="sr-only" aria-live="polite">
           {a && fromKeys
             ? `${activeDay}${activeEst ? "（估計）" : ""}，總資產 ${money(a.market_value)}，` +
-              (inv ? `${shownRecovered ? INVESTED_RECOVERED : `本金 ${money(shownAt.p)}`}，${gainWord} ${money(Math.abs(shownGain))}，` : comp ? "" : `投入本金 ${money(a.net_invested)}，`) +
+              (inv ? `${shownRecovered ? INVESTED_RECOVERED : `本金 ${money(shownAt.p)}`}，${gainSpeech(shownGain, money(Math.abs(shownGain)))}，` : comp ? "" : `投入本金 ${money(a.net_invested)}，`) +
               `報酬${retSpeech(activeRet)}` +
               (activeDividend > 0 ? `，領股利 ${money(activeDividend)}` : "")
             : ""}

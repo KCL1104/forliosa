@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest"
-import { benchmarkGap, estimatedLine, fundRankPeriod, INVESTED_RECOVERED, isRecovered, monthLabel, monthSpanText, offChartText, roughMoney, touchesSpan, trendEstimatedText } from "../composition-text"
+import {
+  benchmarkGap,
+  estimatedLine,
+  fundRankPeriod,
+  GAIN_LABEL,
+  gainSpeech,
+  INVESTED_RECOVERED,
+  isRecovered,
+  monthLabel,
+  monthSpanText,
+  offChartCue,
+  offChartSpeech,
+  roughMoney,
+  touchesSpan,
+  trendEstimatedText,
+} from "../composition-text"
 
 describe("資產組成的字", () => {
   it("估計那一段的說明：只寫畫出來的部分；跨年寫年份；沒碰到是 null", () => {
@@ -76,10 +91,21 @@ describe("資產組成 v2：本金在圖外時圖裡那一行", () => {
     expect(roughMoney(12_345_678)).toBe("1,235萬")
   })
 
-  it("「本金 288萬，在圖的下方」／上方；隱私模式不寫金額", () => {
-    expect(offChartText(2_875_955, "below", false)).toBe("本金 288萬，在圖的下方")
-    expect(offChartText(6_327_331, "above", false)).toBe("本金 633萬，在圖的上方")
-    expect(offChartText(2_875_955, "below", true)).toBe("本金在圖的下方")
+  it("本金線在圖外：縱軸的記號只有約略金額（不寫「在圖的下方」這種句子）；本金已收回畫在 0 寫「0」；報讀器念在哪一邊", () => {
+    expect(offChartCue(2_875_955)).toBe("288萬")
+    expect(offChartCue(6_327_331)).toBe("633萬")
+    expect(offChartCue(0)).toBe("0")
+    expect(offChartCue(-518_422)).toBe("0")
+    expect(offChartSpeech("below")).toBe("本金線在圖的下方")
+    expect(offChartSpeech("above")).toBe("本金線在圖的上方")
+  })
+
+  it("總資產－本金叫「價差」（不叫「賺的」：和「總損益（含股利）」兩個都讀成賺多少）；報讀器念賺或虧", () => {
+    expect(GAIN_LABEL).toBe("價差")
+    expect(gainSpeech(1_231_769, "NT$1,231,769")).toBe("價差賺 NT$1,231,769")
+    expect(gainSpeech(-6_000, "NT$6,000")).toBe("價差虧 NT$6,000")
+    expect(gainSpeech(0, "NT$0")).toBe("價差賺 NT$0")
+    expect(gainSpeech(-1, null)).toBe("價差虧")
   })
 })
 

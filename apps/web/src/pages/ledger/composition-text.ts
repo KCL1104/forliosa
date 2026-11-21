@@ -10,7 +10,7 @@ import { needsYear, trendWindow, type TrendRange } from "@/lib/trend-range"
 
 /**
  * 圖裡的小字用的約略金額（和縱軸刻度同一種寫法）：「296萬」「1.25億」「−50萬」；1 萬以下寫整數。
- * 本金在圖外時那一行「本金 296萬，在圖的下方」用它（準確的金額在圖例與下面那一句）。
+ * 本金線在圖外時縱軸那一欄的記號（「↓ 296萬」）用它（準確的金額在圖例）。
  */
 export function roughMoney(v: number): string {
   const sign = v < 0 ? "−" : ""
@@ -21,18 +21,34 @@ export function roughMoney(v: number): string {
 }
 
 /**
- * 本金 ≤ 0（賣股票收到的錢已經和買股票花的一樣多或更多）：首頁走勢 v2 的圖例、滑過的讀數、圖的說明、圖裡那一行都不寫金額，
- * 寫「本金已收回」（使用者 2026-11-19；負的本金看不懂）。賺的照實寫（總資產－本金），本金線畫在 0。
+ * 本金 ≤ 0（賣股票收到的錢已經和買股票花的一樣多或更多）：首頁走勢 v2 的圖例、滑過的讀數、圖的說明都不寫金額，
+ * 寫「本金已收回」（使用者 2026-11-19；負的本金看不懂）。價差照實寫（總資產－本金），本金線畫在 0（縱軸的記號寫「0」）。
  * 本金開關關掉時沒有本金；每月表格的本金增減照舊寫金額。金額先四捨五入到元再判斷（和畫面上的數字一致）。
  */
 export const INVESTED_RECOVERED = "本金已收回"
 export const isRecovered = (invested: number) => invested <= 0
 
-/** 本金在圖外（縱軸只跟總資產）時圖裡那一行：「本金 296萬，在圖的下方」；隱私模式不寫金額 */
-export function offChartText(invested: number, side: "above" | "below", privacy: boolean): string {
-  const where = side === "below" ? "在圖的下方" : "在圖的上方"
-  return privacy ? `本金${where}` : `本金 ${roughMoney(invested)}，${where}`
+/**
+ * 總資產－本金（未實現＋已實現損益，不含股利）在畫面上的名字（2026-11-21 評論）。原本寫「賺的」：和主數字的「總損益（含股利）」
+ * 兩個都讀成「賺多少」、對不起來（差的就是股利）。「價差」是台股的說法（賺價差、領股利），和圖例旁邊的「股利」合起來就是總損益；
+ * 賺虧都用同一個名字，正負號說方向。
+ */
+export const GAIN_LABEL = "價差"
+
+/** 報讀器念的價差：「價差賺 NT$1,231,769」「價差虧 NT$6,000」；`money` 是 null（隱私模式）時只念賺或虧 */
+export function gainSpeech(gain: number, money: string | null): string {
+  const word = `${GAIN_LABEL}${gain >= 0 ? "賺" : "虧"}`
+  return money === null ? word : `${word} ${money}`
 }
+
+/**
+ * 本金線在圖外（縱軸只跟總資產）時縱軸那一欄的記號：鉛筆灰的箭頭＋約略金額（「288萬」，和刻度同一種寫法），不寫句子
+ * （2026-11-21 評論：原本圖裡寫「本金 288萬，在圖的下方」）。本金已收回時本金線畫在 0：寫「0」。
+ */
+export const offChartCue = (invested: number): string => roughMoney(Math.max(invested, 0))
+
+/** 圖的說明（報讀器）裡念本金線在哪一邊 */
+export const offChartSpeech = (side: "above" | "below"): string => (side === "below" ? "本金線在圖的下方" : "本金線在圖的上方")
 
 /** 「8/14」；`withYear` 時「2024/8/14」 */
 export const dayText = (t: string, withYear: boolean) => (withYear ? `${t.slice(0, 4)}/` : "") + formatDateShort(t, false)
