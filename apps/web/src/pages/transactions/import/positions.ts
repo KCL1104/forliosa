@@ -266,15 +266,15 @@ export function toCommitRow(d: DraftPosition, batchDate: string, importDay: stri
 }
 
 /** 整批日期下面那一句（照實說：每一檔是一筆普通買進，均價到那天收盤的漲跌全部算在那一天） */
-export const BATCH_DATE_HINT = "損益照券商均價算；均價到這天收盤的漲跌會算進這天的報酬，這天之前沒有走勢。每一檔也可以改日期。"
+export const BATCH_DATE_HINT = "均價到這天收盤的漲跌算進這天的報酬，這天之前沒有走勢。"
 
 /**
- * 整批日期下面那一句：有估計的買入日可以套用時多說估計是什麼、要按「套用」才會用（估計是從今天往回找「最近一次」
- * 經過均價的那一天）。舊版伺服器、估不到的、改過股票或成本的都沒有建議，只有原本那一句。
+ * 整批日期下面那一句：有估計的買入日可以套用時多說估計是什麼（估計是從今天往回找「最近一次」經過均價的那一天；
+ * 「按「套用」才會用」不寫，「套用」就在每一列）。舊版伺服器、估不到的、改過股票或成本的都沒有建議，只有原本那一句。
  */
 export function dateHint(rows: readonly Pick<DraftPosition, "estimate">[]): string {
   const suggests = rows.some((d) => typeof d.estimate === "string")
-  return suggests ? `${BATCH_DATE_HINT}估計買入日是從今天往回，股價最近一次經過均價的那一天；按「套用」才會改成那一天。` : BATCH_DATE_HINT
+  return suggests ? `${BATCH_DATE_HINT}估計買入日是股價最近一次經過均價的那一天。` : BATCH_DATE_HINT
 }
 
 /**

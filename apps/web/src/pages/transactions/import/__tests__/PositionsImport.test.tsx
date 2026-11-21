@@ -110,7 +110,7 @@ describe("匯入庫存", () => {
     // 確認表：整批的買進日期（照實說均價到那天收盤的漲跌算進那一天的報酬）、重疊的列只算一次
     expect(within(dialog).getByLabelText("買進日期")).toBeInTheDocument()
     // 資產組成原型：伺服器估了買入日（只是建議），說明多一句估計是什麼、要按「套用」（沒有估計的舊版伺服器照舊，見下面）
-    expect(within(dialog).getByText("損益照券商均價算；均價到這天收盤的漲跌會算進這天的報酬，這天之前沒有走勢。每一檔也可以改日期。估計買入日是從今天往回，股價最近一次經過均價的那一天；按「套用」才會改成那一天。")).toBeInTheDocument()
+    expect(within(dialog).getByText("均價到這天收盤的漲跌算進這天的報酬，這天之前沒有走勢。估計買入日是股價最近一次經過均價的那一天。")).toBeInTheDocument()
     expect(within(dialog).getByText(/永豐金證券・讀到 7 檔・重疊的 1 列只算一次/)).toBeInTheDocument()
     // 已在帳本：不勾、標「已在帳本」，下面一行帳本的股數與均價＋以券商為準；左邊的勾選照實說勾了會刪掉舊紀錄
     const tsmc = within(dialog).getByRole("checkbox", { name: /^匯入並以券商為準：台積電，刪掉 \d+ 筆紀錄/ })
@@ -375,7 +375,7 @@ describe("匯入庫存：估計的買入日（資產組成原型）", () => {
     const commit = vi.spyOn(api, "commitPositions")
     const user = userEvent.setup()
     const dialog = await readShot(user)
-    expect(within(dialog).getByText("損益照券商均價算；均價到這天收盤的漲跌會算進這天的報酬，這天之前沒有走勢。每一檔也可以改日期。")).toBeInTheDocument()
+    expect(within(dialog).getByText("均價到這天收盤的漲跌算進這天的報酬，這天之前沒有走勢。")).toBeInTheDocument()
     expect(within(dialog).queryByText(/^估計 /)).toBeNull()
     expect(within(dialog).queryByRole("button", { name: /^套用/ })).toBeNull()
     expect(within(dialog).queryByText(/沒辦法估買入日/)).toBeNull()

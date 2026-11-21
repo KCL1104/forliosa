@@ -82,11 +82,10 @@ describe("頻道的四個開關（2026-11-18 產品負責人選 A）", () => {
     expect(within(discord).getByRole("switch", { name: "盤後（交易日 16:00）" })).toHaveAttribute("aria-checked", "false")
     expect(within(discord).getByRole("switch", { name: "週報（週日 18:00）" })).toHaveAttribute("aria-checked", "true")
     for (const line of [
-      "成員的買賣，交易建立 15 分鐘後送出。",
-      "盤前重點，加上昨日你的群組（加值群組）。",
-      "盤後重點。",
-      "市場週報，加上這週的群組週報。",
-      "推到頻道的是文字與連結，報告本文人人相同。",
+      "成員的買賣，交易建立 15 分鐘後送出",
+      "盤前重點，加上昨日你的群組（加值群組）",
+      "盤後重點",
+      "市場週報，加上這週的群組週報",
     ]) {
       expect(within(discord).getByText(line)).toBeInTheDocument()
     }
@@ -108,13 +107,14 @@ describe("頻道的四個開關（2026-11-18 產品負責人選 A）", () => {
     expect(within(discord).queryByText(/盲測|投票/)).toBeNull()
   })
 
-  it("預設（市場報告對全站公開）：四列，說明推的是文字與連結；沒有盲測的投票連結", async () => {
+  it("預設（市場報告對全站公開）：四列，下面沒有說明行（不講機制）；沒有盲測的投票連結", async () => {
     mount()
     renderApp("/groups/grp_family?tab=channels")
     const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
     await within(discord).findByRole("switch", { name: "交易動態" }, T)
     expect(switchNames(discord)).toEqual(SWITCH_NAMES)
-    expect(within(discord).getByText("推到頻道的是文字與連結，報告本文人人相同。")).toBeInTheDocument()
+    expect(discord.querySelector("[data-report-note]")).toBeNull()
+    expect(within(discord).queryByText(/報告本文人人相同/)).toBeNull()
     expect(within(discord).queryByText(/盲測|投票/)).toBeNull()
   })
 

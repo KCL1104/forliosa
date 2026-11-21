@@ -66,7 +66,7 @@ function DailyReports({
   if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />
   if (query.isLoading) return <SkeletonLines rows={6} />
   if (items.length === 0) {
-    return <EmptyState title="還沒有日報" description={boosted ? "每個交易日收盤價進來以後，整理當天的群組表現。" : undefined} />
+    return <EmptyState title="還沒有日報" description={boosted ? "每個交易日收盤價進來後更新" : undefined} />
   }
   return <DailyList items={items} boosted={boosted} query={query} />
 }
@@ -87,7 +87,7 @@ function DailyList({ items, boosted, query }: { items: DailyReport[]; boosted: b
   const premarket = useYesterdayPremarket(items[0]?.trading_day)
   return (
     <div className="flex flex-col gap-12">
-      {!boosted && <p className="text-base text-ink">這個群組已經沒有加值，不會再有新的日報。</p>}
+      {!boosted && <p className="text-base text-ink">加值已結束，不再有新的日報</p>}
       {items.map((r, i) => (
         <DailyArticle key={r.id} r={r} latest={i === 0} premarket={i === 0 ? premarket : null} />
       ))}

@@ -85,12 +85,11 @@ export function RecurringPlans() {
       ) : !plans.data || !accounts.data ? (
         <SkeletonLines rows={3} className="pt-3" />
       ) : twd.length === 0 ? (
-        <EmptyState flush title="還沒有新台幣帳戶" description="定期定額要從新台幣帳戶扣款。先在上面的「券商帳戶」新增一個，例如「永豐・一般」。" />
+        <EmptyState flush title="還沒有新台幣帳戶" description="定期定額要從新台幣帳戶扣款" />
       ) : plans.data.length === 0 ? (
         <EmptyState
           flush
           title="還沒有定期定額"
-          description="扣款日 AI 會寫好交易草稿，等你簽名。"
           action={
             <Button variant="outline" size="sm" onClick={() => setEditing("new")}>
               新增第一個計畫
@@ -290,7 +289,7 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
           <label className="flex min-h-11 items-center justify-between gap-3 border-y border-rule py-2">
             <span>
               <span className="block font-medium">啟用</span>
-              <span className="block text-base text-ink">暫停時不會出現扣款提醒，也不會提出草稿。</span>
+              <span className="block text-base text-ink">暫停時沒有扣款提醒與草稿</span>
             </span>
             <Switch checked={active} onCheckedChange={setActive} />
           </label>

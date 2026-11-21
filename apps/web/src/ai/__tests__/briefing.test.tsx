@@ -255,7 +255,7 @@ describe("設定：每日收盤簡報的開關（預設關）", () => {
     renderApp("/settings")
     const sw = await screen.findByRole("switch", { name: "每日收盤簡報" }, T)
     expect(sw).toHaveAttribute("aria-checked", "false")
-    expect(screen.getByText("收盤後依你的持股與觀察清單寫一則，在「問 AI」最上面。")).toBeInTheDocument()
+    expect(screen.getByText("收盤後依持股與觀察清單寫一則")).toBeInTheDocument()
     expect(await api.getLatestBriefing()).toBeNull()
     expect(await api.listBriefings()).toEqual([])
     expect(screen.getByRole("button", { name: "問 AI" }).querySelector("[data-briefing-dot]")).toBeNull()
@@ -284,7 +284,7 @@ describe("設定：每日收盤簡報的開關（預設關）", () => {
       plan: { tier: "free", until: null, deep_search: true, daily_briefing: false, statement_import: true }, // 2026-11-17：只差收盤簡報與題數
     })
     renderApp("/settings")
-    expect(await screen.findByText("收盤後依你的持股與觀察清單寫一則。這是會員功能。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("收盤後依持股與觀察清單寫一則・會員功能", undefined, T)).toBeInTheDocument()
     const sw = screen.getByRole("switch", { name: "每日收盤簡報" })
     expect(sw).toHaveAttribute("aria-checked", "false")
     expect(sw).toHaveAttribute("aria-disabled", "true") // Base UI 的開關用 aria-disabled，不是 disabled 屬性

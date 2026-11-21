@@ -44,12 +44,12 @@ export function ShareToggles({
               </label>
               <p className="text-base text-ink" id={`${id}-detail`}>
                 {SHARE_COPY[key].detail}
-                {locked && "要先打開交易動態才會附上。"}
+                {locked && <span className="block">要先打開交易動態</span>}
               </p>
               {key === "amounts" && value.amounts && value.holdings && (
                 <p className="mt-1.5 flex items-start gap-1.5 text-md text-ink" role="note">
                   <InfoIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
-                  同時分享持股權重與金額時，成員可以推算你大約持有幾股。
+                  成員可以推算你大約持有幾股
                 </p>
               )}
               {key === "push" && <PushTargetsNote targets={pushTargets} autoOffId={autoOff ? `${id}-auto-off` : undefined} />}
@@ -70,8 +70,8 @@ export function ShareToggles({
 }
 
 function PushTargetsNote({ targets, autoOffId }: { targets?: PushTarget[]; autoOffId?: string }) {
-  if (targets === undefined) return <p className="mt-1 text-base text-ink">群組有設定頻道才會送；只送你打開的項目。</p>
-  if (targets.length === 0) return <p className="mt-1 text-base text-ink">這個群組還沒有設定頻道。</p>
+  if (targets === undefined) return <p className="mt-1 text-base text-ink">群組有頻道才會送</p>
+  if (targets.length === 0) return <p className="mt-1 text-base text-ink">群組還沒有頻道</p>
   return (
     <>
       <p className="mt-1 text-sm text-ink-2">
@@ -79,7 +79,7 @@ function PushTargetsNote({ targets, autoOffId }: { targets?: PushTarget[]; autoO
       </p>
       {autoOffId && (
         <p id={autoOffId} className="mt-1 text-base text-ink">
-          群組換頻道時會自動關掉。
+          群組換頻道時會自動關掉
         </p>
       )}
     </>

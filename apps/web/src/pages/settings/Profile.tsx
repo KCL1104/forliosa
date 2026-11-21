@@ -70,7 +70,7 @@ function ProfileForm({ name: initial, email, avatar }: { name: string; email: st
             "請填 1 到 30 個字。"
           ) : (
             <>
-              群組裡大家看到的名字。<span className="text-sm text-ink-2">登入帳號：{email}</span>
+              群組裡顯示的名字<span className="ml-2 text-sm text-ink-2">登入帳號：{email}</span>
             </>
           )}
         </p>

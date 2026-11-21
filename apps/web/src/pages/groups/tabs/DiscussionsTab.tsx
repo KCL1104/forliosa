@@ -14,7 +14,7 @@ export function DiscussionsTab({ group }: { group: Group }) {
         <h2 id="group-discussions-title" className="sr-only">
           討論
         </h2>
-        <p className="text-base text-ink">只有「{group.name}」的成員看得到。</p>
+        <p className="text-base text-ink">只有成員看得到</p>
         <Link to="/discussions/new" search={{ scope: "group", group_id: group.id, from: "group" }} className={buttonVariants({ variant: "outline" })}>
           開新主題
         </Link>
@@ -24,7 +24,7 @@ export function DiscussionsTab({ group }: { group: Group }) {
         origin={{ kind: "group", id: group.id, name: group.name }}
         signedIn
         showGroup={false}
-        empty={{ title: "這個群組還沒有主題", description: "開一個主題，問問大家這個月怎麼配置。" }}
+        empty={{ title: "這個群組還沒有主題" }}
       />
     </section>
   )

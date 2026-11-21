@@ -32,7 +32,7 @@ export function ChannelsTab({ group }: { group: Group }) {
   return (
     <div className="flex max-w-2xl flex-col gap-12">
       <p className="text-base text-ink">
-        成員自己打開「推播」，他分享的內容才會送到頻道。{owner ? "" : "頻道由擁有者設定。"}
+        只送開了「推播」的成員分享的內容{owner ? "" : "・頻道由擁有者設定"}
       </p>
 
       <Section title="Discord" titleId="gc-discord" aside={<Status configured={c.discord.configured} status={c.discord.status} />}>
@@ -59,7 +59,7 @@ export function ChannelsTab({ group }: { group: Group }) {
 
       <Section title="Telegram" titleId="gc-telegram" aside={<Status configured={c.telegram.configured} status={c.telegram.status} />}>
         {!c.telegram_available ? (
-          <EmptyState flush title="暫時不能連結" description="伺服器還沒有設定 Telegram bot。" />
+          <EmptyState flush title="暫時不能連結" />
         ) : (
           <>
             {c.telegram.status === "disabled" && <Disabled reason={c.telegram.disabled_reason} owner={owner} />}
@@ -99,10 +99,10 @@ function Disabled({ reason, owner }: { reason: string | null; owner: boolean }) 
 
 /** 一個頻道的四個開關：預設 交易動態 開、盤前 關、盤後 關、週報 開 */
 const SWITCHES: { key: keyof ChannelNotify; label: string; detail: string; on: boolean }[] = [
-  { key: "notify_trades", label: "交易動態", detail: "成員的買賣，交易建立 15 分鐘後送出。", on: true },
-  { key: "notify_premarket", label: "盤前（交易日 7:30）", detail: "盤前重點，加上昨日你的群組（加值群組）。", on: false },
-  { key: "notify_close", label: "盤後（交易日 16:00）", detail: "盤後重點。", on: false },
-  { key: "notify_weekly", label: "週報（週日 18:00）", detail: "市場週報，加上這週的群組週報。", on: true },
+  { key: "notify_trades", label: "交易動態", detail: "成員的買賣，交易建立 15 分鐘後送出", on: true },
+  { key: "notify_premarket", label: "盤前（交易日 7:30）", detail: "盤前重點，加上昨日你的群組（加值群組）", on: false },
+  { key: "notify_close", label: "盤後（交易日 16:00）", detail: "盤後重點", on: false },
+  { key: "notify_weekly", label: "週報（週日 18:00）", detail: "市場週報，加上這週的群組週報", on: true },
 ]
 
 function NotifyToggles({
@@ -120,8 +120,8 @@ function NotifyToggles({
   reports: boolean
 }) {
   const patch = usePatchChannel(groupId, kind)
-  // 報告暫停或沒開時，盤前、週報照樣在同一個時間送群組的部分（後端 reports/push.py），盤後沒有東西可送
-  const note = reports ? "推到頻道的是文字與連結，報告本文人人相同。" : "市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。"
+  // 報告暫停或沒開時，盤前、週報照樣在同一個時間送群組的部分（後端 reports/push.py），盤後沒有東西可送：只在這時多一行
+  const note = reports ? null : "市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。"
   return (
     <div className="mt-2 border-t border-rule" data-channel-switches="">
       {SWITCHES.map(({ key, label, detail, on }) => {
@@ -143,9 +143,11 @@ function NotifyToggles({
           </div>
         )
       })}
-      <p className="pt-3 text-sm text-ink-2" data-report-note="">
-        {note}
-      </p>
+      {note && (
+        <p className="pt-3 text-sm text-ink-2" data-report-note="">
+          {note}
+        </p>
+      )}
     </div>
   )
 }
@@ -222,7 +224,7 @@ function DiscordForm({ groupId, replacing, current }: { groupId: string; replaci
           onChange={(e) => setUrl(e.target.value)}
         />
         <p id="discord-webhook-help" className="text-sm text-ink-2">
-          Discord 頻道設定 → 整合 → Webhook → 複製網址。網址只用來送訊息，存起來後不會再顯示。
+          Discord 頻道設定 → 整合 → Webhook → 複製網址
         </p>
         {error && (
           <FieldError>{error}</FieldError>
@@ -256,7 +258,7 @@ function TelegramLink({ groupId, code, onCode }: { groupId: string; code: Telegr
   if (code) {
     return (
       <div role="status" className="mt-2 flex flex-col gap-2 border border-ink p-4">
-        <p className="font-medium">在 Telegram 完成連結</p>
+        <p className="font-medium">連結步驟</p>
         <ol className="list-decimal pl-5 text-base">
           <li>
             把 <b className="font-medium">@{code.bot_username}</b> 加進你們的 Telegram 群組。

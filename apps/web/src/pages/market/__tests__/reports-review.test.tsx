@@ -168,7 +168,7 @@ describe("群組", () => {
     renderApp("/groups/grp_family?tab=channels")
     const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
     await within(discord).findByRole("switch", { name: "週報（週日 18:00）" }, T)
-    expect(within(discord).getByText("市場週報，加上這週的群組週報。")).toBeInTheDocument()
+    expect(within(discord).getByText("市場週報，加上這週的群組週報")).toBeInTheDocument()
     expect(within(discord).queryByText(/每週六晚上/)).toBeNull()
   })
 

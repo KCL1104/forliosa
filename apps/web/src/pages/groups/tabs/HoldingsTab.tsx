@@ -22,9 +22,19 @@ export function HoldingsTab({ group }: { group: Group }) {
   return (
     <div className="flex flex-col gap-10">
       <div className="grid gap-10 md:grid-cols-2">
-        <Section title="共同持股" titleId="gh-common" aside={h.is_demo ? <DemoTag /> : undefined}>
+        {/* 共同持股的定義是標題旁的標籤（和「成員持股」的「權重，不含股數與金額」同一個位置），空的時候只有標題 */}
+        <Section
+          title="共同持股"
+          titleId="gh-common"
+          aside={
+            <>
+              兩人以上持有
+              {h.is_demo && <DemoTag className="ml-2" />}
+            </>
+          }
+        >
           {h.common.length === 0 ? (
-            <EmptyState flush title="還沒有共同持股" description="要兩人以上都持有才算。" />
+            <EmptyState flush title="還沒有共同持股" />
           ) : (
             <ul className="-mt-3">
               {h.common.map((c) => (

@@ -14,7 +14,7 @@ import { PageHeader, Section } from "@/components/section"
 import { SourcesFooter } from "@/components/sources"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { formatDateShort, formatDateTime } from "@/lib/format"
 import { untilDay } from "@/lib/plan"
@@ -47,7 +47,7 @@ function Groups() {
         <SkeletonLines rows={4} />
       ) : groups.data.length === 0 ? (
         // 動作只有頁首的「建立群組」一個，這裡不再放第二顆
-        <EmptyState title="還沒有加入任何群組" description="建立群組，把邀請連結傳給家人朋友。別人給你的邀請連結，點開就能加入。" />
+        <EmptyState title="還沒有加入任何群組" />
       ) : (
         <ul aria-label="我的群組" className="border-t border-rule">
           {groups.data.map((g) => (
@@ -113,7 +113,6 @@ function CreateGroupDialog({ onClose }: { onClose: () => void }) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>建立群組</DialogTitle>
-          <DialogDescription>建立後產生邀請連結傳給家人朋友。每個人加入前會自己選要分享什麼。</DialogDescription>
         </DialogHeader>
         <form
           id="create-group"
