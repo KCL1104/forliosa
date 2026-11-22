@@ -7,6 +7,7 @@ import { Section } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
 import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
+import { inText } from "@/lib/cjk"
 import { announcementHost, eventLabel, eventTitle, mergeAnnouncements, NEWS_CATEGORY_LABEL, type TimelineRow } from "@/lib/events"
 import { formatDaysUntil, formatMoney, formatPrice, formatQuantity } from "@/lib/format"
 import { officialNews } from "@/lib/news"
@@ -93,7 +94,7 @@ function Timeline({ rows, today, privacy, who, empty, future }: { rows: Timeline
                 // 有原文的列：常駐的底線；連結撐滿整列（手機上整列都按得到）
                 <a href={e.url} target="_blank" rel="noreferrer" className="underline decoration-ctl underline-offset-3 after:absolute after:inset-0 hover:decoration-ink">
                   {title}
-                  <span className="sr-only">（在{announcementHost(e.url)}查看，另開新視窗）</span>
+                  <span className="sr-only">（在{inText(announcementHost(e.url))}查看，另開新視窗）</span>
                 </a>
               ) : (
                 title

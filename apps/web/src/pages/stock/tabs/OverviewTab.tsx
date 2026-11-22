@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { formatNav, formatPremium } from "@/lib/etf-nav"
+import { inText } from "@/lib/cjk"
 import { announcementHost, eventLabel, eventTitle, mergeAnnouncements, NEWS_CATEGORY_LABEL, type TimelineRow } from "@/lib/events"
 import { formatCompact, formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPercent, formatPerShare, formatPrice, formatRevenueThousands, formatVolume } from "@/lib/format"
 import { officialNews } from "@/lib/news"
@@ -257,7 +258,8 @@ function chipItems(inst: InstrumentDetail, c: NonNullable<ReturnType<typeof useC
         bigItem,
         ...(top ? [{ label: "外資持股", value: formatPercent(top.pct, { signed: false, decimals: 1 }), title: `證交所外資持股前 20 名第 ${top.rank} 名` }] : []),
       ],
-      note: `上市${inst.type === "etf" ? " ETF " : "股票"}沒有逐檔三大法人資料${top ? `；外資持股是證交所前 20 名資料（第 ${top.rank} 名）` : ""}。`,
+      // 標籤，不寫句子（2026-11-22 評論）；名次和籌碼分頁的「外資持股比」同一種寫法
+      note: `三大法人：上市${inst.type === "etf" ? " ETF " : "股票"}沒有逐檔資料${top ? `・外資持股：前 20 名第 ${top.rank} 名` : ""}`,
     }
   }
   const last5 = c.institutional.slice(-5)
@@ -497,7 +499,7 @@ function EventRow({ e, today, amount }: { e: TimelineRow; today: string; amount:
           // 有原文的列：常駐的底線；連結撐滿整列（手機上整列都按得到，不只是字）
           <a href={e.url} target="_blank" rel="noreferrer" className="underline decoration-ctl underline-offset-3 after:absolute after:inset-0 hover:decoration-ink">
             {title}
-            <span className="sr-only">（在{announcementHost(e.url)}查看，另開新視窗）</span>
+            <span className="sr-only">（在{inText(announcementHost(e.url))}查看，另開新視窗）</span>
           </a>
         ) : (
           title

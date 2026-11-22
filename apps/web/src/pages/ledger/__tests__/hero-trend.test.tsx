@@ -450,13 +450,16 @@ describe("和績效分段分工：整頁只有一排區間按鈕", { timeout: 20
     expect(await screen.findByText(`只有 ${first.replaceAll("-", "/")} – 2026/11/12 的資料`, undefined, T)).toBeInTheDocument()
   })
 
-  it("首頁走勢的區間報酬和績效分段同一個區間的時間加權報酬是同一個數字（1 月、3 月、全部）", async () => {
+  it("首頁走勢的區間報酬和績效分段同一個區間的時間加權報酬是同一個數字（每一個區間，畫面上的兩位小數也一樣）", async () => {
     const all = await api.getPerformance({ range: "ALL" })
     const { rangeReturn, trendWindow } = await import("@/lib/trend-range")
-    for (const range of ["1M", "3M", "ALL"] as const) {
-      const p = await api.getPerformance({ range })
+    const { formatPercent } = await import("@/lib/format")
+    for (const range of ["5D", "1M", "3M", "6M", "YTD", "1Y", "ALL"] as const) {
+      const p = await api.getPerformance({ range, benchmark: "0050.TW" })
       const win = trendWindow(all.series, range)
-      expect(rangeReturn(win)!).toBeCloseTo(p.twr!, 3)
+      expect(rangeReturn(win)!).toBeCloseTo(p.twr!, 5)
+      // 2026-11-22 評論：示範資料的指數只到小數 4 位時，「1月」是 ▲9.91% 和 ▲9.90%（後端是 6 位）
+      expect(formatPercent(rangeReturn(win))).toBe(formatPercent(p.twr))
       expect(win.points[win.from]!.t).toBe(p.start_date)
     }
   })

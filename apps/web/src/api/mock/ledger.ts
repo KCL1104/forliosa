@@ -397,6 +397,11 @@ const holdingAccounts = (pos: Position) => [...pos.held].filter(([, q]) => q > 0
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 const r4 = (n: number) => Math.round(n * 10000) / 10000
+/**
+ * 績效的指數與報酬：和後端一樣到小數 6 位（`services/portfolio.py` 的 `round(…, 6)`）。2026-11-22 以前是 4 位，
+ * 首頁走勢用「全部」的指數相除算出的「報酬 ▲9.91%」和績效分段的「▲9.90%」差了 0.01（同一個報酬，四捨五入不同）
+ */
+const r6 = (n: number) => Math.round(n * 1_000_000) / 1_000_000
 
 /**
  * 持股。`commercial`（與後端相同，不標示示範資料）：每一檔帶 `price_date`（價格屬於哪一個交易日；美股是紐約的日期
@@ -759,8 +764,8 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
     t: x.t,
     market_value: x.market_value,
     net_invested: x.net_invested,
-    twr_index: r4(x.twr_index / base),
-    benchmark_index: x.benchmark_index === null ? null : r4(x.benchmark_index / bBase),
+    twr_index: r6(x.twr_index / base),
+    benchmark_index: x.benchmark_index === null ? null : r6(x.benchmark_index / bBase),
   }))
   let peak = 0
   let mdd = 0
@@ -818,16 +823,16 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
     range,
     start_date: startDate,
     end_date: MOCK_TODAY,
-    twr: r4(last.twr_index - 1),
+    twr: r6(last.twr_index - 1),
     xirr: (() => {
       if (days !== null) return null // 一到五天的現金流年化沒有意義
       if (touchesEstimate && opts.composition !== false) return null
       const v = xirr(flows)
-      return v === null ? null : r4(v)
+      return v === null ? null : r6(v)
     })(),
-    max_drawdown: r4(mdd),
-    volatility: r4(Math.sqrt(variance) * Math.sqrt(252)),
-    benchmark: { symbol: benchSpec.symbol, name: benchSpec.name, twr: last.benchmark_index === null ? null : r4(last.benchmark_index - 1) },
+    max_drawdown: r6(mdd),
+    volatility: r6(Math.sqrt(variance) * Math.sqrt(252)),
+    benchmark: { symbol: benchSpec.symbol, name: benchSpec.name, twr: last.benchmark_index === null ? null : r6(last.benchmark_index - 1) },
     series,
     dividends_by_month: [...dividends.entries()].sort().map(([month, amount]) => ({ month, amount: r2(amount) })),
     realized_by_year: [...realized.entries()].sort((a, b) => a[0] - b[0]).map(([year, amount]) => ({ year, amount: r2(amount) })),

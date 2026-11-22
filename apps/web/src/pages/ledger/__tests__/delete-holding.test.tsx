@@ -100,13 +100,13 @@ async function recordsOf(accountId: string, symbol: string) {
 }
 
 describe("入口", { timeout: 20_000 }, () => {
-  it("持倉的「⋯」：最後一項是「刪除這檔」，上面一條格線和加碼、減少持股、全部賣出隔開", async () => {
+  it("持倉的「⋯」：最後一項是「刪除這檔」，上面一條格線和買進、賣出、全部賣出隔開", async () => {
     mount()
     renderApp()
     const table = await holdingsTable()
     await user().click(within(table).getByRole("button", { name: "台積電的動作" }))
     const menu = await screen.findByRole("menu", {}, T)
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["加碼", "減少持股", "全部賣出", "刪除這檔"])
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["買進", "賣出", "全部賣出", "刪除這檔"])
     const separator = within(menu).getByRole("separator")
     const last = within(menu).getByRole("menuitem", { name: "刪除這檔" })
     expect(separator.compareDocumentPosition(last) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -125,8 +125,8 @@ describe("入口", { timeout: 20_000 }, () => {
     await within(phone).findByRole("list", { name: "台積電的每一筆買賣" }, T)
     const action = within(phone).getByRole("button", { name: "刪除這檔" })
     expect(action).toHaveClass("text-ink-2")
-    // 在「再加一筆買進」「減少持股」後面
-    const add = within(phone).getByRole("button", { name: "再加一筆買進" })
+    // 在「買進」「賣出」後面
+    const add = within(phone).getByRole("button", { name: "買進" })
     expect(add.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await user().click(action)
     const dialog = await screen.findByRole("alertdialog", {}, T)

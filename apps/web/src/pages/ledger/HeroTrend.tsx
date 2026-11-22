@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch"
 import { useLedgerClose } from "@/hooks/use-close"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { compositionAxis, dividendsByDay, estimatedRuns, fromZero, inSpans, profitBands, snapDividends, spanIndexes, totalPreFlow } from "@/lib/asset-composition"
-import { direction, formatDateShort, formatMoney, toneClass } from "@/lib/format"
+import { formatDateShort, formatMoney } from "@/lib/format"
 import {
   compactTicks,
   dateAxis,
@@ -67,11 +67,12 @@ import { useTrendRange } from "./use-trend-range"
  *     本金線超出圖的部分切掉、塗色畫到圖的邊緣（`compositionAxis`）。本金線在圖外：縱軸那一欄靠那一邊多一個記號——
  *     鉛筆灰的箭頭（本金線的顏色，朝圖外）＋本金的約略金額（「↓ 288萬」，和刻度同一種寫法），不寫句子（2026-11-21 評論）。
  *     下方的記號在圖的下緣下面（縱軸那一欄的這個位置是空的）；上方的記號在最上面，碰到的刻度字不寫（格線照畫）。不為了從 0 開始而從 0 開始。
- *   - 圖例兼金額（「— 本金 NT$…」「■ 目前價差 +NT$…」「❙ 股利」「— 總資產」；「全部」寫「價差」）：沒有滑過時是最後一天，
- *     滑過時是那一天；每一項的寬度撐到這段期間最寬的金額（滑過時不左右跳）。讀數第一行是日期與總資產，第二行是報酬。
+ *   - 圖例（「— 本金 NT$…」「■ 目前價差」「❙ 股利」「— 總資產」；「全部」寫「價差」）：本金的金額沒有滑過時是最後一天，
+ *     滑過時是那一天；寬度撐到這段期間最寬的金額（滑過時不左右跳）。價差只有名字、不寫金額（2026-11-22 評論：上面已經有
+ *     「總損益（含股利）」，主數字附近只留一個「賺了多少」；價差就是塗色的那一塊）。讀數第一行是日期與總資產，第二行是報酬。
  *     **價差**＝總資產－本金＝未實現＋已實現損益，不含股利（2026-11-21 評論：原本寫「賺的」，和上面的「總損益（含股利）」
  *     兩個都讀成「賺多少」、差的就是股利；改用台股的說法「價差」，和旁邊的「股利」一起就是總損益）。
- *   - 本金 ≤ 0（賣股票收到的錢已經和買股票花的一樣多或更多）：圖例、讀數、圖的說明寫「本金已收回」，不寫金額；價差照實寫（總資產－本金）。
+ *   - 本金 ≤ 0（賣股票收到的錢已經和買股票花的一樣多或更多）：圖例、讀數、圖的說明寫「本金已收回」，不寫金額；價差照實念在圖的說明裡（總資產－本金）。
  *     本金線畫在 0、塗色從 0 塗到總資產（`profitBands` 的 `floor`）；那幾天塗的高度比價差少（提案附錄 A）。0 在圖外時縱軸的記號寫「0」。
  *   - 領到股利的日子在橫軸上一個短直線（不疊進圖裡）；滑過那一天時讀數寫「領股利 NT$3,200」。
  *   - 照估計的買入日畫的那一段：線改成細線，上面一條標「估計」的括線，區間按鈕下面一行「… 用估計的買入日計算」；塗色照常。
@@ -373,13 +374,13 @@ function TrendBand({
   const activeRet = active !== null ? rangeReturn(win, active) : null
   // 資產組成：滑過那一天的股利（日期已對到收盤日；從基準收盤起算的區間不含基準收盤那天）
   const activeDividend = a ? (divs.get(a.t) ?? 0) : 0
-  // 圖例的金額：沒有滑過時是區間的最後一天，滑過時是那一天。價差＝總資產－本金（未實現＋已實現，不含股利）
+  // 圖例的本金：沒有滑過時是區間的最後一天，滑過時是那一天。價差＝總資產－本金（未實現＋已實現，不含股利）
   const shownAt = model.vp[active ?? n - 1]!
   const shownGain = shownAt.v - shownAt.p
   // 本金已收回（≤ 0）：不寫金額，寫「本金已收回」（滑過時看那一天）
   const shownRecovered = isRecovered(shownAt.p)
-  // 沒有滑過、而且不是「全部」：圖例的價差是到最後一天累積的，不是這段期間的——寫「目前價差」（滑過時讀數有日期，不用）
-  const gainLabel = `${!a && !whole ? "目前" : ""}${GAIN_LABEL}`
+  // 價差只有名字（2026-11-22）。不是「全部」時塗色是到最後一天累積的，不是這段期間的——寫「目前價差」
+  const gainLabel = `${whole ? "" : "目前"}${GAIN_LABEL}`
   // 有賺有虧：看收盤（有一天總資產在本金上面、有一天在下面），不看塗了哪幾種顏色
   const mixed = model.vp.some((q) => q.v > q.p) && model.vp.some((q) => q.v < q.p)
   const money = (v: number) => (privacy ? "已隱藏" : formatMoney(v))
@@ -436,20 +437,12 @@ function TrendBand({
       {shownRecovered ? INVESTED_RECOVERED : <>本金 {privacy ? <Masked /> : <span className="text-ink">{formatMoney(shownAt.p)}</span>}</>}
     </span>
   )
-  // 價差的名字不分賺虧：正負號說方向。隱私模式只遮金額、留著正負號（以前的「賺的／虧的」在隱私模式也看得出方向）
-  const gainTone = toneClass(direction(shownGain))
+  // 價差：色塊＋名字，不寫金額（2026-11-22 評論：主數字已經有「總損益（含股利）」，不再放第二個「賺了多少」）。
+  // 色塊是那一天賺或虧的顏色；金額在圖的說明（報讀器）裡
   const legendGain = inv && (
     <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap" data-legend="gain">
       <span aria-hidden className={cn("inline-block size-2.5 shrink-0", shownGain >= 0 ? "bg-rise-tint" : "bg-fall-tint")} />
-      {gainLabel}{" "}
-      {privacy ? (
-        <span className="inline-flex items-baseline">
-          <span className={cn("font-medium", gainTone)}>{shownGain < 0 ? "−" : "+"}</span>
-          <Masked />
-        </span>
-      ) : (
-        <span className={cn("font-medium", gainTone)}>{formatMoney(shownGain, { signed: true })}</span>
-      )}
+      {gainLabel}
     </span>
   )
   const legendDividend = hasDividends && (
@@ -465,31 +458,21 @@ function TrendBand({
       總資產
     </span>
   )
-  // 本金、價差那兩項撐到這段期間最寬的金額（看不到、不佔高度）：滑過時金額的位數變了，後面的圖例不會左右跳。
-  // 本金已收回的日子寫「本金已收回」（不寫金額）：有這種日子時也撐一個
+  // 本金那一項撐到這段期間最寬的金額（看不到、不佔高度）：滑過時金額的位數變了，後面的圖例不會左右跳。
+  // 本金已收回的日子寫「本金已收回」（不寫金額）：有這種日子時也撐一個。價差只有名字，不用撐
   const widest = useMemo(
     () => ({
       invested: widestOf(model.vp.filter((q) => !isRecovered(q.p)).map((q) => formatMoney(q.p))),
       recovered: model.vp.some((q) => isRecovered(q.p)),
-      gain: widestOf(model.vp.map((q) => formatMoney(q.v - q.p, { signed: true }))),
     }),
     [model.vp],
   )
-  const sizer = (label: string, amount: string, signed = false) => (
+  const sizer = (label: string, amount: string) => (
     <span aria-hidden className="invisible inline-flex h-0 items-baseline gap-1.5 overflow-hidden whitespace-nowrap" data-legend-sizer>
       <span className="inline-block w-3.5 shrink-0" />
-      {label}{" "}
-      {privacy ? (
-        <span className="inline-flex items-baseline">
-          {signed && <span className="font-medium">+</span>}
-          <Masked />
-        </span>
-      ) : (
-        <span className="font-medium">{amount}</span>
-      )}
+      {label} {privacy ? <Masked /> : <span className="font-medium">{amount}</span>}
     </span>
   )
-  const gainSizer = sizer(`${whole ? "" : "目前"}${GAIN_LABEL}`, widest.gain, true)
   const investedSizers = (
     <>
       {widest.invested && sizer("本金", widest.invested)}
@@ -502,10 +485,11 @@ function TrendBand({
     </>
   )
   // 「本金」開關：只有資產組成、看自己的資產時才有（`comp` 已經擋過）。和個股走勢圖的「重要時刻」同一種：字在前、小號開關在後，
-  // 沒有外框、沒有圖示。觸控時按得到的範圍至少 44px 高（開關元件自己的 ::after）
+  // 沒有外框、沒有圖示。觸控時字和開關整個 44px 高（2026-11-22 評論：小號開關的 ::after 只有 40px、字只有 20px）：
+  // 標籤本身撐到 44px，上下多出來的部分疊在讀數與圖例上（那裡沒有可以按的東西），看得到的大小與位置不變
   const investedSwitch = comp && (
     <span className="inline-flex shrink-0" data-invested-switch>
-      <label htmlFor={switchId} className="inline-flex cursor-pointer items-center gap-2 text-sm leading-5 text-ink-2 select-none">
+      <label htmlFor={switchId} className="inline-flex cursor-pointer items-center gap-2 text-sm leading-5 text-ink-2 select-none pointer-coarse:min-h-11">
         本金
         <Switch id={switchId} size="sm" checked={investedOn} onCheckedChange={setInvestedOn} aria-describedby={`${switchId}-desc`} />
       </label>
@@ -532,7 +516,6 @@ function TrendBand({
           {legendInvested}
           {legendGain}
           {investedSizers}
-          {gainSizer}
         </div>
         <div className="flex flex-col">
           {legendDividend}
@@ -549,10 +532,7 @@ function TrendBand({
             {legendInvested}
             {investedSizers}
           </span>
-          <span className="inline-flex flex-col">
-            {legendGain}
-            {gainSizer}
-          </span>
+          {legendGain}
         </>
       )}
       {legendDividend}

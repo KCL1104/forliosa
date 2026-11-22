@@ -120,7 +120,7 @@ export function benchmarkGap(m: Pick<PerformanceMonth, "twr" | "benchmark_twr">)
   return { word: gap >= 0 ? "多" : "少", points: Math.abs(gap).toFixed(2) }
 }
 
-/** 「今年贏過」或「7/1 以來贏過」：比較的期間從今年第一週開始才說「今年」 */
+/** 基金排名的期間（「贏過的台股基金（今年）」「（7/1 以來）」）：比較的期間從今年第一週開始才說「今年」 */
 export function fundRankPeriod(start: string, today: string): string {
   const sameYear = start.slice(0, 4) === today.slice(0, 4)
   if (sameYear && start.slice(5, 7) === "01" && Number(start.slice(8, 10)) <= 7) return "今年"

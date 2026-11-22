@@ -280,8 +280,8 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
               aria-checked={kind === k}
               disabled={isIntraday && k === "candle"}
               onClick={() => setKind(k)}
-              // 觸控：軌道裡的按鈕 40px 高，可按範圍用 ::before 上下各多 2px（蓋到軌道的內距），合計 44px；一個字的「線」至少 44px 寬
-              className="sel-chip relative h-7 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:min-w-11 pointer-coarse:px-3.5 pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-0.5 pointer-coarse:before:content-['']"
+              // 觸控：按鈕本身 44×44（和下面的區間按鈕同一種：軌道跟著高 4px；2026-11-22 評論：原本 40px 高、靠 ::before 補）
+              className="sel-chip h-7 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3.5"
             >
               {k === "line" ? "線" : "K 線"}
             </button>
@@ -406,8 +406,8 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
       {!desktop && toolbar}
       <DataNotes
         // 美股的收盤和台股一樣沒有還原配息；但區間裡有股票分割時，後端把分割前的價格換算過、notes 會寫哪一天怎麼拆，
-        // 所以美股不說「未還原」，只說配息沒有還原
-        notes={!empty && !loading ? [...(!isIntraday ? [...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])] : []), inst.market === "US" ? "價格為收盤價，配息沒有還原。" : "價格為未還原收盤價。"] : []}
+        // 所以美股不說「未還原」，只說配息沒有還原。標籤，不寫句子（2026-11-22 評論）
+        notes={!empty && !loading ? [...(!isIntraday ? [...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])] : []), inst.market === "US" ? "收盤價・配息未還原" : "未還原收盤價"] : []}
         className="mt-1"
       />
     </Tray>

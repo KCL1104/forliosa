@@ -7,8 +7,8 @@ import type { Holding } from "@/api/types"
 import { useUi } from "@/app/ui-store"
 import { FieldError, FormField as Row } from "@/components/form-field"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useIsDesktop } from "@/hooks/use-media-query"
@@ -19,20 +19,20 @@ import { usePrefs } from "@/stores/prefs"
 import { AccountSelect, StampLine } from "./TradeForm"
 
 /**
- * 減少持股（產品負責人 2026-11-14：只需要記買進，賣出不用特別去記帳）。
- * 賣了之後在那一檔按「減少持股」或「全部賣出」：只填股數。日期是今天、價格用最新的收盤價（美股的日期是那個收盤的紐約交易日；
+ * 賣出（產品負責人 2026-11-14：只需要記買進，賣出不用特別去記帳；2026-11-22 以前叫「減少持股」）。
+ * 賣了之後在那一檔按「賣出」或「全部賣出」：只填股數。日期是今天、價格用最新的收盤價（美股的日期是那個收盤的紐約交易日；
  * 這個帳戶這一檔有更晚的交易時改記今天，見 `closeSellDate`），
  * 不自動算手續費與稅（2026-11-14）——記成一筆賣出，所以已實現損益和績效照常算得出來。
  * 要指定日期或成交價，按「改日期或價格」到完整表單。
  */
-const TITLE = "減少持股"
-const DESCRIPTION = "填賣出的股數。價格用最新的收盤價；日期是今天，美股是那個收盤的交易日。"
+const TITLE = "賣出"
 
 export function ReduceHost() {
   const { open, symbol, all } = useUi((s) => s.reduce)
   const close = useUi((s) => s.closeReduce)
   const isDesktop = useIsDesktop()
-  // 「全部賣出」是最不可逆的一個：標題直接說（2026-11-14 第六次評分）
+  // 「全部賣出」是最不可逆的一個：標題直接說（2026-11-14 第六次評分）。
+  // 沒有對話框的說明：原本只給報讀器的那一句和表單裡「用 11/12 的收盤價 … 記成賣出。」重複，台股也念到美股（2026-11-22 評論）
   const title = all ? "全部賣出" : TITLE
   const body = open && symbol ? <ReduceForm key={`${symbol}:${all ? "all" : "some"}`} symbol={symbol} all={!!all} onDone={close} /> : null
   if (isDesktop) {
@@ -41,7 +41,6 @@ export function ReduceHost() {
         <DialogContent className="gap-0 p-0 sm:max-w-[440px]">
           <DialogHeader className="px-6 pt-5 pb-4">
             <DialogTitle>{title}</DialogTitle>
-            <DialogDescription className="sr-only">{DESCRIPTION}</DialogDescription>
           </DialogHeader>
           {body}
         </DialogContent>
@@ -53,7 +52,6 @@ export function ReduceHost() {
       <DrawerContent className="data-[vaul-drawer-direction=bottom]:max-h-[92dvh]">
         <DrawerHeader className="pb-2">
           <DrawerTitle>{title}</DrawerTitle>
-          <DrawerDescription className="sr-only">{DESCRIPTION}</DrawerDescription>
         </DrawerHeader>
         <div className="overflow-y-auto overscroll-contain">{body}</div>
       </DrawerContent>

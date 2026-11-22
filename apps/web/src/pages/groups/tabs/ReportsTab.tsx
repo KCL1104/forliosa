@@ -1,7 +1,5 @@
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { appToday } from "@/api"
-import { kaiSize } from "@/ai/kai-size"
-import { KaiText } from "@/ai/kai-text"
 import { useMarketReportStatus } from "@/api/queries"
 import { useDailyReports } from "@/api/sharing-queries"
 import type { DailyReport, Group, ReportSummary } from "@/api/types"
@@ -101,9 +99,10 @@ function DailyList({ items, boosted, query }: { items: DailyReport[]; boosted: b
 }
 
 /**
- * 一則日報（照 2026-11-16 備忘錄的範例）：日期 → AI 寫的 2–4 句（黑體墨色 `.ai-voice`；少於 2 人分享報酬、還在寫、
- * 有人收回時沒有，後端的 `notes` 說為什麼）→ 數字：今日報酬與兩個對照｜共同持股與那天的漲跌、那天的買賣（不寫是誰）、
+ * 一則日報（照 2026-11-16 備忘錄的範例）：日期 → 數字：今日報酬與兩個對照｜共同持股與那天的漲跌、那天的買賣（不寫是誰）、
  * 站內的連結（只有最新一則：個股頁的「為什麼漲跌」與市場頁的收盤重點都是最新一天的）→ 免責。
+ * AI 寫的 2–4 句（`summary`）頁面不放（2026-11-22 評論：頁面只放標籤和數字，那一段把下面的表格再說一次）；
+ * 後端照樣寫、推播照樣帶（盤前推播的「昨日你的群組」）。後端 `notes` 裡說 AI 摘要為什麼沒有的那幾句也不放。
  * 數字由伺服器依目前的成員與分享設定過濾，前端照樣畫，不自己推算。
  */
 export function DailyArticle({ r, latest, premarket = null }: { r: DailyReport; latest: boolean; premarket?: ReportSummary | null }) {
@@ -129,12 +128,7 @@ export function DailyArticle({ r, latest, premarket = null }: { r: DailyReport; 
           </InternalLink>
         )}
       </header>
-      {r.summary && (
-        <p className={cn("ai-voice max-w-prose", kaiSize.page)}>
-          <KaiText text={r.summary} />
-        </p>
-      )}
-      <DataNotes notes={r.notes} />
+      <DataNotes notes={r.notes.filter((n) => !isSummaryNote(n))} />
       <div className="grid gap-x-10 gap-y-6 md:grid-cols-2">
         {(f.returns.length > 0 || f.benchmarks.length > 0) && (
           <div>
@@ -206,15 +200,18 @@ export function DailyArticle({ r, latest, premarket = null }: { r: DailyReport; 
           )}
         </div>
       </div>
-      {/* AI 寫了段落才是 `ai` 那一句（後端的字）；沒有段落時只有伺服器算的數字：全站那一句 */}
-      {r.summary ? <Disclaimer kind="ai" text={r.disclaimer} /> : <Disclaimer kind="short" />}
+      {/* 頁面上只有伺服器算的數字（AI 的段落不放）：全站那一句 */}
+      <Disclaimer kind="short" />
     </article>
   )
 }
 
+/** 後端說 AI 摘要為什麼沒有（還在寫、收回、分享的人太少、沒寫成）的那幾句：頁面不放段落，這幾句也不放 */
+const isSummaryNote = (n: string) => n.includes("摘要")
+
 /**
- * 一天的漲跌：一位小數，和 AI 段落、推播一樣（備忘錄的格式）；不到 0.05% 算持平（後端 `DAILY_FLAT`），
- * 寫 0.0%、不畫箭頭，表格和段落說的「幾個持平」才對得起來。算不出來是「—」（不說原因）。
+ * 一天的漲跌：一位小數，和推播（含 AI 段落）一樣（備忘錄的格式）；不到 0.05% 算持平（後端 `DAILY_FLAT`），
+ * 寫 0.0%、不畫箭頭，表格和推播的段落說的「幾個持平」才對得起來。算不出來是「—」（不說原因）。
  */
 const DAILY_FLAT = 0.0005
 function DayPct({ value }: { value: number | null }) {

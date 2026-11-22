@@ -347,7 +347,8 @@ const avgCostText = (h: Holding) => `${h.market === "US" ? "US$" : ""}${formatPr
 const NAME_CELL = "h-[60px] py-1.5 pr-3 text-left font-normal"
 
 /**
- * 這一檔的動作：加碼、減少持股、全部賣出（賣出不用開表單：只填股數，用最新的收盤價記）；一條格線隔開，最後是「刪除這檔」
+ * 這一檔的動作：買進、賣出、全部賣出（一個動作一個動詞，2026-11-22 起不寫「加碼」「減少持股」；賣出不用開表單：
+ * 只填股數，用最新的收盤價記）；一條格線隔開，最後是「刪除這檔」
  * （產品負責人 2026-11-17：記錯、匯入錯的整檔刪掉，不記成賣出；確認框見 `DeleteHoldingDialog`）。刪除不用紅色（紅色是「漲」），
  * 和群組成員的「移出群組」同一個寫法：放在最後、上面一條格線。
  */
@@ -369,8 +370,8 @@ function RowMenu({ h }: { h: Holding }) {
         <EllipsisIcon aria-hidden className="size-5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
-        <DropdownMenuItem onClick={() => openTradeForm({ symbol: h.code })}>加碼</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => reduce(h.symbol)}>減少持股</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => openTradeForm({ symbol: h.code })}>買進</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => reduce(h.symbol)}>賣出</DropdownMenuItem>
         <DropdownMenuItem onClick={() => reduce(h.symbol, true)}>全部賣出</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => openDelete(h.symbol)}>刪除這檔</DropdownMenuItem>
