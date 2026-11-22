@@ -30,13 +30,15 @@ describe("mock：讀庫存", () => {
     // 台積電：已在帳本、股數一樣均價不同
     expect(by("台積電").include).toBe(false)
     expect(by("台積電").in_ledger).toMatchObject({ quantity: 1500, currency: "TWD" })
-    expect(by("台積電").flags.find((f) => f.code === "in_ledger")!.message).toMatch(/^帳本裡已經有 1,500 股，均價 [\d.]+。$/)
+    expect(by("台積電").flags.find((f) => f.code === "in_ledger")!.message).toMatch(/^已在帳本 1,500 股・均價 [\d.]+$/)
     // 鴻海：股數和均價都一樣
-    expect(by("鴻海").flags.find((f) => f.code === "in_ledger")!.message).toBe("帳本裡已經有，股數和均價都一樣。")
+    expect(by("鴻海").flags.find((f) => f.code === "in_ledger")!.message).toBe("已在帳本・股數和均價相同")
     // 中華電：只有總成本、1.5 張
     expect(by("中華電")).toMatchObject({ quantity: 1500, price: 120, price_basis: "total_cost", total_cost: 180000, include: true })
     // 資產組成原型：均價 120 五年內都沒有經過（最低 130.5），沒辦法估買入日——多一句原因（照樣勾著）
     expect(by("中華電").flags.map((f) => f.code)).toEqual(["not_whole_lots", "no_crossing"])
+    // 標籤，不是句子（2026-11-22）
+    expect(by("中華電").flags[0]!.message).toBe("1.5 張＝1,500 股・不是整張")
     expect(by("中華電").estimated_date).toBeNull()
     // 其他列有估計的買入日（從今天往回，股價最近一次經過均價的那一天）
     expect(by("台積電").estimated_date).toBe("2023-05-08")
@@ -45,7 +47,7 @@ describe("mock：讀庫存", () => {
     expect(by("富邦金").flags.map((f) => f.code)).toEqual(["margin"])
     // 找不到、融券：不勾
     expect(by("台光電")).toMatchObject({ symbol: null, include: false })
-    expect(by("台光電").flags[0]).toEqual({ code: "unknown_symbol", message: "找不到「台光電」。", severity: "error" })
+    expect(by("台光電").flags[0]).toEqual({ code: "unknown_symbol", message: "找不到「台光電」", severity: "error" })
     expect(by("長榮").flags.map((f) => f.code)).toEqual(["short_sale"])
     expect(by("長榮").include).toBe(false)
   })
@@ -57,11 +59,11 @@ describe("mock：讀庫存", () => {
     const aapl = doc.rows[1]!
     expect(aapl.currency).toBe("USD")
     expect(aapl.flags.map((f) => f.code)).toEqual(["currency_guess", "in_other_account"])
-    expect(aapl.flags[1]!.message).toMatch(/^「國泰・複委託」帳戶也有 [\d,.]+ 股。$/)
+    expect(aapl.flags[1]!.message).toMatch(/^「國泰・複委託」帳戶也有 [\d,.]+ 股$/)
     const trades = await api.parsePositions({ kind: "text", text: "2026/10/13 買進 2330 台積電 1,000 股 1,030" })
-    expect(trades).toMatchObject({ document_kind: "trade_records", rows: [], notice: "這是交易明細，不是庫存。請改用「匯入對帳單」。" })
+    expect(trades).toMatchObject({ document_kind: "trade_records", rows: [], notice: "這是交易明細・改用匯入對帳單" })
     const nothing = await api.parsePositions({ kind: "text", text: "你好" })
-    expect(nothing.notice).toBe("這裡面沒有看到庫存。")
+    expect(nothing.notice).toBe("沒有讀到庫存")
   })
 
   it("沒有截圖或文字、混在一起、文字裡還有身分證字號：拒絕", async () => {
@@ -122,7 +124,7 @@ describe("mock：寫入庫存", () => {
     const err = await api.commitPositions({ account_id: TW, rows }).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(ApiError)
     expect((err as ApiError).code).toBe("batch_rejected")
-    expect((err as ApiError).extra.rows).toEqual([{ index: 0, code: "in_ledger", message: "帳本裡已經有 1,500 股。勾「以券商為準」才會換掉，不然這一列不要匯入。" }])
+    expect((err as ApiError).extra.rows).toEqual([{ index: 0, code: "in_ledger", message: "已在帳本 1,500 股・選換成券商才匯入" }])
     expect((await txnsOf(api, TW)).length).toBe(before)
     const check = await api.checkPositions({ account_id: TW, rows: [{ ...rows[0]!, replace: true }, rows[1]!] })
     expect(check.ok).toBe(true)

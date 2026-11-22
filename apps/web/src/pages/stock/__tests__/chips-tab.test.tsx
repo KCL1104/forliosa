@@ -16,7 +16,7 @@ afterEach(() => {
 })
 
 describe("籌碼分頁：上市股票的外資持股比", () => {
-  it("掉出最新的前 20 名名單：標題旁不顯示以前在榜的持股比，內文說明不在名單上", async () => {
+  it("掉出最新的前 20 名名單：標題旁不顯示以前在榜的持股比，空狀態寫不在前 20 名", async () => {
     const tsmc = await api.getInstrument("2330.TW")
     const real = await api.getChips("2330.TW", "3M")
     // 舊版後端的回應：區間內曾在榜（11/10），最新名單沒有
@@ -24,7 +24,8 @@ describe("籌碼分頁：上市股票的外資持股比", () => {
     withQueries(<ChipsTab inst={tsmc} />)
     const section = await screen.findByRole("region", { name: "外資持股比" }, { timeout: 3000 })
     expect(section.textContent).not.toContain("72.1")
-    expect(within(section).getByText(/不在名單上/)).toBeInTheDocument()
+    expect(within(section).getByText("不在外資持股前 20 名")).toBeInTheDocument()
+    expect(section.textContent).toContain("證交所只公布前 20 名")
   })
   it("名列前 20 名：標題旁是名次；三大法人的空狀態仍說明原因", async () => {
     const ase = await api.getInstrument("3711.TW")
@@ -41,7 +42,7 @@ describe("籌碼分頁：上市股票的外資持股比", () => {
     withQueries(<ChipsTab inst={tsmc} />)
     const inst = await screen.findByRole("region", { name: "三大法人買賣超" }, { timeout: 3000 })
     expect(inst.textContent).toContain("上市股票沒有逐檔三大法人資料")
-    expect(inst.textContent).toContain("外資持股只公布前 20 名。")
+    expect(inst.textContent).toContain("外資持股只公布前 20 名")
     expect(document.body.textContent).not.toContain("OpenAPI")
   })
 })

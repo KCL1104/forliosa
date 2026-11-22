@@ -66,6 +66,13 @@ export function beforeShareChangeMessage(p: PickFrom): string {
   return `${y}/${m}/${d} ${reason}，買進日期不能早於這一天`
 }
 
+/** 匯入庫存那一列的 `before_share_change` 標籤（和後端 `before_change_label` 一樣，2026-11-22） */
+export function beforeShareChangeLabel(p: PickFrom): string {
+  const [y, m, d] = p.date.split("-").map(Number)
+  const reason = p.reason === "split" ? "股票分割" : p.reason === "reduction" ? "減資" : "配股"
+  return `${y}/${m}/${d} ${reason}・買入日不能更早`
+}
+
 /**
  * 使用者自己記的股利代表哪些除息日：每筆紀錄（日期 d）代表 `e ≤ d ≤ e + 120 天` 中最近的除息日 e；
  * 有每股金額時優先挑每股金額相同的（季配息的四月入帳與七月入帳才不會混在一起）。

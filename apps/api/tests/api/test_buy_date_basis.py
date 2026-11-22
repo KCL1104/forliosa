@@ -213,8 +213,7 @@ def test_reading_holdings_estimates_each_buy_date(client, arch, fake):
     assert estimate_buy_date(traded, cost_old, today) == SPLIT_0050
     assert rows[1]["estimated_date"] is None
     assert next(f["message"] for f in rows[1]["flags"] if f["code"] == "no_crossing") == (
-        f"2025/6/18 以後的股價都沒有經過均價 {cost_old.normalize():,f}，沒辦法估買入日（那天股票分割，"
-        "之前的股價和現在的均價比不起來）。")
+        f"2025/6/18 股票分割以後沒有經過均價 {cost_old.normalize():,f}・估不到買入日")
     # a cost after the split: found on the prices as traded
     want = estimate_buy_date([c for c in traded if c.t >= SPLIT_0050], cost_new, today)
     assert want is not None and rows[2]["estimated_date"] == want.isoformat()
@@ -222,10 +221,10 @@ def test_reading_holdings_estimates_each_buy_date(client, arch, fake):
     assert rows[3]["estimated_date"] is None and rows[3]["include"] is True
     flag = next(f for f in rows[3]["flags"] if f["code"] == "no_crossing")
     assert flag == {"code": "no_crossing", "severity": "warning",
-                    "message": "五年內的股價都沒有經過均價 1，沒辦法估買入日。"}
+                    "message": "五年內沒有經過均價 1・估不到買入日"}
     us = next(f for f in rows[4]["flags"] if f["code"] == "no_crossing")
     assert rows[4]["estimated_date"] is None
-    assert us["message"] == "美股的股價只有 2024/7/1 以後的，都沒有經過均價 US$0.5，沒辦法估買入日。"
+    assert us["message"] == "2024/7/1 以後沒有經過均價 US$0.5・估不到買入日"
     assert "estimated_date" not in rows[5] and "estimated_date" not in rows[6]  # short sale, unknown stock
     assert all(f["code"] != "no_crossing" for row in rows[5:] for f in row["flags"])
 
@@ -239,7 +238,7 @@ def test_with_the_backfill_off_the_sentence_says_where_the_prices_begin(client, 
     first = arch.archive_start
     assert row["estimated_date"] is None
     assert next(f["message"] for f in row["flags"] if f["code"] == "no_crossing") == (
-        f"{first.year}/{first.month}/{first.day} 以後的股價都沒有經過均價 1，沒辦法估買入日。")
+        f"{first.year}/{first.month}/{first.day} 以後沒有經過均價 1・估不到買入日")
 
 
 def _commit(client, acc, rows, **body):
@@ -386,8 +385,8 @@ def test_an_imported_buy_before_a_stock_dividend_is_refused_not_booked_twice(cli
     dry = _commit(client, acc, [row], dry_run=True)
     assert dry.status_code == 200 and dry.json()["ok"] is False
     codes = {f["code"]: f["message"] for f in dry.json()["rows"][0]["flags"]}
-    assert codes["before_share_change"] == f"{_ymd(ex)} 配股，買進日期不能早於這一天。"
-    assert codes["bad_estimated_date"].startswith(f"估計的買入日 {_ymd(early)} 不在估得到的期間（{_ymd(ex)} – ")
+    assert codes["before_share_change"] == f"{_ymd(ex)} 配股・買入日不能更早"
+    assert codes["bad_estimated_date"].startswith(f"估計的買入日 {_ymd(early)}・不在 {_ymd(ex)} – ")
     r = _commit(client, acc, [row])
     assert r.status_code == 422 and r.json()["error"]["code"] == "batch_rejected", r.text
     assert {e["code"] for e in r.json()["error"]["rows"]} == {"before_share_change", "bad_estimated_date"}
@@ -421,8 +420,7 @@ def test_the_estimate_stops_at_a_stock_dividend(client, arch, engine, fake):
     row = read(client, account_id=account(client)["id"]).json()["rows"][0]
     assert row["estimated_date"] is None
     assert next(f["message"] for f in row["flags"] if f["code"] == "no_crossing") == (
-        f"{_ymd(ex)} 以後的股價都沒有經過均價 {cost.normalize():,f}，沒辦法估買入日（那天配股，"
-        "之前的股價和現在的均價比不起來）。")
+        f"{_ymd(ex)} 配股以後沒有經過均價 {cost.normalize():,f}・估不到買入日")
     # the picker gets the same limit
     h = client.get(f"{API}/instruments/6488/history", params={"range": "5Y", "prices": "as_traded"}).json()
     assert h["pick_from"] == {"date": ex.isoformat(), "reason": "stock_dividend"}

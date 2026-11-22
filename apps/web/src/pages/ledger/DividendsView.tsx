@@ -15,7 +15,7 @@ import { formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPerS
 import { codeOf, marketOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
-import { useReadOnly, useWho } from "@/api/view-as"
+import { useReadOnly } from "@/api/view-as"
 import { DateCell } from "@/components/date-cell"
 import { useSymbolNames } from "./use-symbol-names"
 
@@ -28,7 +28,6 @@ export function DividendsView() {
   // 台股股利在除息日自動入帳：只有美股要自己記。沒有美股就不放按鈕（2026-11-14 第七次評分）
   const usHeld = (useHoldings().data ?? []).filter((h) => h.market === "US")
   const readOnly = useReadOnly()
-  const you = useWho("你")
   const summary = useSummary()
   const upcoming = useUpcoming(30)
   const privacy = usePrefs((s) => s.privacyMode)
@@ -98,7 +97,7 @@ export function DividendsView() {
             }}
           />
         ) : soon.length === 0 ? (
-          <EmptyState className="-mt-3 border-t-0" title="接下來沒有事項" description={`${you}的持股接下來 60 天沒有除息，30 天內沒有股利入帳，也沒有定期定額扣款。`} />
+          <EmptyState className="-mt-3 border-t-0" title="接下來沒有事項" description="60 天內沒有除息・30 天內沒有股利入帳・沒有定期定額扣款" />
         ) : (
           <div className="-mt-3">
             <div aria-hidden className="form-head grid h-10 grid-cols-[88px_1fr_auto] items-end gap-3 pb-2 md:grid-cols-[120px_1fr_auto]">
@@ -160,7 +159,7 @@ export function DividendsView() {
           <EmptyState
             className="-mt-3 border-t-0"
             title="還沒有股利紀錄"
-            description={readOnly ? undefined : "台股股利會在除息日自動入帳；美股股利領到時跟 AI 說「AAPL 配息 2.6」就能入帳。"}
+            description={readOnly ? undefined : "台股：除息日自動入帳・美股：跟 AI 說「AAPL 配息 2.6」"}
           />
         ) : (
           // 每一年是一張印好的表：年份與合計 → 表頭（雙線）→ 一列一筆

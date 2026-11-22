@@ -21,7 +21,7 @@ export function ReportCalendar({ calendar }: { calendar: Spec }) {
         <span className="shrink-0 text-sm text-ink-2">資料</span>
       </header>
       {calendar.groups.length === 0 ? (
-        <p className="py-3 text-base text-ink">{calendar.empty_text ?? "這段期間沒有已排定的事件。"}</p>
+        <p className="py-3 text-base text-ink">{calendar.empty_text ?? "沒有已排定的事件"}</p>
       ) : (
         <div className="flex flex-col">
           {calendar.groups.map((g) => (

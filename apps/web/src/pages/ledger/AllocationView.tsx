@@ -530,18 +530,18 @@ function Notes({ alloc, grouping }: { alloc: PortfolioAllocation; grouping: Allo
   const hasEtf = alloc.groups.holding.some((s) => s.is_etf)
   const rate = alloc.groups.currency.some((s) => s.key === "USD") ? alloc.fx.USD : undefined
   const notes: React.ReactNode[] = []
-  if (grouping === "industry" && hasEtf) notes.push("ETF 不算進產業，也不拆成分股。")
+  if (grouping === "industry" && hasEtf) notes.push("ETF 不算產業・不拆成分股")
   if (grouping === "holding" && hasEtf)
     notes.push(
       <>
-        {alloc.concentration.top_industry && <span className="lg:hidden">最大產業不含 ETF。</span>}
-        ETF 算一檔，不拆成分股。
+        {alloc.concentration.top_industry && <span className="lg:hidden">最大產業不含 ETF・</span>}
+        ETF 算一檔・不拆成分股
       </>,
     )
-  if (grouping === "industry" && unclassified) notes.push(`${nameList(unclassified.symbols)}還沒有產業資料，列在「未分類」。`)
-  if (alloc.valued_at_cost.length > 0) notes.push(`${nameList(alloc.valued_at_cost)}還沒有收盤價，先照成本算。`)
+  if (grouping === "industry" && unclassified) notes.push(`${nameList(unclassified.symbols)}沒有產業資料・列在未分類`)
+  if (alloc.valued_at_cost.length > 0) notes.push(`${nameList(alloc.valued_at_cost)}還沒有收盤價・照成本算`)
   const meta: string[] = []
-  if (rate !== undefined) meta.push(`美股依匯率 ${rate.toFixed(2)} 換成新台幣。`)
+  if (rate !== undefined) meta.push(`美元匯率 ${rate.toFixed(2)}`)
   if (!limit && notes.length === 0 && meta.length === 0) return null
   return (
     <div className="mt-3.5 flex flex-col gap-1">
@@ -551,7 +551,7 @@ function Notes({ alloc, grouping }: { alloc: PortfolioAllocation; grouping: Allo
             <span className="absolute inset-y-0 left-0 w-5 bg-ink" />
             <span className="absolute -inset-y-[5px] left-3.5 w-px bg-ink" />
           </span>
-          直線是{who}設定的{limit.kind === "holding" ? "單一個股" : "單一產業"}上限 {limitText(limit.value)}
+          {who}設定的{limit.kind === "holding" ? "單一個股" : "單一產業"}上限 {limitText(limit.value)}
         </p>
       )}
       {notes.map((n, i) => (

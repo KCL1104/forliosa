@@ -24,7 +24,7 @@ export function FinancialsTab({ inst }: { inst: InstrumentDetail }) {
     if (inst.type === "etf") {
       return (
         <NotYet title="ETF 沒有自己的財報">
-          持股與費用率請看發行商公告。
+          持股與費用率見發行商公告
         </NotYet>
       )
     }
@@ -52,7 +52,7 @@ function Revenue({ symbol }: { symbol: string }) {
   if (revenue.isError) return <ErrorState error={revenue.error} onRetry={() => void revenue.refetch()} />
   if (revenue.isLoading) return <Skeleton className="h-80 w-full rounded-sm" />
   const all = revenue.data ?? []
-  if (all.length === 0) return <NotYet title="沒有月營收資料">這檔沒有在公開資訊觀測站公告月營收。</NotYet>
+  if (all.length === 0) return <NotYet title="沒有月營收資料" />
   const rows = all.slice(-24)
   const last = rows.at(-1)!
   const n = streak(all)
@@ -62,7 +62,7 @@ function Revenue({ symbol }: { symbol: string }) {
       <TabLead>
         {n >= 2 ? (
           <>
-            {Number(last.period.slice(5))} 月營收年增 <Fig>{formatPercent(last.yoy_pct, { decimals: 0 })}</Fig>，連續 <Fig>{n}</Fig> 個月成長。
+            {Number(last.period.slice(5))} 月營收年增 <Fig>{formatPercent(last.yoy_pct, { decimals: 0 })}</Fig>・連續 <Fig>{n}</Fig> 個月成長
           </>
         ) : null}
       </TabLead>
@@ -201,8 +201,8 @@ function Statements({ symbol }: { symbol: string }) {
           <TabLead>
             {epsNow !== null && epsPrev !== null && epsPrev > 0 ? (
               <>
-                {f.periods[lastIdx]} EPS <Fig>{formatPerShare(epsNow, usd ? "US" : "TWSE")}</Fig>，{period === "quarterly" ? "比去年同季" : "比前一年"}
-                {epsNow >= epsPrev ? "成長" : "減少"} <Fig>{formatPercent(Math.abs(epsNow / epsPrev - 1), { signed: false, decimals: 0 })}</Fig>。
+                {f.periods[lastIdx]} EPS <Fig>{formatPerShare(epsNow, usd ? "US" : "TWSE")}</Fig>・{period === "quarterly" ? "比去年同季" : "比前一年"}
+                {epsNow >= epsPrev ? "成長" : "減少"} <Fig>{formatPercent(Math.abs(epsNow / epsPrev - 1), { signed: false, decimals: 0 })}</Fig>
               </>
             ) : null}
           </TabLead>
@@ -265,7 +265,7 @@ function EtfHoldings({ inst }: { inst: InstrumentDetail }) {
         {dividends.isLoading ? (
           <Skeleton className="h-40 w-full rounded-sm" />
         ) : rows.length === 0 ? (
-          <p className="text-base text-ink">沒有配息紀錄。</p>
+          <p className="text-base text-ink">沒有配息紀錄</p>
         ) : (
           <ul className="-mt-3">
             {rows.map((d) => (

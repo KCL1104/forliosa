@@ -4769,3 +4769,35 @@ AI 工具給的價格不受影響。CLAUDE.md 的 Yahoo 例外多了一句。
 - **來源**：`yahoo-history` 的標示改成「存檔開始以前的歷史日線（非官方資料）」；`/meta/attributions` 那一筆 `agency`「非官方資料」、
   `dataset`「存檔開始以前的歷史日線」、`license`「非官方資料」，`url`、`license_url` 是 `null`（前端那一列不放連結）。`key` 照舊（內部用）。
 - 管理後台照舊寫 Yahoo Finance（只有站方看得到）；授權風險不變，見 CLAUDE.md。
+
+## 2026-11-22 匯入的提醒是標籤，不是句子（產品負責人照建議）
+
+頁面只放標籤和數字（DESIGN.md〈說明文字怎麼寫〉第一條），確認表每一列下面的提醒也是。**代碼、`severity`、預設勾選都不變**，只有 `message`
+（與一列都沒有時的 `notice`）換成短標籤加數字，用「・」分開、不加句號；前端照原文顯示。上面各節引用的舊句子是當時的寫法。
+
+- **匯入庫存**（`services/positions_import.py`）：`not_whole_lots`「1.5 張＝1,500 股・不是整張」；`unit_fixed`「照金額算是張數・2 張＝2,000 股」／
+  「照金額算是股數・不是張數」；`cost_mismatch`／`value_mismatch`「股數 × 均價和總成本差 299,700・可能是張數（1 張＝1,000 股）」；
+  `unreadable`「沒讀清楚・總成本」；`currency_mismatch`「美股成本是新台幣・改成美元」「台股成本是美元」「成本不是美元」；`currency_guess`
+  「沒寫幣別・當成美元」；`margin`「融資・當成一般持股匯入」；`short_sale`「融券・不匯入」；`in_ledger`「已在帳本 2,000 股・均價 480」
+  （一樣時「已在帳本・股數和均價相同」；送出時沒選換成券商的 error「已在帳本 1,500 股・選換成券商才匯入」）；`in_other_account`
+  「「富邦－複委託」帳戶也有 1,000 股」「另外 2 個帳戶也有」；`same_symbol_twice`「同一檔 2 列・匯入會加在一起」；`notice`「這是交易明細・改用匯入對帳單」
+  「沒有讀到庫存」「沒有讀到持股」。估計的買入日（`services/buy_date.py`）：`no_crossing`「五年內沒有經過均價 120・估不到買入日」
+  （「2024/7/1 以後…」「2025/6/18 股票分割以後…」「沒有股價・估不到買入日」）；列的 `before_share_change`「2025/6/18 股票分割・買入日不能更早」
+  （新的 `before_change_label`；`PATCH /transactions/{id}` 的 422 照舊是 `before_change_message` 的句子）；`bad_estimated_date`
+  「估計的買入日 2025/6/10・不在 2025/6/18 – 2026/11/12」；`before_earlier_records`「這一檔最後一筆紀錄 2025/3/1・買入日要在 2025/3/2 以後」。
+- **匯入對帳單**（`services/imports.py`）：`ambiguous_symbol`「代號 2454 是聯發科・對帳單寫「聯發」」「「國泰」對到好幾檔・選一檔」；`unknown_symbol`
+  「找不到「長榮」」（匯入庫存用同一個函式，寫「畫面寫」）；`unreadable`「沒讀清楚・價格」；`amount_mismatch`「股數 × 價格和成交金額差 900」（張股弄錯時多
+  「・可能是張數（1 張＝1,000 股）」）；`fee_out_of_range`「手續費 5,000・比一般高很多」；美股手續費的 `currency_mismatch`「手續費 150・以美元太高，可能是新台幣」；
+  `side_inconsistent`「買進有交易稅・買賣可能看反了」「應收付的正負和買賣不符・買賣可能看反了」；`tax_out_of_range`「交易稅 100・一般是成交金額的 0.3%（918）」；
+  `price_far_from_close`「那天收盤 1,030・這裡 103」「那天參考收盤 1,030（非官方資料）・這裡 103」；`dividend_auto`「股利・已自動入帳」（美股「股利・不匯入」）；
+  `short_sale`「融券・不匯入」；`day_trade`「當沖・不匯入」；`margin`「融資・當成一般買進匯入」；價格的 `currency_mismatch`「美股價格是新台幣・可能是複委託換算的」
+  「台股價格是美元」；`fractional_tw_qty`「台股股數要是整數」；`not_trading_day`「10/10（六）不是交易日」；`outside_period`「11/3 不在對帳單期間 10/1–10/31」；
+  `notice`「這是庫存畫面・改用匯入庫存」「沒有買賣紀錄」。
+- **整批驗算**（`services/transactions.py` 的 `check_batch`，兩種匯入都用）：`duplicate`「10/5 已記過一樣的」「這次匯入裡同一天有一樣的」；`possible_duplicate`
+  「2025/3/10 已記過同股數的賣出・價格 1,050」；`oversell`「賣出 2,000 股・當時只有 1,000 股」（前端「補一筆買進」照舊從兩個「N 股」讀差幾股）；
+  `ledger_inconsistent`「匯入後帳目對不起來・2025/3/20 賣出台積電 1,000 股，超過當時持有的 900 股」（股利重算時「匯入後股利重算・帳目對不起來・…」）。
+- **照舊是句子的**（錯誤訊息，DESIGN.md〈Copy〉最後一條）：422／429 的整批錯誤（`batch_rejected`「有 1 筆不能匯入，整批都沒有寫入。」、`unreadable_file`、
+  每天的次數、`no_account`）、`validation_error`／`bad_date`（和記一筆同一套驗證）、整批復原的 `ledger_inconsistent`、`PATCH` 的 `before_share_change`。
+- **前端**（同一天）：對帳單合計那一行「合計相符」「比對帳單合計少 NT$12,450・可能漏讀」「比對帳單合計多 NT$900・可能重複讀」；
+  「沒讀清楚・第 2 頁最下面合計列的手續費」；「像指令的文字・沒有照做」。mock（`api/mock/positions.ts`、`api/mock/imports.ts`）同一套標籤。
+- **測試**：`tests/api/test_imports.py`、`test_positions_import.py`、`test_buy_date_basis.py`、`test_transactions_batch.py`、`test_auto_dividends.py` 改成新的標籤。

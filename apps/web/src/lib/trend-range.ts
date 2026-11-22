@@ -171,6 +171,17 @@ export function rangeReturn(win: Pick<TrendWindow<Pick<PerformancePoint, "twr_in
 }
 
 /**
+ * 績效分段「全部帳戶」的「報酬（時間加權）」（2026-11-22）：和首頁走勢讀數的「報酬」同一個來源——同一個「全部」序列
+ * （`all`，`usePerformance("ALL")` 不帶帳戶）、同一個算法（`rangeReturn(trendWindow(…))`），所以兩個數字不會不一樣。
+ * 後端的 `twr` 是全精度算的，走勢是兩個 6 位小數的指數相除，在四捨五入的邊界上會差 0.01%。`resp.range` 是回應自己的區間；
+ * 序列不到 2 點（畫不出走勢）或不是走勢的區間時照後端的。後端的報酬算法不變。
+ */
+export function sharedTwr(resp: { range: string; twr: number | null }, all: readonly Pick<PerformancePoint, "t" | "twr_index">[] | undefined): number | null {
+  if (!all || all.length < 2 || !isTrendRange(resp.range)) return resp.twr
+  return rangeReturn(trendWindow(all, resp.range)) ?? resp.twr
+}
+
+/**
  * 走勢的狀態：少於 2 點不畫（也不放區間按鈕）；2～6 點畫、每一點一個圓點、區間按鈕下面寫績效從哪天開始算；7 點以上照常。
  * 畫得出來（short、full）就放七顆區間按鈕。
  */

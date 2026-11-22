@@ -161,16 +161,16 @@ describe("群組畫面不透露誰沒分享", () => {
     })
     renderInRouter(<RankingTab group={family} />)
     await screen.findByRole("table", { name: "今日排行" }, T)
-    expect(screen.queryByText(/收盤起算：有持股在那之前沒有參考價/)).toBeNull()
+    expect(screen.queryByText(/收盤起算・之前有持股沒有參考價/)).toBeNull()
     await user.click(screen.getByRole("radio", { name: "今年" }))
-    expect(await screen.findByText("你的今年報酬從 6/1 收盤起算：有持股在那之前沒有參考價。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("你的今年報酬從 6/1 收盤起算・之前有持股沒有參考價", undefined, T)).toBeInTheDocument()
     cleanup()
     mine = false
     renderInRouter(<RankingTab group={family} />)
     await screen.findByRole("table", { name: "今日排行" }, T)
     await user.click(screen.getByRole("radio", { name: "今年" }))
     await screen.findByRole("table", { name: "今年排行" }, T)
-    expect(screen.queryByText(/收盤起算：有持股在那之前沒有參考價/)).toBeNull()
+    expect(screen.queryByText(/收盤起算・之前有持股沒有參考價/)).toBeNull()
   })
 
   it("排行下面有當天的表情（和動態、週報同一個元件）；按了以伺服器的計數為準，只有計數", async () => {
@@ -286,7 +286,7 @@ describe("邀請：加入前先選分享", () => {
 
   it("已經是成員：直接連到那個群組（預覽帶 group_id），不是群組清單", async () => {
     renderApp("/invite/family-open")
-    expect(await screen.findByText("你已經是這個群組的成員。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("已是成員", undefined, T)).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "到群組" }).getAttribute("href")).toBe("/groups/grp_family")
     expect((await api.getInvite("family-open")).group_id).toBe("grp_family")
     // 還不是成員的人拿不到群組 id

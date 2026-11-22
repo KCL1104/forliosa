@@ -68,7 +68,7 @@ export function EventsTab({ inst, position, markers }: { inst: InstrumentDetail;
         <Timeline rows={future} today={today} privacy={privacy} who={you} empty={{ title: "沒有已公告的事件" }} future />
       </Section>
       <Section title="過去" titleId="ev-past">
-        <Timeline rows={past} today={today} privacy={privacy} who={you} empty={filter === "mine" ? { title: "還沒有紀錄", reason: `沒有${you}的交易或股利紀錄。` } : { title: "沒有過去的事件" }} />
+        <Timeline rows={past} today={today} privacy={privacy} who={you} empty={filter === "mine" ? { title: `沒有${you}的交易或股利紀錄` } : { title: "沒有過去的事件" }} />
       </Section>
     </div>
   )

@@ -136,10 +136,10 @@ describe("匯入對帳單", () => {
     expect(body.pages).toHaveLength(2)
     expect(JSON.stringify(body)).not.toContain("A123456789")
     // 確認表：整份核對、每一列的問題
-    expect(within(dialog).getByText("比對帳單的合計少 NT$12,450，可能漏讀了。")).toBeInTheDocument()
-    expect(within(dialog).getByText("檔案裡有一段像指令的文字，沒有照做。")).toBeInTheDocument()
-    expect(within(dialog).getByText("找不到「台積」。")).toBeInTheDocument()
-    expect(within(dialog).getByText("賣出 2,000 股，超過當時持有的 1,000 股。")).toBeInTheDocument()
+    expect(within(dialog).getByText("比對帳單合計少 NT$12,450・可能漏讀")).toBeInTheDocument()
+    expect(within(dialog).getByText("像指令的文字・沒有照做")).toBeInTheDocument()
+    expect(within(dialog).getByText("找不到「台積」")).toBeInTheDocument()
+    expect(within(dialog).getByText("賣出 2,000 股・當時只有 1,000 股")).toBeInTheDocument()
     expect(within(dialog).getByRole("button", { name: "略過 3 筆股利、1 筆融券" })).toBeInTheDocument()
     const count = Number(sign.getAttribute("aria-label")!.match(/\d+/)![0])
     // 取消勾選一列：簽名格的數字跟著變
@@ -186,7 +186,7 @@ describe("匯入對帳單", () => {
         { row_id: "r1", candidate: candidate({}), raw: { name: "APPLE INC", symbol_code: "AAPL", page: 1 }, flags: [], include: true },
         {
           row_id: "r2", candidate: candidate({ symbol: "NVDA", trade_date: "2026-10-03", quantity: 1, price: 180 }), raw: { name: "NVIDIA", symbol_code: "NVDA", page: 1 },
-          flags: [{ code: "not_trading_day", message: "10/3（六）不是交易日。", severity: "warning" }], include: true,
+          flags: [{ code: "not_trading_day", message: "10/3（六）不是交易日", severity: "warning" }], include: true,
         },
       ],
       printed_totals: null, totals_check: null, unreadable: [], embedded_instructions: [], model_used: "claude-haiku-5-5", retried: false,
@@ -201,8 +201,8 @@ describe("匯入對帳單", () => {
     const dup = await within(dialog).findByRole("checkbox", { name: /買進 APPLE INC$/ }, T)
     await waitFor(() => expect(dup).not.toBeChecked(), T)
     expect(check.mock.calls[0]![0].account_id).toBe("acc_01JCATHAYUS")
-    expect(within(dialog).getByText(/已經記過一筆/)).toBeInTheDocument()
-    expect(within(dialog).getByText("10/3（六）不是交易日。")).toBeInTheDocument()
+    expect(within(dialog).getByText(/已記過/)).toBeInTheDocument()
+    expect(within(dialog).getByText("10/3（六）不是交易日")).toBeInTheDocument()
     expect(within(dialog).getByRole("checkbox", { name: /買進 NVIDIA$/ })).toBeChecked()
     expect(within(dialog).getByRole("button", { name: "簽名：匯入 1 筆" })).toBeInTheDocument()
   })
@@ -218,7 +218,7 @@ describe("匯入對帳單", () => {
     await user.upload(fileInput(dialog), pngFile())
     await within(dialog).findByText("1 張", {}, T)
     await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
-    expect(await within(dialog).findByText("這是庫存畫面，沒有買進日期。請改用「匯入庫存」。", {}, T)).toBeInTheDocument()
+    expect(await within(dialog).findByText("這是庫存畫面・改用匯入庫存", {}, T)).toBeInTheDocument()
     await user.click(within(dialog).getByRole("button", { name: "換一個檔案" }))
     expect(await within(dialog).findByRole("button", { name: "選檔案" }, T)).toBeInTheDocument()
     // 再讀一次，這次按「改用匯入庫存」：同一個對話框換成匯入庫存，截圖已經選好

@@ -220,7 +220,7 @@ describe("審查後的修正：績效分段與查看別人的資產", { timeout:
     renderApp("/?view=performance")
     await screen.findByText("最大回撤", {}, T)
     const line = await waitFor(() => document.querySelector<HTMLElement>("[data-metrics-estimate]")!, T)
-    expect(line.textContent).toBe("這些數字含 2025/11/11 – 2025/11/28，那段期間用估計的買入日計算。")
+    expect(line.textContent).toBe("含估計的買入日・2025/11/11 – 2025/11/28")
     expect(line).toHaveClass("text-sm", "text-ink-2")
     const region = await trend()
     expect(within(region).getByText("2025/11/11 – 2025/11/28 用估計的買入日計算")).toBeInTheDocument()
@@ -239,7 +239,7 @@ describe("審查後的修正：績效分段與查看別人的資產", { timeout:
     // 等到回應換成兩段的那一份（第一次畫的可能還是上一份）
     const line = await waitFor(() => {
       const el = document.querySelector<HTMLElement>("[data-metrics-estimate]")
-      expect(el?.textContent).toBe("這些數字含 2025/11/11 – 2025/11/28、2026/9/1 – 2026/11/11，那幾段期間用估計的買入日計算。")
+      expect(el?.textContent).toBe("含估計的買入日・2025/11/11 – 2025/11/28、2026/9/1 – 2026/11/11")
       return el!
     }, T)
     expect(line).toHaveClass("text-sm", "text-ink-2")
@@ -279,14 +279,14 @@ describe("審查後的修正：績效分段與查看別人的資產", { timeout:
     act(() => useLedgerPrefs.setState({ trendRange: "1Y" }))
     renderApp("/?view=performance")
     await screen.findByText("最大回撤", {}, T)
-    expect(screen.queryByText("含估計的買入日，不年化")).toBeNull()
-    expect(screen.getByText("期間太短或現金流不足，無法計算")).toBeInTheDocument()
+    expect(screen.queryByText("含估計的買入日・不年化")).toBeNull()
+    expect(screen.getByText("現金流不足・無法計算")).toBeInTheDocument()
     expect(document.querySelector("[data-metrics-estimate]")).toBeNull()
     // 自己的帳本（同一個回應）：照寫
     cleanup()
     act(() => useViewAs.setState({ target: null }))
     renderApp("/?view=performance")
-    expect(await screen.findByText("含估計的買入日，不年化", {}, T)).toBeInTheDocument()
+    expect(await screen.findByText("含估計的買入日・不年化", {}, T)).toBeInTheDocument()
   })
 
   it("#12 查看別人的資產：持倉展開裡估計的那一筆不標「估計」（同一個元件，換成有估計的交易來測）", async () => {

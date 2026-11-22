@@ -579,7 +579,7 @@ describe("持倉展開每一筆買賣（產品負責人 2026-11-14，參考 Goog
     renderApp("/")
     const list = await expand("NVIDIA")
     expect(within(list).getAllByRole("listitem").length).toBeGreaterThan(0)
-    expect(list.parentElement!.parentElement).toHaveTextContent("配過股或分割過，不列每一筆的漲跌。")
+    expect(list.parentElement!.parentElement).toHaveTextContent("配過股或分割過・不列每筆漲跌")
     expect(list).not.toHaveTextContent("%")
     cleanup()
     act(() => usePrefs.setState({ privacyMode: true }))

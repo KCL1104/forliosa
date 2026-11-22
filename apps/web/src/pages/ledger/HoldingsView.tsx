@@ -103,8 +103,8 @@ function UnpricedNote({ rows }: { rows: Holding[] }) {
   const names = (hs: Holding[]) => inText(hs.map((h) => h.name).join("、"), "start")
   return (
     <>
-      {other.length > 0 && <p className="mt-2.5 text-base text-ink">{names(other)}沒有報價，照成本算。</p>}
-      {us.length > 0 && <p className="mt-2.5 text-base text-ink">{names(us)}還沒有收盤價，先照成本算。</p>}
+      {other.length > 0 && <p className="mt-2.5 text-base text-ink">{names(other)}沒有報價・照成本算</p>}
+      {us.length > 0 && <p className="mt-2.5 text-base text-ink">{names(us)}還沒有收盤價・照成本算</p>}
     </>
   )
 }
@@ -483,7 +483,7 @@ function Cell({ c, h, maxWeight, stackDay = false, stackAvg = false }: { c: Hold
     case "value":
       return (
         <span className="flex flex-col items-end">
-          <span className="leading-tight" title={unpriced ? "沒有報價，照成本算" : undefined}>{money(h.market_value)}</span>
+          <span className="leading-tight" title={unpriced ? "沒有報價・照成本算" : undefined}>{money(h.market_value)}</span>
           <span className="mt-0.5 grid grid-cols-[48px_48px] items-center justify-end text-sm leading-tight text-ink-2">
             <span aria-hidden className="relative block h-[3px] w-12 bg-rule">
               <span className="absolute inset-y-0 left-0 bg-ink" style={{ width: `${(h.weight / maxWeight) * 100}%` }} />

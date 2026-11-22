@@ -84,9 +84,9 @@ PRICE_PLACES = Decimal("0.00000001")  # total ÷ shares, as the database keeps a
 FIELD_LABELS = {"symbol_code": "代號", "name": "名稱", "kind": "種類", "quantity": "股數", "quantity_unit": "單位",
                 "avg_cost": "均價", "total_cost": "總成本", "market_price": "現價", "market_value": "市值",
                 "currency": "幣別", "cost": "成本"}  # cost: neither 均價 nor 總成本
-NOTICE = {"trade_records": "這是交易明細，不是庫存。請改用「匯入對帳單」。",
-          "other": "這裡面沒有看到庫存。",
-          "holdings": "畫面上沒有讀到持股。"}
+NOTICE = {"trade_records": "這是交易明細・改用匯入對帳單",
+          "other": "沒有讀到庫存",
+          "holdings": "沒有讀到持股"}
 
 _flag = stm._flag
 _num = stm._num
@@ -214,10 +214,10 @@ def _check_product(row: _Pos, code: str, what: str, qty: Decimal, unit: Decimal,
         return
     message = f"股數 × {what}差 {_num(abs(gross - printed).quantize(Decimal('0.01')))}"
     if tw and not lots and abs(gross * LOT - printed) <= tol:
-        message += "，股數可能是張數（1 張＝1,000 股）"
+        message += "・可能是張數（1 張＝1,000 股）"
     elif tw and lots and raw_qty is not None and abs(raw_qty * unit - printed) <= tol:
-        message += "，數量可能是股數，不是張數"
-    row.add(_flag(code, message + "。"))
+        message += "・可能是股數，不是張數"
+    row.add(_flag(code, message))
 
 
 def _value_in_twd(info: InstrumentInfo, gross: Decimal, printed: Decimal) -> bool:
@@ -228,13 +228,13 @@ def _value_in_twd(info: InstrumentInfo, gross: Decimal, printed: Decimal) -> boo
 def _currency(row: _Pos, info: InstrumentInfo, printed: str) -> None:
     if info.currency == "USD":
         if printed in ("TWD", "other"):
-            row.add(_flag("currency_mismatch", "美股的成本寫的是新台幣，要改成美元的成本。" if printed == "TWD"
-                          else "這一列的成本不是美元。", "error"))
+            row.add(_flag("currency_mismatch", "美股成本是新台幣・改成美元" if printed == "TWD"
+                          else "成本不是美元", "error"))
         elif printed == "not_shown":
-            row.add(_flag("currency_guess", "畫面上沒寫幣別，當成美元。"))
+            row.add(_flag("currency_guess", "沒寫幣別・當成美元"))
     elif printed in ("USD", "other"):
-        row.add(_flag("currency_mismatch", "台股的成本寫的是美元。" if printed == "USD"
-                      else "這一列的成本不是新台幣。", "error"))
+        row.add(_flag("currency_mismatch", "台股成本是美元" if printed == "USD"
+                      else "成本不是新台幣", "error"))
 
 
 def _books(ctx: _Ctx, row: _Pos, info: InstrumentInfo) -> None:
@@ -243,14 +243,14 @@ def _books(ctx: _Ctx, row: _Pos, info: InstrumentInfo) -> None:
         row.in_ledger = held
         same = (row.quantity == held.quantity and row.price is not None
                 and abs(held.avg_cost - row.price) <= max(Decimal("0.01"), row.price * Decimal("0.0005")))
-        row.add(_flag("in_ledger", "帳本裡已經有，股數和均價都一樣。" if same else
-                      f"帳本裡已經有 {_num(held.quantity)} 股，均價 {_avg_text(held.avg_cost)}。"))
+        row.add(_flag("in_ledger", "已在帳本・股數和均價相同" if same else
+                      f"已在帳本 {_num(held.quantity)} 股・均價 {_avg_text(held.avg_cost)}"))
     others = [(a, h) for (a, s), h in ctx.held.items() if s == info.symbol and a != ctx.account.id]
     if len(others) == 1:
         a, h = others[0]
-        row.add(_flag("in_other_account", f"「{ctx.account_names.get(a, '')}」帳戶也有 {_num(h.quantity)} 股。"))
+        row.add(_flag("in_other_account", f"「{ctx.account_names.get(a, '')}」帳戶也有 {_num(h.quantity)} 股"))
     elif others:
-        row.add(_flag("in_other_account", f"另外 {len(others)} 個帳戶也有這一檔。"))
+        row.add(_flag("in_other_account", f"另外 {len(others)} 個帳戶也有"))
 
 
 def build_row(ctx: _Ctx, x: dict[str, Any], chunk: int) -> _Pos:
@@ -284,10 +284,10 @@ def build_row(ctx: _Ctx, x: dict[str, Any], chunk: int) -> _Pos:
     name = info.name if info is not None else raw["name"] or raw["symbol_code"]
     row = _Pos(raw, info, name, kind, currency, qty, price, basis, total or None, chunk)
     if kind == "short":
-        row.add(_flag("short_sale", "融券的庫存不匯入。"))
+        row.add(_flag("short_sale", "融券・不匯入"))
         return row
     if kind == "margin":
-        row.add(_flag("margin", "融資的庫存，當成一般持股匯入。"))
+        row.add(_flag("margin", "融資・當成一般持股匯入"))
     missing = [f for f, v in (("quantity", qty), ("cost", price)) if not v]
     if not (raw["symbol_code"] or raw["name"]):
         missing.insert(0, "name")
@@ -299,19 +299,19 @@ def build_row(ctx: _Ctx, x: dict[str, Any], chunk: int) -> _Pos:
                and str(x.get(f) or "").strip() not in ("", "not_shown")]
     fields = list(dict.fromkeys([*missing, *unclear]))
     if fields:
-        row.add(_flag("unreadable", f"這一列的{'、'.join(FIELD_LABELS[f] for f in fields)}沒讀清楚。", "error"))
+        row.add(_flag("unreadable", f"沒讀清楚・{'、'.join(FIELD_LABELS[f] for f in fields)}", "error"))
     if raw["symbol_code"] or raw["name"]:
         row.add(symbol_flag)
     if info is None:
         return row
     _currency(row, info, printed)
     if unit_fixed is not None:
-        row.add(_flag("unit_fixed", "照畫面上的金額算，數量是張數（1 張＝1,000 股），已經換成股數。" if unit_fixed
-                      else "照畫面上的金額算，數量是股數，不是張數。"))
+        row.add(_flag("unit_fixed", f"照金額算是張數・{_num(raw_qty)} 張＝{_num(qty or 0)} 股" if unit_fixed
+                      else "照金額算是股數・不是張數"))
     if tw and qty is not None and qty != qty.to_integral_value():
-        row.add(_flag("fractional_tw_qty", "台股的股數要是整數。", "error"))
+        row.add(_flag("fractional_tw_qty", "台股股數要是整數", "error"))
     elif lots and raw_qty is not None and raw_qty != raw_qty.to_integral_value():
-        row.add(_flag("not_whole_lots", f"畫面上是 {_num(raw_qty)} 張，算成 {_num(qty or 0)} 股；不是整張，確認一下。"))
+        row.add(_flag("not_whole_lots", f"{_num(raw_qty)} 張＝{_num(qty or 0)} 股・不是整張"))
     if qty and avg and total:
         _check_product(row, "cost_mismatch", "均價和總成本", qty, avg, total, raw_qty, lots, tw, COST_TOLERANCE)
     if qty and market_price and market_value and not _value_in_twd(info, qty * market_price, market_value):
@@ -364,7 +364,7 @@ def merge_rows(rows: list[_Pos]) -> tuple[list[_Pos], int]:
         if len(same) > 1:
             for r in same:
                 r.add(_flag("same_symbol_twice",
-                            f"這一檔有 {len(same)} 列，都匯入會加在一起（例如整股和零股分開列）。"))
+                            f"同一檔 {len(same)} 列・匯入會加在一起"))
     return out, merged
 
 
@@ -520,15 +520,14 @@ def basis_errors(row: CommitRow, symbol: str, trade_date: date, imported_on: dat
         lo = buy_date.search_floor(symbol, imported_on - timedelta(days=1), change)
         if not lo <= est <= imported_on:
             out.append(_flag(buy_date.BAD_ESTIMATED_DATE,
-                             f"估計的買入日 {buy_date.ymd_text(est)} 不在估得到的期間（{buy_date.ymd_text(lo)} – "
-                             f"{buy_date.ymd_text(imported_on)}）。", "error"))
+                             f"估計的買入日 {buy_date.ymd_text(est)}・不在 {buy_date.ymd_text(lo)} – "
+                             f"{buy_date.ymd_text(imported_on)}", "error"))
     if change is not None and trade_date < change.date:
-        out.append(_flag(buy_date.BEFORE_SHARE_CHANGE, f"{buy_date.before_change_message(change)}。", "error"))
+        out.append(_flag(buy_date.BEFORE_SHARE_CHANGE, buy_date.before_change_label(change), "error"))
     if floor is not None and trade_date < floor and date_basis_of(row, trade_date, imported_on)[0] == "estimated":
         last = buy_date.ymd_text(floor - timedelta(days=1))
         out.append(_flag(buy_date.BEFORE_EARLIER_RECORDS,
-                         f"這個帳戶裡這一檔最後一筆紀錄在 {last}，估計的買入日比它早，那筆賣出會先賣掉這一批。"
-                         f"請改成 {buy_date.ymd_text(floor)} 以後的日期。", "error"))
+                         f"這一檔最後一筆紀錄 {last}・買入日要在 {buy_date.ymd_text(floor)} 以後", "error"))
     return out
 
 
@@ -566,8 +565,7 @@ def commit(db: Session, user: User, account_id: str, rows: Sequence[CommitRow], 
     pre: list[list[dict[str, str]]] = [[] for _ in rows]
     for i, (r, info, h) in enumerate(zip(rows, infos, in_ledger, strict=True)):
         if info is not None and h is not None and info.symbol not in replacing:
-            pre[i].append(_flag("in_ledger", f"帳本裡已經有 {_num(h.quantity)} 股。勾「以券商為準」才會換掉，"
-                                             "不然這一列不要匯入。", "error"))
+            pre[i].append(_flag("in_ledger", f"已在帳本 {_num(h.quantity)} 股・選換成券商才匯入", "error"))
         if info is not None:
             pre[i] += basis_errors(r, info.symbol, r.trade_date or day, imported_on, limits.get(info.symbol),
                                    floors.get(info.symbol))

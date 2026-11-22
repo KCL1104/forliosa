@@ -157,7 +157,7 @@ def test_reads_holdings_and_flags_each_row(client, pool, fake, env, db):
 
     tsmc = by["台積電"]
     assert codes(tsmc) == ["in_ledger"] and tsmc["include"] is False
-    assert message(tsmc, "in_ledger") == "帳本裡已經有 2,000 股，均價 480。"
+    assert message(tsmc, "in_ledger") == "已在帳本 2,000 股・均價 480"
     assert tsmc["in_ledger"] == {"quantity": 2000, "avg_cost": 480.0, "currency": "TWD", "records": 1, "dividends": 0,
                                  "sells": 0}
     etf = by["元大台灣50"]
@@ -171,38 +171,38 @@ def test_reads_holdings_and_flags_each_row(client, pool, fake, env, db):
     hon = by["鴻海"]
     assert codes(hon) == ["not_whole_lots", "in_other_account"] and hon["include"] is True
     assert hon["quantity"] == 2500
-    assert message(hon, "not_whole_lots") == "畫面上是 2.5 張，算成 2,500 股；不是整張，確認一下。"
-    assert message(hon, "in_other_account") == "「富邦－複委託」帳戶也有 1,000 股。"
+    assert message(hon, "not_whole_lots") == "2.5 張＝2,500 股・不是整張"
+    assert message(hon, "in_other_account") == "「富邦－複委託」帳戶也有 1,000 股"
     apple = by["Apple"]
     assert (apple["symbol"], apple["currency"], codes(apple), apple["include"]) == (
         "AAPL", "USD", ["currency_guess"], True)
-    assert message(apple, "currency_guess") == "畫面上沒寫幣別，當成美元。"
+    assert message(apple, "currency_guess") == "沒寫幣別・當成美元"
     nvda = by["NVIDIA"]
     assert codes(nvda) == ["currency_mismatch"] and nvda["include"] is False
-    assert message(nvda, "currency_mismatch") == "美股的成本寫的是新台幣，要改成美元的成本。"
+    assert message(nvda, "currency_mismatch") == "美股成本是新台幣・改成美元"
     unknown = by["長榮"]
     assert (unknown["symbol"], codes(unknown), unknown["include"]) == (None, ["unknown_symbol"], False)
     assert codes(by["聯發科"]) == ["margin"] and by["聯發科"]["include"] is True
     assert codes(by["富邦金"]) == ["short_sale"] and by["富邦金"]["include"] is False
     cathay = by["國泰金"]
     assert codes(cathay) == ["unit_fixed"] and cathay["include"] is True and cathay["quantity"] == 2000
-    assert message(cathay, "unit_fixed") == "照畫面上的金額算，數量是張數（1 張＝1,000 股），已經換成股數。"
+    assert message(cathay, "unit_fixed") == "照金額算是張數・2 張＝2,000 股"
     ase = by["日月光投控"]
     assert codes(ase) == ["cost_mismatch", "value_mismatch"] and ase["quantity"] == 2 and ase["include"] is True
-    assert message(ase, "cost_mismatch") == "股數 × 均價和總成本差 299,700，股數可能是張數（1 張＝1,000 股）。"
+    assert message(ase, "cost_mismatch") == "股數 × 均價和總成本差 299,700・可能是張數（1 張＝1,000 股）"
     gw = by["環球晶"]
     assert (gw["quantity"], gw["price"], gw["price_basis"], codes(gw), gw["include"]) == (
         100, 500.0, "total_cost", ["unreadable"], False)
-    assert message(gw, "unreadable") == "這一列的總成本沒讀清楚。"
+    assert message(gw, "unreadable") == "沒讀清楚・總成本"
     umc = by["聯電"]
     assert codes(umc) == ["unreadable"] and umc["include"] is False and umc["quantity"] is None
-    assert message(umc, "unreadable") == "這一列的股數沒讀清楚。"
+    assert message(umc, "unreadable") == "沒讀清楚・股數"
     assert codes(by["0056-1000"]) == codes(by["0056-345"]) == ["same_symbol_twice"]
-    assert message(by["0056-345"], "same_symbol_twice") == "這一檔有 2 列，都匯入會加在一起（例如整股和零股分開列）。"
+    assert message(by["0056-345"], "same_symbol_twice") == "同一檔 2 列・匯入會加在一起"
     assert codes(by["台達電"]) == ["fractional_tw_qty"] and by["台達電"]["include"] is False
     quanta = by["廣達"]
     assert codes(quanta) == ["unit_fixed"] and quanta["quantity"] == 1000 and quanta["include"] is True
-    assert message(quanta, "unit_fixed") == "照畫面上的金額算，數量是股數，不是張數。"
+    assert message(quanta, "unit_fixed") == "照金額算是股數・不是張數"
 
     # nothing stored but usage; one read of the day's imports, not one of the day's questions
     assert db.scalar(select(func.count()).select_from(Transaction)) == 2
@@ -300,14 +300,14 @@ def test_a_total_cost_screen_read_in_lots_is_settled_by_the_printed_amounts(clie
     got = [(r["symbol"], r["quantity"], r["price"], r["price_basis"], codes(r), r["include"]) for r in out["rows"]]
     assert got == [("2454.TW", 150, 1242.8, "total_cost", ["unit_fixed"], True),
                    ("2881.TW", 3000, 71.18, "total_cost", ["unit_fixed"], True)]
-    assert message(out["rows"][0], "unit_fixed") == "照畫面上的金額算，數量是股數，不是張數。"
+    assert message(out["rows"][0], "unit_fixed") == "照金額算是股數・不是張數"
     assert [u.model for u in usage_rows(db)] == [HAIKU, HAIKU]
     # with nothing printed to check the unit against, an unclear 張/股 still counts
     answer(fake, doc([p("2454", "聯發科", "150", "lots", total="186420", unclear=["quantity_unit"])]))
     env(AI_MODEL_IMPORT_RETRY="")
     row = read(client).json()["rows"][0]
     assert (row["quantity"], codes(row)) == (150000, ["unreadable"])
-    assert message(row, "unreadable") == "這一列的單位沒讀清楚。"
+    assert message(row, "unreadable") == "沒讀清楚・單位"
 
 
 def test_a_us_market_value_printed_in_nt_dollars_is_not_a_misreading(client, pool, fake, env):
@@ -324,7 +324,7 @@ def test_a_us_market_value_printed_in_nt_dollars_is_not_a_misreading(client, poo
     env(AI_MODEL_IMPORT_RETRY="")
     answer(fake, doc([p("AAPL", "APPLE INC", "10", avg="200", price="230", value="5000", currency="USD")]))
     row = read(client).json()["rows"][0]
-    assert codes(row) == ["value_mismatch"] and message(row, "value_mismatch") == "股數 × 現價和市值差 2,700。"
+    assert codes(row) == ["value_mismatch"] and message(row, "value_mismatch") == "股數 × 現價和市值差 2,700"
 
 
 def test_not_a_holdings_screen(client, pool, fake, env):
@@ -332,7 +332,7 @@ def test_not_a_holdings_screen(client, pool, fake, env):
     answer(fake, doc([p()], kind="trade_records"))
     out = read(client).json()
     assert (out["document_kind"], out["rows"], out["retried"]) == ("trade_records", [], False)
-    assert out["notice"] == "這是交易明細，不是庫存。請改用「匯入對帳單」。"
+    assert out["notice"] == "這是交易明細・改用匯入對帳單"
     assert len(fake.requests) == 1
 
 
@@ -449,7 +449,7 @@ def test_in_ledger_needs_replace_and_replace_is_one_atomic_operation(client, oth
     err = r.json()["error"]
     assert err["code"] == "batch_rejected" and err["message"] == "有 1 筆不能匯入，整批都沒有寫入。"
     assert err["rows"] == [{"index": 0, "code": "in_ledger",
-                            "message": "帳本裡已經有 1,500 股。勾「以券商為準」才會換掉，不然這一列不要匯入。"}]
+                            "message": "已在帳本 1,500 股・選換成券商才匯入"}]
     dry = commit(client, acc["id"], snapshot, dry_run=True).json()
     assert dry["ok"] is False and dry["replaced"] == []
     assert dry["rows"][0]["in_ledger"] == {"quantity": 1500, "avg_cost": 550.0, "currency": "TWD", "records": 3,

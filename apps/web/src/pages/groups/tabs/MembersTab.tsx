@@ -209,7 +209,7 @@ function Invites({ group }: { group: Group }) {
       <div className="flex flex-col gap-4">
         {full && group.plan && (
           <p role="status" className="border-b border-rule pb-3 text-base font-medium text-ink">
-            已經有 {group.members.length} 位成員，上限是 {group.plan.member_cap} 人。新的成員不能加入。
+            成員 {group.members.length} 人・上限 {group.plan.member_cap} 人・新的成員不能加入
           </p>
         )}
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3">

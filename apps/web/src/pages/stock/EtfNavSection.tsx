@@ -12,7 +12,7 @@ import { formatDate, formatDateShort, formatPercent, formatPrice } from "@/lib/f
 import { KeyGrid, NotYet } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
-const TRACKING_ERROR = "沒有追蹤誤差。"
+const TRACKING_ERROR = "沒有追蹤誤差"
 const md = (d: string) => formatDateShort(d, false)
 
 /**
@@ -73,7 +73,7 @@ function NavBody({ inst, n, figures = true }: { inst: InstrumentDetail; n: EtfNa
       )}
       {at && !sameDay && n.nav_date && n.close_date && (
         <p className="mt-2 max-w-prose text-md text-ink">
-          最新的淨值是 {md(n.nav_date)}、收盤是 {md(n.close_date)}；折溢價用兩者都有的 {md(at.t)} 計算（收盤 {price(at.close)}、淨值 {formatNav(at.nav)}）。
+          折溢價依 {md(at.t)}・收盤 {price(at.close)}・淨值 {formatNav(at.nav)}
         </p>
       )}
       {chart && <PremiumChart points={n.history} missing={n.history_missing} price={price} />}

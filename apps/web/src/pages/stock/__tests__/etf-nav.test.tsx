@@ -37,7 +37,7 @@ function withSourcesFooter(ui: React.ReactNode) {
     </QueryClientProvider>,
   )
 }
-const TRACKING = "沒有追蹤誤差。"
+const TRACKING = "沒有追蹤誤差"
 
 async function section(symbol: string) {
   const inst = await api.getInstrument(symbol)
@@ -134,7 +134,7 @@ describe("總覽的「淨值與折溢價」", () => {
     const s = await section("00679B.TWO")
     const terms = within(s).getAllByRole("term").map((t) => t.textContent)
     expect(terms).toEqual(["淨值（11/11）", "收盤（11/12）", "折溢價（11/11）"])
-    expect(s.textContent).toContain("最新的淨值是 11/11、收盤是 11/12；折溢價用兩者都有的 11/11 計算")
+    expect(s.textContent).toContain("折溢價依 11/11・收盤")
     expect(within(s).getAllByRole("definition")[0]!.textContent).toMatch(/^\d+\.\d{4}$/) // 四位小數照公布
   })
 

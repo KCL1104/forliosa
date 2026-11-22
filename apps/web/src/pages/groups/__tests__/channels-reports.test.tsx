@@ -103,7 +103,7 @@ describe("頻道的四個開關（2026-11-18 產品負責人選 A）", () => {
     const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
     await within(discord).findByRole("switch", { name: "交易動態" }, T)
     expect(switchNames(discord)).toEqual(SWITCH_NAMES)
-    expect(within(discord).getByText("市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。")).toBeInTheDocument()
+    expect(within(discord).getByText("市場報告未開放・盤前、週報只送群組的部分・盤後不送")).toBeInTheDocument()
     expect(within(discord).queryByText(/盲測|投票/)).toBeNull()
   })
 

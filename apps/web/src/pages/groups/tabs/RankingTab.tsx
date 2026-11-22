@@ -254,7 +254,7 @@ function BoardList({ board, groupId }: { board: Leaderboard; groupId: string }) 
 function MyNullNote({ entries }: { entries: LeaderboardEntry[] }) {
   const me = entries.find((e) => e.is_me)
   if (!me || me.return_pct !== null) return null
-  return <p className="text-base text-ink">這段期間算不出你的報酬：持股有幾天沒有收盤價。</p>
+  return <p className="text-base text-ink">你的報酬算不出來・持股有幾天沒有收盤價</p>
 }
 
 /**
@@ -266,7 +266,7 @@ function MyStartNote({ board }: { board: Leaderboard }) {
   if (!me?.own_start_date || me.return_pct === null) return null
   return (
     <p className="text-base text-ink">
-      你的{PERIOD_LABEL[board.period]}報酬從 {formatDateShort(me.own_start_date, false)} 收盤起算：有持股在那之前沒有參考價。
+      你的{PERIOD_LABEL[board.period]}報酬從 {formatDateShort(me.own_start_date, false)} 收盤起算・之前有持股沒有參考價
     </p>
   )
 }

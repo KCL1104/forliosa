@@ -51,7 +51,7 @@ describe("確認表的一列", () => {
   })
 
   it("選了股票：「找不到」「對到好幾檔」那一句拿掉", () => {
-    const d = toDraftRow(row({ symbol: null }, [flag("unknown_symbol", "找不到「台積」。", "error"), flag("price_far_from_close")], false, "台積"))
+    const d = toDraftRow(row({ symbol: null }, [flag("unknown_symbol", "找不到「台積」", "error"), flag("price_far_from_close")], false, "台積"))
     const picked = editRow(d, { symbol: { symbol: "2330.TW", code: "2330", name: "台積電", market: "TWSE" } })
     expect(picked.flags.map((f) => f.code)).toEqual(["price_far_from_close"])
     expect(picked.picked).toBe(true)
@@ -75,20 +75,20 @@ describe("確認表的一列", () => {
 
 describe("賣超：補一筆買進", () => {
   it("從伺服器的句子算出差的股數；日期與價格空著讓使用者填", () => {
-    const sell = toDraftRow(row({ type: "sell", symbol: "2603.TW", quantity: 2000, price: 216 }, [flag("oversell", "賣出 2,000 股，超過當時持有的 1,000 股。", "error")], false, "長榮"))
+    const sell = toDraftRow(row({ type: "sell", symbol: "2603.TW", quantity: 2000, price: 216 }, [flag("oversell", "賣出 2,000 股・當時只有 1,000 股", "error")], false, "長榮"))
     const buy = shortfallRow(sell, "added_1")
     // 股數和其他列一樣寫千分位
     expect(buy).toMatchObject({ id: "added_1", include: true, type: "buy", qty: "1,000", date: "", price: "", added: true })
     expect(buy?.symbol?.symbol).toBe("2603.TW")
     // 當時一股都沒有
-    const none = toDraftRow(row({ type: "sell", quantity: 500 }, [flag("oversell", "賣出 500 股，超過當時持有的 0 股。", "error")]))
+    const none = toDraftRow(row({ type: "sell", quantity: 500 }, [flag("oversell", "賣出 500 股・當時只有 0 股", "error")]))
     expect(shortfallRow(none, "added_2")?.qty).toBe("500")
   })
 })
 
 describe("重新驗算（dry_run）的結果併進來", () => {
   it("伺服器算得出來的換成新的；讀檔時才知道的留著，處理過就拿掉", () => {
-    const d = toDraftRow(row({}, [flag("unreadable", "這一列沒讀清楚。", "error"), flag("margin"), flag("oversell", "", "error")]))
+    const d = toDraftRow(row({}, [flag("unreadable", "沒讀清楚・價格", "error"), flag("margin"), flag("oversell", "", "error")]))
     expect(mergeFlags(d, [flag("duplicate")]).map((f) => f.code)).toEqual(["unreadable", "margin", "duplicate"])
     // 改過股數：「沒讀清楚」拿掉
     expect(mergeFlags(editRow(d, { qty: "3000" }), []).map((f) => f.code)).toEqual(["margin"])
@@ -98,7 +98,7 @@ describe("重新驗算（dry_run）的結果併進來", () => {
 
   it("讀檔時才算得出來的（張數、買賣看反、價格、非交易日、手續費、稅、期間）重新驗算後還在；改了相關的格子才拿掉", () => {
     const read = [
-      flag("amount_mismatch", "股數 × 價格和成交金額差 587,412，股數可能是張數（1 張＝1,000 股）。"),
+      flag("amount_mismatch", "股數 × 價格和成交金額差 587,412・可能是張數（1 張＝1,000 股）"),
       flag("side_inconsistent"), flag("price_far_from_close"), flag("not_trading_day"), flag("outside_period"),
       flag("fee_out_of_range"), flag("tax_out_of_range"), flag("currency_mismatch"), flag("day_trade"),
     ]
@@ -119,7 +119,7 @@ describe("重新驗算（dry_run）的結果併進來", () => {
 
   it("新出現的賣超、重複：使用者沒自己動過勾選就跟伺服器一樣不勾；自己勾的照舊", () => {
     const d = toDraftRow(row())
-    const merged = mergeFlags(d, [flag("duplicate", "10/1 已經記過一筆一樣的。")])
+    const merged = mergeFlags(d, [flag("duplicate", "10/1 已記過一樣的")])
     expect(includeAfterCheck(d, merged)).toBe(false)
     expect(includeAfterCheck({ ...d, includeSet: true }, merged)).toBe(true)
     // 早就看過的（不是新的）、或只是提醒（價格）：不動
@@ -129,9 +129,9 @@ describe("重新驗算（dry_run）的結果併進來", () => {
   })
 
   it("換帳戶：沒勾的列上舊帳戶的賣超、重複拿掉；只因為這些沒勾的列重新勾上（自己取消的、讀不清楚的不動）", () => {
-    const dup = toDraftRow(row({}, [flag("duplicate", "10/1 已經記過一筆一樣的。")], false))
+    const dup = toDraftRow(row({}, [flag("duplicate", "10/1 已記過一樣的")], false))
     const mine = { ...dup, id: "mine", includeSet: true }
-    const unread = toDraftRow(row({}, [flag("duplicate"), flag("unreadable", "這一列的價格沒讀清楚。", "error")], false))
+    const unread = toDraftRow(row({}, [flag("duplicate"), flag("unreadable", "沒讀清楚・價格", "error")], false))
     const day = toDraftRow(row({}, [flag("day_trade")], false))
     const [a, b, c, e] = forAccountSwitch([dup, mine, unread, day])
     expect([a!.include, a!.flags]).toEqual([true, []])
@@ -147,18 +147,18 @@ describe("重新驗算（dry_run）的結果併進來", () => {
 })
 
 describe("整份的句子", () => {
-  it("合計相符、少了、多了；沒有印合計就不說", () => {
-    expect(totalsLine({ totals_check: { ok: true, diff: 0 } })).toBe("和對帳單的合計相符。")
-    expect(totalsLine({ totals_check: { ok: false, diff: -12450 } })).toBe("比對帳單的合計少 NT$12,450，可能漏讀了。")
-    expect(totalsLine({ totals_check: { ok: false, diff: 900 } })).toBe("比對帳單的合計多 NT$900，可能有一列讀了兩次。")
+  it("合計相符、少了、多了（標籤，不是句子）；沒有印合計就不寫", () => {
+    expect(totalsLine({ totals_check: { ok: true, diff: 0 } })).toBe("合計相符")
+    expect(totalsLine({ totals_check: { ok: false, diff: -12450 } })).toBe("比對帳單合計少 NT$12,450・可能漏讀")
+    expect(totalsLine({ totals_check: { ok: false, diff: 900 } })).toBe("比對帳單合計多 NT$900・可能重複讀")
     expect(totalsLine({ totals_check: { ok: null, diff: null } })).toBeNull()
     expect(totalsLine({ totals_check: null })).toBeNull()
   })
 
-  it("庫存畫面請改用匯入庫存；不是交易紀錄、沒有讀到買賣都直接說", () => {
-    expect(unsupportedLine({ document_kind: "holdings_snapshot", rows: [row()] })).toBe("這是庫存畫面，沒有買進日期。請改用「匯入庫存」。")
-    expect(unsupportedLine({ document_kind: "not_a_trade_record", rows: [] })).toBe("這個檔案裡沒有買賣紀錄。")
-    expect(unsupportedLine({ document_kind: "monthly_statement", rows: [] })).toBe("這個檔案裡沒有讀到買賣。")
+  it("庫存畫面改用匯入庫存；不是交易紀錄、沒有讀到買賣都直接寫（標籤）", () => {
+    expect(unsupportedLine({ document_kind: "holdings_snapshot", rows: [row()] })).toBe("這是庫存畫面・改用匯入庫存")
+    expect(unsupportedLine({ document_kind: "not_a_trade_record", rows: [] })).toBe("沒有買賣紀錄")
+    expect(unsupportedLine({ document_kind: "monthly_statement", rows: [] })).toBe("沒有讀到買賣")
     expect(unsupportedLine({ document_kind: "app_screenshot", rows: [row()] })).toBeNull()
     // 伺服器寫了句子就照它的；能匯入的檔案不因為有 notice 就擋下來
     expect(unsupportedLine({ document_kind: "holdings_snapshot", rows: [], notice: "庫存截圖還不能匯入。" })).toBe("庫存截圖還不能匯入。")

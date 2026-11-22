@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router"
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
@@ -461,6 +461,38 @@ describe("和績效分段分工：整頁只有一排區間按鈕", { timeout: 20
       // 2026-11-22 評論：示範資料的指數只到小數 4 位時，「1月」是 ▲9.91% 和 ▲9.90%（後端是 6 位）
       expect(formatPercent(rangeReturn(win))).toBe(formatPercent(p.twr))
       expect(win.points[win.from]!.t).toBe(p.start_date)
+    }
+  })
+
+  it("全部帳戶：績效分段的「報酬（時間加權）」就是首頁走勢讀數的「報酬」（同一個來源；後端的 twr 差 0.01% 也一樣，2026-11-22）", async () => {
+    // 後端的 twr 是全精度算的，走勢是兩個 6 位小數的指數相除，在四捨五入的邊界上會差 0.01%：
+    // 故意讓績效分段問的每一個區間的 twr 多 0.01%（畫面上的兩位小數一定差 0.01），兩個數字還是要一樣
+    const real = api.getPerformance.bind(api)
+    vi.spyOn(api, "getPerformance").mockImplementation(async (q) => {
+      const r = await real(q)
+      const heroQuery = q.range === "ALL" && !q.benchmark && !q.account_id
+      return heroQuery || r.twr === null ? r : { ...r, twr: r.twr + 0.0001 }
+    })
+    const all = await real({ range: "ALL" })
+    const { rangeReturn, trendWindow } = await import("@/lib/trend-range")
+    const { formatPercent } = await import("@/lib/format")
+    const { pctText } = await import("../trend-chart")
+    renderApp("/?view=performance")
+    await screen.findByText("最大回撤", undefined, T)
+    const region = await trend()
+    const chips = within(region).getByRole("radiogroup", { name: "走勢區間" })
+    // 指標格裡「報酬（時間加權）」的數字（「▲9.90%上漲」）
+    const metric = () => screen.getByText("報酬（時間加權）").closest("div")!.querySelector("dd")!.textContent ?? ""
+    const ranges = [["5日", "5D"], ["1月", "1M"], ["3月", "3M"], ["6月", "6M"], ["今年", "YTD"], ["1年", "1Y"], ["全部", "ALL"]] as const
+    for (const [chip, range] of ranges) {
+      await userEvent.click(within(chips).getByRole("radio", { name: chip }))
+      const want = rangeReturn(trendWindow(all.series, range))!
+      const glyph = want > 0 ? "▲" : want < 0 ? "▼" : ""
+      // 首頁走勢讀數（10% 以上一位小數）
+      expect(headlineReturn(region)).toContain(`${glyph}${pctText(want)}`)
+      // 績效分段（兩位小數）：同一個數字，不是後端多出來的 0.01%
+      await waitFor(() => expect(metric()).toContain(`${glyph}${formatPercent(Math.abs(want), { signed: false, decimals: 2 })}`), T)
+      if (Math.abs(want) < 0.1) expect(metric().replace(/上漲|下跌|持平/, "")).toBe(headlineReturn(region)!.replace(/^報酬\s*/, "").replace(/上漲|下跌|持平/, ""))
     }
   })
 })

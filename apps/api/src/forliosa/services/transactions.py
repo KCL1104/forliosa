@@ -556,11 +556,11 @@ def _flag_duplicates(existing: Sequence[Transaction], candidates: Sequence[Trans
         key = _trade_key(t)
         full = (*key, Decimal(t.price).normalize())
         if full in same:
-            flags[i].append(_flag("duplicate", f"{_day(t.trade_date)} 已經記過一筆一樣的。", "warning"))
+            flags[i].append(_flag("duplicate", f"{_day(t.trade_date)} 已記過一樣的", "warning"))
         elif full in seen:
-            flags[i].append(_flag("duplicate", "這次匯入裡，同一天有另一筆一樣的。", "warning"))
+            flags[i].append(_flag("duplicate", "這次匯入裡同一天有一樣的", "warning"))
         elif key in same_shares:
-            message = f"{_day(t.trade_date)} 已經記過一筆同樣股數的{_SIDE[t.type]}，價格 {_num(same_shares[key])}。"
+            message = f"{_day(t.trade_date)} 已記過同股數的{_SIDE[t.type]}・價格 {_num(same_shares[key])}"
             flags[i].append(_flag("possible_duplicate", message, "warning"))
         seen.add(full)
 
@@ -615,18 +615,18 @@ def _flag_ledger(db: Session, user: User, md: MarketData, account: BrokerAccount
     if not refused:
         return []
     dividends_only = not _refused(inp.transactions, inp.method)[0]
-    lead = "匯入以後，自動入帳的股利重算，帳目對不起來" if dividends_only else "匯入以後帳目對不起來"
+    lead = "匯入後股利重算・帳目對不起來" if dividends_only else "匯入後帳目對不起來"
     problems: list[dict[str, str]] = []
     for r in refused:
         t = r.txn
         if t is not None and t.id in index_of:
-            message = f"賣出 {_num(t.quantity)} 股，超過當時持有的 {_num(r.held)} 股。"
+            message = f"賣出 {_num(t.quantity)} 股・當時只有 {_num(r.held)} 股"
             flags[index_of[t.id]].append(_flag("oversell", message))
             continue
         blame = None if t is None else max(
             (c for c in batch if c.type == TxnType.SELL.value and c.account_id == t.account_id
              and c.symbol == t.symbol and places[c.id] < r.place), key=lambda c: places[c.id], default=None)
-        flag = _flag("ledger_inconsistent", f"{lead}：{r.message}。")
+        flag = _flag("ledger_inconsistent", f"{lead}・{r.message}")
         if blame is None:
             problems.append(flag)
         elif flag not in flags[index_of[blame.id]]:

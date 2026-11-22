@@ -27,10 +27,10 @@ import { pickDay, pickFromLine, readoutLine } from "./buy-date-text"
  * - 候選的日子也列成一排可以按的列（手機 44px 高）：五年的圖在 360px 的手機上一天不到 1px，用手指點不到；
  *   自動估的那天標「估計」，現在記的那天標「目前的日期」，打開時先選現在記的那天。
  * - 點圖上任何一天、按住橫拖、或用鍵盤（← → 一天、Page Up／Page Down 跳到上一個／下一個候選、Home／End 到頭尾）都可以選。
- * - 選的那天收盤和成本差 3% 以上時照實說（「這天收盤 580，和你的成本 612.4 差 5.2%。」）。
+ * - 選的那天收盤和成本差 3% 以上時照實寫（「收盤 580・和成本 612.4 差 5.2%」）。
  * - 「改成 2024/8/14」只改日期（價格、股數、手續費照舊），之後這一筆標「自己選的日期」。
  * - 匯入以前最近一次股票分割、減資、配股（`pick_from`）以前的日子不在圖上、不能選：券商的股數與均價已經算進那一次，
- *   買在那天以前的話帳本會多算一次配股、拿現在的股數乘當時的價格。資料說明多一行「2025/6/18 股票分割，之前的日子不能選」。
+ *   買在那天以前的話帳本會多算一次配股、拿現在的股數乘當時的價格。資料說明多一行「2025/6/18 股票分割・之前不能選」。
  * 隱私模式：成本是自己的數字，遮掉（圖的縱軸、成本線的標籤、說明裡的成本都不寫），收盤價照常。
  */
 
@@ -156,7 +156,7 @@ function PickerBody({ lot, name, market, type, onClose }: { lot: Transaction; na
           <Skeleton className="h-[168px] w-full sm:h-[200px]" />
         </div>
       ) : candles.length === 0 ? (
-        <p className="text-base text-ink">沒有這一檔的走勢，沒辦法在圖上選日期。</p>
+        <p className="text-base text-ink">沒有走勢</p>
       ) : (
         <div className="flex min-w-0 flex-col gap-3">
           <Readout candles={candles} sel={sel} initialIdx={initialIdx} cost={cost} costText={costText} price={price} lot={lot} privacy={privacy} />
@@ -173,7 +173,7 @@ function PickerBody({ lot, name, market, type, onClose }: { lot: Transaction; na
             onSelect={choose}
           />
           {spans.length > 1 && <RangeChips label="走勢的長度" value={shownSpan} options={spans} onChange={setSpan} />}
-          {/* 分割、減資、配股以前的日子不能選：一行（「2025/6/18 股票分割，之前的日子不能選」），和資料說明放在一起 */}
+          {/* 分割、減資、配股以前的日子不能選：一行（「2025/6/18 股票分割・之前不能選」），和資料說明放在一起 */}
           <DataNotes notes={[...(limitLine ? [limitLine] : []), ...(history.data.notes ?? [])]} />
 
           <div>
@@ -181,7 +181,7 @@ function PickerBody({ lot, name, market, type, onClose }: { lot: Transaction; na
             {candidates.length === 0 ? (
               // 照實寫有資料的那幾年（美股只從 2024/7/1 開始，不是五年）
               <p className="py-3 text-base text-ink">
-                {pickDay(candles[0]!.t)} – {pickDay(candles.at(-1)!.t)} 的股價都沒有經過成本{privacy ? "" : ` ${costText}`}。
+                {pickDay(candles[0]!.t)} – {pickDay(candles.at(-1)!.t)}・沒有經過成本{privacy ? "" : ` ${costText}`}
               </p>
             ) : (
               <>

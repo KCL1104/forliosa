@@ -39,7 +39,7 @@ import {
 /**
  * 確認表（DESIGN.md〈匯入對帳單〉）：AI 讀出來的是草稿，畫成草稿卡的樣子——石墨淡底、石墨灰虛線、數字是鉛筆的石墨灰；
  * 使用者改過的格子變成墨色。一列一筆：勾選、日期、買／賣、股票、股數、價格、手續費、稅、合計，每一格都能改；
- * 有問題的那一列下面直接寫伺服器的句子（找不到股票旁邊可以選、賣超旁邊有「補一筆買進」）。
+ * 有問題的那一列下面直接寫伺服器的標籤（2026-11-22 起不寫句子；找不到股票旁邊可以選、賣超旁邊有「補一筆買進」）。
  * 最上面是整份的核對（合計、沒讀清楚、像指令的文字）；股利與融券不匯入，收成一行「略過 N 筆股利」。
  * 簽名格「匯入 N 筆」：先重新驗算（dry_run），有新的問題就停下來給你看；沒有就一次寫入（全部或全不）。
  */
@@ -246,7 +246,7 @@ export function ReviewTable({
           )}
           <p className="num text-sm text-ink-2">{facts}</p>
           {totals && <p className="text-base text-ink">{totals}</p>}
-          {doc.unreadable.length > 0 && <p className="text-base text-ink">沒讀清楚：{doc.unreadable.join("、")}。</p>}
+          {doc.unreadable.length > 0 && <p className="text-base text-ink">沒讀清楚・{doc.unreadable.join("、")}</p>}
           {(doc.problems ?? []).map((p) => (
             <p key={p.code + p.message} className="text-base text-ink">
               {p.message}
@@ -254,7 +254,7 @@ export function ReviewTable({
           ))}
           {doc.embedded_instructions.length > 0 && (
             <div>
-              <p className="text-base text-ink">檔案裡有一段像指令的文字，沒有照做。</p>
+              <p className="text-base text-ink">像指令的文字・沒有照做</p>
               {doc.embedded_instructions.map((q) => (
                 <p key={q} className="mt-1 line-clamp-2 text-sm break-all text-ink-2">
                   「{q}」

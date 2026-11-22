@@ -40,7 +40,7 @@ export function MonthlyTable({ p }: { p: Performance }) {
     <Panel title="每月報酬率" titleId="months-title">
       {months.length === 0 ? (
         <p className="text-base text-ink">
-          {comp.months_estimated > 0 && importMonths === 0 ? "這段期間都是用估計的買入日算的，沒有可以比的月份。" : "這段期間沒有可以比的月份。"}
+          {comp.months_estimated > 0 && importMonths === 0 ? "沒有可以比的月份・都是估計的買入日" : "沒有可以比的月份"}
         </p>
       ) : (
         <div className="@container">

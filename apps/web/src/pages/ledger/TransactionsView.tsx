@@ -159,7 +159,6 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
           <EmptyState
             className={LAST}
             title="沒有符合條件的交易"
-            description="換個帳戶、類型或期間看看。"
             action={
               <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => setFilters({ period: "all" })}>
                 清除篩選
@@ -220,7 +219,7 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
                 list.isFetchingNextPage ? (
                   <div className="py-3 text-sm text-ink-2">載入更多…</div>
                 ) : !list.hasNextPage ? (
-                  <div className="py-3 text-sm text-ink-2">共 {items.length} 筆，已經是最早的紀錄。</div>
+                  <div className="py-3 text-sm text-ink-2">共 {items.length} 筆・已到最早</div>
                 ) : null,
             }}
           />

@@ -270,10 +270,10 @@ export function PositionsReview({
               ))}
             </dl>
           </Disclosure>
-          {doc.unreadable.length > 0 && <p className="text-base text-ink">沒讀清楚：{doc.unreadable.join("、")}。</p>}
+          {doc.unreadable.length > 0 && <p className="text-base text-ink">沒讀清楚・{doc.unreadable.join("、")}</p>}
           {doc.embedded_instructions.length > 0 && (
             <div>
-              <p className="text-base text-ink">截圖或文字裡有一段像指令的字，沒有照做。</p>
+              <p className="text-base text-ink">像指令的文字・沒有照做</p>
               {doc.embedded_instructions.map((q) => (
                 <p key={q} className="mt-1 line-clamp-2 text-sm break-all text-ink-2">
                   「{q}」

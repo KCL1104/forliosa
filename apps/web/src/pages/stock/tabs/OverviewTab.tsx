@@ -469,7 +469,7 @@ function Events({ inst, position }: { inst: InstrumentDetail; position: Position
         <ErrorState error={events.error} onRetry={() => void events.refetch()} />
       ) : shown.length === 0 ? (
         <NotYet title="目前沒有事件">
-          {inst.market === "US" ? "沒有已公告的除息，最近也沒有 SEC 申報。" : "沒有已公告的除息、營收公布或法說會，最近 90 天也沒有官方公告。"}
+          {inst.market === "US" ? "沒有已公告的除息・近期沒有 SEC 申報" : "沒有已公告的除息、營收公布或法說會・近 90 天沒有官方公告"}
         </NotYet>
       ) : (
         <ol className="border-t border-rule">

@@ -49,7 +49,7 @@ export function ReportPage() {
           <div className="flex flex-col gap-4">
             {version && (
               <p className="border-y border-rule py-2.5 text-base text-ink">
-                這是第 {q.data.version} 版。{" "}
+                第 {q.data.version} 版・
                 <Link to="/market/reports/$reportId" params={{ reportId }} search={{}} className={textAction}>
                   看最新的一版
                 </Link>

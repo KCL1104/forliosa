@@ -316,8 +316,8 @@ function SharesHint({ symbol, amount }: { symbol: Instrument; amount: number }) 
   return (
     <p className="num -mt-2 text-sm text-ink-2" aria-live="polite">
       {shares < 1
-        ? `最近收盤 ${formatQuote(price, symbol.market, symbol.type)}，NT$${amount.toLocaleString("zh-TW")} 不足買 1 股。`
-        : `最近收盤 ${formatQuote(price, symbol.market, symbol.type)}，一次約 ${formatQuantity(shares, "lot", symbol.market)}${shares < 1000 ? "（零股）" : ""}。`}
+        ? `最近收盤 ${formatQuote(price, symbol.market, symbol.type)}・NT$${amount.toLocaleString("zh-TW")} 不足 1 股`
+        : `最近收盤 ${formatQuote(price, symbol.market, symbol.type)}・一次約 ${formatQuantity(shares, "lot", symbol.market)}${shares < 1000 ? "（零股）" : ""}`}
     </p>
   )
 }

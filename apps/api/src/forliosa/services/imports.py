@@ -21,7 +21,7 @@ Checks (``flags[].code``; ``include`` is the default tick in the review table):
   official close (``prices_daily`` under the data policy): Taiwan ±10.5% of the previous close (the daily limit is
   10%), US ±20% of that day's close. A trade from before the archive began is compared with the history backfill's
   close as a reference (product owner 2026-11-17, ``services.reference_close``), and the message says so
-  (「那天參考收盤 1,030（非官方資料），這裡是 103。」); the archive wins whenever it has a close in the lookback. A
+  (「那天參考收盤 1,030（非官方資料）・這裡 103」); the archive wins whenever it has a close in the lookback. A
   known split between the previous day and the trade puts the previous close on the trade day's basis first.
 * the books, for the rows ticked by default (``services.transactions.check_batch``): ``oversell``,
   ``ledger_inconsistent``, ``duplicate``, ``possible_duplicate``.
@@ -89,8 +89,8 @@ WEEKDAYS = "一二三四五六日"
 FIELD_LABELS = {"trade_date": "日期", "symbol_code": "代號", "name": "名稱", "side": "買賣", "kind": "種類",
                 "quantity": "股數", "quantity_unit": "單位", "price": "價格", "amount": "價金", "fee": "手續費",
                 "tax": "交易稅", "currency": "幣別"}
-NOTICE = {"holdings_snapshot": "這是庫存畫面，沒有買進日期。請改用「匯入庫存」。",
-          "not_a_trade_record": "這個檔案裡沒有買賣紀錄。"}
+NOTICE = {"holdings_snapshot": "這是庫存畫面・改用匯入庫存",
+          "not_a_trade_record": "沒有買賣紀錄"}
 
 
 # -- who may import, and how many today -----------------------------------------------------------------------------
@@ -219,7 +219,7 @@ def resolve_symbol(md: MarketData, code: str, name: str, currency: str, where: s
     info = md.instrument(code) if code else None
     if info is not None:
         if name and not name.isascii() and not _name_matches(md, info, name):
-            return info, _flag("ambiguous_symbol", f"代號 {code} 是{info.name}，{where}上寫的是「{name}」。", "error")
+            return info, _flag("ambiguous_symbol", f"代號 {code} 是{info.name}・{where}寫「{name}」", "error")
         return info, None
     if name:
         found = md.search(name, 8)
@@ -231,8 +231,8 @@ def resolve_symbol(md: MarketData, code: str, name: str, currency: str, where: s
         if len(found) == 1:
             return found[0], None
         if found:
-            return None, _flag("ambiguous_symbol", f"「{name}」對得到好幾檔，選一檔。", "error")
-    return None, _flag("unknown_symbol", f"找不到「{name or code}」。", "error")
+            return None, _flag("ambiguous_symbol", f"「{name}」對到好幾檔・選一檔", "error")
+    return None, _flag("unknown_symbol", f"找不到「{name or code}」", "error")
 
 
 # -- one row ----------------------------------------------------------------------------------------------------------
@@ -301,7 +301,7 @@ def _unreadable(x: dict[str, Any], missing: list[str]) -> dict[str, str] | None:
     fields = list(dict.fromkeys([*missing, *unclear]))
     if not fields:
         return None
-    return _flag("unreadable", f"這一列的{'、'.join(FIELD_LABELS[f] for f in fields)}沒讀清楚。", "error")
+    return _flag("unreadable", f"沒讀清楚・{'、'.join(FIELD_LABELS[f] for f in fields)}", "error")
 
 
 def _arithmetic(row: _Row, info: InstrumentInfo, kind_day_trade: bool, t: str, qty: Decimal, price: Decimal,
@@ -313,30 +313,30 @@ def _arithmetic(row: _Row, info: InstrumentInfo, kind_day_trade: bool, t: str, q
     if amount is not None and abs(gross - amount) > tolerance:
         message = f"股數 × 價格和成交金額差 {_num(abs(gross - amount).quantize(Decimal('0.01')))}"
         if tw and not lots and abs(gross * LOT - amount) <= tolerance:
-            message += "，股數可能是張數（1 張＝1,000 股）"
+            message += "・可能是張數（1 張＝1,000 股）"
         elif tw and lots and raw_qty is not None and abs(raw_qty * price - amount) <= tolerance:
-            message += "，數量可能是股數，不是張數"
-        row.add(_flag("amount_mismatch", message + "。"))
+            message += "・可能是股數，不是張數"
+        row.add(_flag("amount_mismatch", message))
     # 價金 as printed, or shares × price when that is what was misread: one misread figure gives one flag
     bases = {amount, gross} if amount is not None else {gross}
     base = amount if amount is not None else gross
     if tw and fee is not None and fee > max((max(bases) * FEE_RATE).to_integral_value(ROUND_FLOOR), FEE_MIN) + 1:
-        row.add(_flag("fee_out_of_range", f"手續費 {_num(fee)} 比一般高很多。"))
+        row.add(_flag("fee_out_of_range", f"手續費 {_num(fee)}・比一般高很多"))
     # 複委託 settled in NT$ often prints the fee in NT$ next to US$ prices: booked as US$ it would inflate the cost
     if not tw and fee is not None and fee > max(US_FEE_FLOOR, max(bases) * US_FEE_RATE):
-        row.add(_flag("currency_mismatch", f"手續費 {_num(fee)} 以美元來說太高，可能是新台幣。"))
+        row.add(_flag("currency_mismatch", f"手續費 {_num(fee)}・以美元太高，可能是新台幣"))
     if t == "buy" and tw and tax is not None and tax > 0:
-        row.add(_flag("side_inconsistent", "買進卻有交易稅，買賣可能看反了。"))
+        row.add(_flag("side_inconsistent", "買進有交易稅・買賣可能看反了"))
     if t == "sell" and tw and tax is not None:
         rates = (ETF_TAX, Decimal(0)) if info.type == "etf" else (STOCK_TAX, DAY_TRADE_TAX)
         if not any(abs(tax - (b * r).to_integral_value(ROUND_FLOOR)) <= max(Decimal(1), b * r * Decimal("0.02"))
                    for r in rates for b in bases):
             usual = ETF_TAX if info.type == "etf" else (DAY_TRADE_TAX if kind_day_trade else STOCK_TAX)
             expected = (base * usual).to_integral_value(ROUND_FLOOR)
-            row.add(_flag("tax_out_of_range", f"賣出的交易稅是 {_num(tax)}，一般是成交金額的 "
-                                              f"{_num(usual * 100)}%（{_num(expected)}）。"))
+            row.add(_flag("tax_out_of_range", f"交易稅 {_num(tax)}・一般是成交金額的 "
+                                              f"{_num(usual * 100)}%（{_num(expected)}）"))
     if net is not None and net != 0 and ((t == "buy" and net > 0) or (t == "sell" and net < 0)):
-        row.add(_flag("side_inconsistent", "應收付金額的正負和買賣對不上，買賣可能看反了。"))
+        row.add(_flag("side_inconsistent", "應收付的正負和買賣不符・買賣可能看反了"))
 
 
 def _price_check(ctx: _Ctx, row: _Row, info: InstrumentInfo, d: date, price: Decimal) -> None:
@@ -346,11 +346,11 @@ def _price_check(ctx: _Ctx, row: _Row, info: InstrumentInfo, d: date, price: Dec
     if ref is None or ref <= 0:
         return
     if abs(price / ref - 1) > (TW_PRICE_BAND if tw else US_PRICE_BAND):
-        # a reference close (the history backfill) says so: 「那天參考收盤 1,030（非官方資料），這裡是 103。」
+        # a reference close (the history backfill) says so: 「那天參考收盤 1,030（非官方資料）・這裡 103」
         what, tail = ("參考收盤", "（非官方資料）") if reference else ("收盤", "")
         num = (lambda x: _num(x.quantize(CENT))) if reference else _num  # a split multiplied back: to the cent
         shown = f"那天{what} {num(day)}" if day is not None else f"前一個交易日{what} {num(prev or ref)}"
-        row.add(_flag("price_far_from_close", f"{shown}{tail}，這裡是 {_num(price)}。"))
+        row.add(_flag("price_far_from_close", f"{shown}{tail}・這裡 {_num(price)}"))
 
 
 def build_row(ctx: _Ctx, x: dict[str, Any], chunk: int) -> _Row:
@@ -382,16 +382,16 @@ def build_row(ctx: _Ctx, x: dict[str, Any], chunk: int) -> _Row:
     }
     row = _Row(raw, candidate, [], chunk)
     if dividend:
-        row.add(_flag("dividend_auto", "股利已經自動入帳。" if tw else "股利先不匯入。"))
+        row.add(_flag("dividend_auto", "股利・已自動入帳" if tw else "股利・不匯入"))
         return row
     if kind == "short":
-        row.add(_flag("short_sale", "融券不匯入。"))
+        row.add(_flag("short_sale", "融券・不匯入"))
         return row
     if kind == "daytrade":
-        row.add(_flag("day_trade", "當沖：同一天買進又賣出，先不匯入。"))
+        row.add(_flag("day_trade", "當沖・不匯入"))
     if kind == "margin":
         what = "買進" if t == "buy" else "賣出"
-        row.add(_flag("margin", f"融資{what}，當成一般{what}匯入。"))
+        row.add(_flag("margin", f"融資・當成一般{what}匯入"))
     missing = [f for f, v in (("trade_date", d), ("quantity", qty), ("price", price)) if not v]
     if side == "other":
         missing.append("side")
@@ -400,21 +400,21 @@ def build_row(ctx: _Ctx, x: dict[str, Any], chunk: int) -> _Row:
     if info is None:
         return row
     if printed_currency and printed_currency != info.currency:
-        message = ("美股的價格寫的是新台幣，可能是複委託換算過的。" if info.currency == "USD"
-                   else "台股的價格寫的是美元。")
+        message = ("美股價格是新台幣・可能是複委託換算的" if info.currency == "USD"
+                   else "台股價格是美元")
         row.add(_flag("currency_mismatch", message))
     if info.currency == "TWD" and qty is not None and qty != qty.to_integral_value():
-        row.add(_flag("fractional_tw_qty", "台股的股數要是整數。", "error"))
+        row.add(_flag("fractional_tw_qty", "台股股數要是整數", "error"))
     if qty and price:
         _arithmetic(row, info, kind == "daytrade", t, qty, price, amount, fee, tax, net, raw_qty, lots)
     if d is not None:
         trading = is_tw_trading_day(d) if info.currency == "TWD" else d.weekday() < 5
         if not trading:
-            row.add(_flag("not_trading_day", f"{_md(d, ctx.today)}（{WEEKDAYS[d.weekday()]}）不是交易日。"))
+            row.add(_flag("not_trading_day", f"{_md(d, ctx.today)}（{WEEKDAYS[d.weekday()]}）不是交易日"))
         start, end = ctx.period
         if start and end and not (start <= d <= end):
-            row.add(_flag("outside_period", f"{_md(d, ctx.today)} 不在對帳單的期間（{_md(start, ctx.today)}–"
-                                            f"{_md(end, ctx.today)}）裡。"))
+            row.add(_flag("outside_period", f"{_md(d, ctx.today)} 不在對帳單期間 {_md(start, ctx.today)}–"
+                                            f"{_md(end, ctx.today)}"))
         if price and d <= ctx.today:
             _price_check(ctx, row, info, d, price)
     if row.include and d is not None and qty and price:

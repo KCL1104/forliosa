@@ -135,7 +135,7 @@ export function editRow(row: DraftRow, patch: Partial<EditableFields>): DraftRow
 /** 「補一筆買進」：賣超那一列的股票、差的股數；日期與價格要自己填（日期一定要在那筆賣出以前） */
 export function shortfallRow(sell: DraftRow, id: string): DraftRow | null {
   const m = sell.flags.find((f) => f.code === "oversell")?.message ?? ""
-  // 伺服器的句子：「賣出 2,000 股，超過當時持有的 1,000 股。」
+  // 伺服器的標籤：「賣出 2,000 股・當時只有 1,000 股」
   const nums = [...m.matchAll(/([\d,]+(?:\.\d+)?)\s*股/g)].map((x) => Number(x[1]!.replace(/,/g, "")))
   const sold = parseNumber(sell.qty) ?? nums[0] ?? 0
   const held = nums.length >= 2 ? nums[1]! : 0
@@ -274,26 +274,26 @@ export function skippedSummary(rows: ImportRow[]): string | null {
   return parts.length ? `略過 ${parts.join("、")}` : null
 }
 
-/** 整份核對的一句話（對帳單沒有印合計時不說） */
+/** 整份核對的標籤（對帳單沒有印合計時不寫；2026-11-22 起是標籤，不是句子） */
 export function totalsLine(doc: Pick<StatementImport, "totals_check">, currency: "TWD" | "USD" = "TWD"): string | null {
   const t = doc.totals_check
   if (!t || t.ok === null) return null
-  if (t.ok || !t.diff) return "和對帳單的合計相符。"
+  if (t.ok || !t.diff) return "合計相符"
   const amount = formatMoney(Math.abs(t.diff), { currency })
-  return t.diff < 0 ? `比對帳單的合計少 ${amount}，可能漏讀了。` : `比對帳單的合計多 ${amount}，可能有一列讀了兩次。`
+  return t.diff < 0 ? `比對帳單合計少 ${amount}・可能漏讀` : `比對帳單合計多 ${amount}・可能重複讀`
 }
 
-/** 庫存畫面（請改用匯入庫存，2026-11-17）、不是交易紀錄：不出表格，直接說 */
+/** 庫存畫面（請改用匯入庫存，2026-11-17）、不是交易紀錄：不出表格，直接寫 */
 export function unsupportedLine(doc: Pick<StatementImport, "document_kind" | "rows" | "notice">): string | null {
   const own = defaultUnsupported(doc)
-  // 伺服器寫了句子就用它的（同一件事只有一種說法）
+  // 伺服器寫了就用它的（同一件事只有一種說法）
   return own && doc.notice ? doc.notice : own
 }
 
 function defaultUnsupported(doc: Pick<StatementImport, "document_kind" | "rows">): string | null {
-  if (doc.document_kind === "holdings_snapshot") return "這是庫存畫面，沒有買進日期。請改用「匯入庫存」。"
-  if (doc.document_kind === "not_a_trade_record") return "這個檔案裡沒有買賣紀錄。"
-  if (doc.rows.length === 0) return "這個檔案裡沒有讀到買賣。"
+  if (doc.document_kind === "holdings_snapshot") return "這是庫存畫面・改用匯入庫存"
+  if (doc.document_kind === "not_a_trade_record") return "沒有買賣紀錄"
+  if (doc.rows.length === 0) return "沒有讀到買賣"
   return null
 }
 

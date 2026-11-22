@@ -34,7 +34,7 @@ export function ReportTable({ table, aligned = false }: { table: Spec; aligned?:
       </figcaption>
       <div className="flex min-w-0 flex-col">
         {table.rows.length === 0 ? (
-          <p className="border-y border-rule py-2.5 text-base text-ink">{table.empty_text ?? "沒有資料。"}</p>
+          <p className="border-y border-rule py-2.5 text-base text-ink">{table.empty_text ?? "沒有資料"}</p>
         ) : (
           <div className="-mx-1 overflow-x-auto px-1">
             <table id={`${id}-b`} className="w-full border-collapse text-md">

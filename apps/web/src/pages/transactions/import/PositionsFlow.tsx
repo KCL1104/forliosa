@@ -22,7 +22,7 @@ import { PositionsReview, type ReplacedName } from "./PositionsReview"
  * 讀取中（可以取消）→ 確認表 → 簽名「匯入 N 檔」。每一檔記一筆買進（均價、手續費 0），整批可以復原。
  * - 截圖沒有文字層，塗不了，整張送出（畫面上說一句，和匯入對帳單一樣）；貼上的文字在這台裝置上先塗掉個資再送出。
  * - 不存截圖、不存文字、不存讀出的結果；只有簽名匯入的買進進帳本（來源「匯入」）。
- * - 讀出來是交易明細（不是庫存）：一句話＋「改用匯入對帳單」（截圖帶過去，不用再選一次）。
+ * - 讀出來是交易明細（不是庫存）：一個標籤＋「改用匯入對帳單」（截圖帶過去，不用再選一次）。
  */
 
 export type PositionsPhase = "pick" | "reading" | "review"
@@ -169,7 +169,7 @@ export function PositionsFlow({
       return (
         <>
           <div className={bodyClass(sheet)}>
-            <p className="border-y border-rule py-5 text-base text-ink">{doc.notice || "畫面上沒有讀到持股。"}</p>
+            <p className="border-y border-rule py-5 text-base text-ink">{doc.notice || "沒有讀到持股"}</p>
           </div>
           <div className={footerClass(sheet)}>
             <button type="button" onClick={reset} className={cn(textAction, "text-sm text-ink-2 hover:text-ink")}>

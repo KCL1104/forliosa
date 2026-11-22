@@ -42,7 +42,7 @@ export function ValuationTab({ inst: instrument, position, noQuote = false }: { 
 
   if (us) return <UsValuation inst={instrument} />
   if (noQuote) {
-    return <NotYet title="沒有報價，算不出估值">本益比、股價淨值比與殖利率都要用到股價。</NotYet>
+    return <NotYet title="沒有報價，算不出估值" />
   }
   if (valuation.isError) return <ErrorState error={valuation.error} onRetry={() => void valuation.refetch()} />
   if (!valuation.data) return <ChartSkeleton height={420} />
@@ -55,8 +55,8 @@ export function ValuationTab({ inst: instrument, position, noQuote = false }: { 
       <div className="flex flex-col gap-10">
         <NotYet title={instrument.type === "etf" ? "ETF 沒有本益比與股價淨值比河流圖" : "這檔還沒有估值資料"}>
           {instrument.type === "etf"
-            ? "ETF 是一籃子股票，沒有自己的每股盈餘與淨值。"
-            : "沒有這檔的歷史每股盈餘與淨值。"}
+            ? "沒有自己的每股盈餘與淨值"
+            : "沒有歷史每股盈餘與淨值"}
         </NotYet>
         {instrument.type === "etf" && instrument.market !== "US" && <EtfNavSection inst={instrument} titleId="val-premium" />}
         <YieldPanel valuation={v} />
@@ -102,7 +102,7 @@ export function ValuationTab({ inst: instrument, position, noQuote = false }: { 
  */
 function UsValuation({ inst }: { inst: InstrumentDetail }) {
   if (inst.type === "etf") {
-    return <NotYet title="ETF 沒有本益比與股價淨值比河流圖">ETF 是一籃子股票，沒有自己的每股盈餘與淨值；美股的股利沒有資料，所以也沒有殖利率。</NotYet>
+    return <NotYet title="ETF 沒有本益比與股價淨值比河流圖">沒有自己的每股盈餘與淨值・沒有股利資料</NotYet>
   }
   return (
     <NotYet
@@ -119,7 +119,7 @@ function UsValuation({ inst }: { inst: InstrumentDetail }) {
         </Link>
       }
     >
-      美股只有收盤價，沒有歷史本益比、每股淨值與股利資料。每股盈餘在「財務」。
+      沒有歷史本益比、每股淨值與股利資料
     </NotYet>
   )
 }
@@ -220,7 +220,7 @@ function RiverPanel({
         {runs.length > 0 && (
           <p className="mb-1 border-y border-rule py-2 text-sm">
             <span className="font-medium">{runs.map((r) => `${formatDate(r.from)}–${formatDate(r.to)}`).join("、")}</span>
-            ：{baseLabel} ≤ 0，{ratioLabel}沒有意義，這段期間不畫區間。
+            ・{baseLabel} ≤ 0・不畫區間
           </p>
         )}
         <div ref={box} className="h-[340px] w-full sm:h-[380px]">
@@ -283,7 +283,7 @@ function RiverPanel({
           <div className="flex flex-col gap-2">
             <p className="text-2xl font-medium">不適用</p>
             <p className="text-base text-ink">
-              {baseLabel} ≤ 0（{last?.base !== null && last?.base !== undefined ? perShare(last.base) : "無資料"}），{ratioLabel}沒有意義。可改看股價淨值比或殖利率。
+              {baseLabel} ≤ 0（{last?.base !== null && last?.base !== undefined ? perShare(last.base) : "無資料"}）・改看股價淨值比或殖利率
             </p>
           </div>
         ) : (
@@ -360,7 +360,7 @@ function YieldPanel({ valuation }: { valuation: Valuation }) {
       action={data.length >= 2 ? howTo.toggle : undefined}
     >
       {data.length < 2 ? (
-        <p className="text-base text-ink">配息資料還不夠畫殖利率走勢。</p>
+        <p className="text-base text-ink">配息資料還不夠</p>
       ) : (
         <>
           {howTo.panel(<p>殖利率＝近 12 個月現金股利 ÷ 收盤價。</p>, "mb-2")}

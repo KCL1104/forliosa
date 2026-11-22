@@ -1,5 +1,4 @@
 import { useState } from "react"
-import { inText } from "@/lib/cjk"
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { FOREIGN_FLOW_QUESTION } from "@/ai/suggestions"
 import { useAskAi } from "@/ai/use-ask"
@@ -39,7 +38,7 @@ function runOf(values: number[]): { side: "buy" | "sell" | null; days: number } 
   return { side, days }
 }
 
-/** 分頁第一行（規則句）：投信、外資連續買超／賣超 3 天以上才說 */
+/** 分頁第一行（標籤，2026-11-22 起不寫句子）：投信、外資連續買超／賣超 3 天以上才寫 */
 function lead(c: Chips): React.ReactNode {
   const parts: React.ReactNode[] = []
   const f = runOf(c.institutional.map((r) => r.foreign))
@@ -49,7 +48,7 @@ function lead(c: Chips): React.ReactNode {
   if (!parts.length) return null
   return (
     <>
-      {parts.flatMap((p, i) => (i ? ["，", p] : [p]))}。
+      {parts.flatMap((p, i) => (i ? ["・", p] : [p]))}
     </>
   )
 }
@@ -81,7 +80,7 @@ function ListedInstitutional({ inst, top20 }: { inst: InstrumentDetail; top20: b
         )
       }
     >
-      {!top20 && "外資持股只公布前 20 名。"}
+      {!top20 && "外資持股只公布前 20 名"}
     </NotYet>
   )
 }
@@ -222,7 +221,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
           }
         >
           {listed ? (
-            <ListedForeign inst={inst} chips={c} notes={top20Notes} />
+            <ListedForeign chips={c} notes={top20Notes} />
           ) : (
             <MiniLine data={c.foreign_holding_pct.map((m) => ({ t: m.t, v: m.pct }))} color="var(--chart-mine)" label="外資持股比" fmt={(v) => formatPercent(v, { signed: false })} />
           )}
@@ -254,12 +253,12 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
  * 上市股票的外資持股比：證交所開放資料只有「外資及陸資持股前 20 名」（MI_QFIIS_sort_20）。
  * 名列前 20 名時顯示持股比、名次與在榜日的走勢；其他上市股票說明為什麼沒有。
  */
-function ListedForeign({ inst, chips, notes }: { inst: InstrumentDetail; chips: Chips; notes: string[] }) {
+function ListedForeign({ chips, notes }: { chips: Chips; notes: string[] }) {
   const top = chips.foreign_top20
   if (!top) {
     return (
       <NotYet className="-mt-3 border-t-0" title="不在外資持股前 20 名">
-        證交所只公布外資持股比率前 20 名，{inText(inst.name, "start")}不在名單上。
+        證交所只公布前 20 名
       </NotYet>
     )
   }
@@ -271,7 +270,8 @@ function ListedForeign({ inst, chips, notes }: { inst: InstrumentDetail; chips: 
         <p className="num text-2xl font-medium">{formatPercent(top.pct, { signed: false })}</p>
       )}
       <p className="mt-2 text-base text-ink">
-        {formatDateShort(top.as_of)} 名列證交所外資及陸資持股前 20 名第 {top.rank} 名。{notes.map((n) => (n.endsWith("。") ? n : `${n}。`)).join("")}
+        外資及陸資持股前 20 名・{formatDateShort(top.as_of)}
+        {notes.map((n) => `・${n.replace(/。$/, "")}`).join("")}
       </p>
     </>
   )
@@ -283,7 +283,7 @@ const points = <K extends "margin_balance" | "short_balance">(rows: { t: string;
   rows.flatMap((m) => (m[key] === null ? [] : [{ t: m.t, v: m[key] as number }]))
 
 function MiniLine({ data, color, label, fmt }: { data: { t: string; v: number }[]; color: string; label: string; fmt: (v: number) => string }) {
-  if (data.length < 2) return <NotYet className="-mt-3 border-t-0" title="資料還不夠畫走勢">至少要有兩天的資料。</NotYet>
+  if (data.length < 2) return <NotYet className="-mt-3 border-t-0" title="資料還不夠畫走勢">要有兩天的資料</NotYet>
   // 比率的變化很小時（例如外資持股 75.2%–75.5%），刻度要有一位小數才不會重複
   const values = data.map((d) => d.v)
   const pctDecimals = Math.max(...values) - Math.min(...values) < 0.03 ? 1 : 0

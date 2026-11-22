@@ -21,7 +21,7 @@ describe("美股 ETF 的配息空狀態", () => {
   it("財務分頁不再叫人去看股利分頁", async () => {
     const voo = await api.getInstrument("VOO")
     const { container } = withQueries(<FinancialsTab inst={voo} />)
-    expect(container.textContent).toContain("持股與費用率請看發行商公告。")
+    expect(container.textContent).toContain("持股與費用率見發行商公告")
     expect(container.textContent).not.toContain("「股利」分頁")
   })
 })

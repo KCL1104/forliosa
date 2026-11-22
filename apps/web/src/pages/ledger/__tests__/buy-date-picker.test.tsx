@@ -49,14 +49,14 @@ describe("選買入日", () => {
     const readout = dialog.querySelector<HTMLElement>("[data-picker-readout]")!
     expect(within(readout).getByText("目前的日期")).toBeInTheDocument()
     expect(readout.textContent).toContain("2025/12/5")
-    expect(within(readout).getByText("帳本上記的是 2025/12/6，那天沒有收盤，這是前一個交易日。")).toBeInTheDocument()
+    expect(within(readout).getByText("帳本 2025/12/6 沒有收盤・前一個交易日")).toBeInTheDocument()
   })
 
   it("#16a 美股（歷史只從 2024/7/1 開始）：找不到時照實寫有資料的期間，不寫「五年內」；3 年、5 年和 1 年一樣時不放", async () => {
     // VOO 的成本 100（比 2024/7 以後的最低價低很多）：找不到
     const dialog = await open(lotOf({ symbol: "VOO", price: 100, currency: "USD", imported_on: "2025-11-29", trade_date: "2025-11-29" }), "Vanguard S&P 500 ETF", "US")
     await within(dialog).findByRole("group", { name: /^價格走勢/ }, T)
-    expect(within(dialog).getByText(/^2024\/7\/1 – 2025\/11\/2\d 的股價都沒有經過成本 US\$100\.00。$/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/^2024\/7\/1 – 2025\/11\/2\d・沒有經過成本 US\$100\.00$/)).toBeInTheDocument()
     expect(dialog.textContent).not.toContain("五年")
     const chips = within(dialog).getByRole("radiogroup", { name: "走勢的長度" })
     expect(within(chips).getAllByRole("radio").map((r) => r.textContent)).toEqual(["1年", "3年"])
@@ -66,7 +66,7 @@ describe("選買入日", () => {
     // 0050 2025/6/18 一拆四；2026/11/12 匯入
     const dialog = await open(lotOf({ symbol: "0050.TW", price: 60, trade_date: "2026-03-02", estimated_date: "2026-03-02", date_basis: "estimated", imported_on: "2026-11-12" }), "元大台灣50")
     await within(dialog).findByRole("group", { name: /^價格走勢/ }, T)
-    expect(within(dialog).getByText("2025/6/18 股票分割，之前的日子不能選")).toBeInTheDocument()
+    expect(within(dialog).getByText("2025/6/18 股票分割・之前不能選")).toBeInTheDocument()
     // 圖從分割那天開始：只剩 1 年、3 年（3 年就是全部）
     const chips = within(dialog).getByRole("radiogroup", { name: "走勢的長度" })
     expect(within(chips).getAllByRole("radio").map((r) => r.textContent)).toEqual(["1年", "3年"])
@@ -78,7 +78,7 @@ describe("選買入日", () => {
   it("沒有分割、減資、配股：不寫那一行", async () => {
     const dialog = await open(lotOf({ symbol: "6488.TWO", price: 580, trade_date: "2025-07-02", estimated_date: "2025-07-02", date_basis: "estimated", imported_on: "2025-11-29" }), "環球晶")
     await within(dialog).findByRole("group", { name: /^價格走勢/ }, T)
-    expect(dialog.textContent).not.toContain("之前的日子不能選")
+    expect(dialog.textContent).not.toContain("之前不能選")
   })
 
   it("台股有五年的資料：1年・3年・5年都放", async () => {
@@ -95,26 +95,26 @@ describe("#16b／#16c 讀數下面那一句（readoutLine）", () => {
 
   it("當天經過成本（估計就是照這個找的）：寫那天的最低–最高，不寫收盤差幾 %", () => {
     const candles = [k("2025-07-01", 560, 570, 565), k("2025-07-02", 545, 612, 550)]
-    expect(readoutLine(candles, 1, base)).toEqual({ text: "這天股價在 545–612 之間，經過你的成本 580。", strong: false })
+    expect(readoutLine(candles, 1, base)).toEqual({ text: "當天 545–612・經過成本 580", strong: false })
   })
 
   it("跳空越過成本：寫前一天與這天的價格", () => {
     const up = [k("2025-07-01", 560, 570, 565), k("2025-07-02", 590, 600, 595)]
-    expect(readoutLine(up, 1, base)!.text).toBe("前一天最高 570，這天最低 590，跳空越過你的成本 580。")
+    expect(readoutLine(up, 1, base)!.text).toBe("前一天最高 570・當天最低 590・跳空越過成本 580")
     const down = [k("2025-07-01", 590, 600, 595), k("2025-07-02", 560, 570, 565)]
-    expect(readoutLine(down, 1, base)!.text).toBe("前一天最低 590，這天最高 570，跳空越過你的成本 580。")
+    expect(readoutLine(down, 1, base)!.text).toBe("前一天最低 590・當天最高 570・跳空越過成本 580")
   })
 
   it("沒有經過、收盤差 3% 以上：照實說差多少（15px 墨色）；差不多時一句淡墨", () => {
     const far = [k("2025-05-06", 540, 560, 550), k("2025-05-07", 530, 540, 536)]
-    expect(readoutLine(far, 1, base)).toEqual({ text: "這天收盤 536，和你的成本 580 差 7.6%。", strong: true })
+    expect(readoutLine(far, 1, base)).toEqual({ text: "收盤 536・和成本 580 差 7.6%", strong: true })
     const near = [k("2025-05-07", 583, 595, 590), k("2025-05-08", 582, 590, 585)]
-    expect(readoutLine(near, 1, base)).toEqual({ text: "這天收盤和你的成本 580 差 0.9%。", strong: false })
+    expect(readoutLine(near, 1, base)).toEqual({ text: "收盤和成本 580 差 0.9%", strong: false })
   })
 
   it("帳本上的日期沒有收盤（選的是前一個收盤日）：照實說", () => {
     const candles = [k("2025-11-27", 600, 620, 610), k("2025-11-28", 600, 620, 610)]
-    expect(readoutLine(candles, 1, { ...base, lotDate: "2025-11-29", initialIdx: 1 })!.text).toBe("帳本上記的是 2025/11/29，那天沒有收盤，這是前一個交易日。")
+    expect(readoutLine(candles, 1, { ...base, lotDate: "2025-11-29", initialIdx: 1 })!.text).toBe("帳本 2025/11/29 沒有收盤・前一個交易日")
   })
 
   it("隱私模式：什麼都不寫（收盤加差幾 % 就算得出成本）", () => {

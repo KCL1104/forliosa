@@ -148,7 +148,7 @@ export function DailyArticle({ r, latest, premarket = null }: { r: DailyReport; 
               ))}
             </ul>
             {/* 開了報酬率、那天沒有數字的人（例如還沒記帳）：只寫人數，不畫一排「—」 */}
-            {(f.returns_no_data ?? 0) > 0 && <p className="mt-1 text-sm text-ink-2">另 {f.returns_no_data} 人沒有這天的資料。</p>}
+            {(f.returns_no_data ?? 0) > 0 && <p className="mt-1 text-sm text-ink-2">另 {f.returns_no_data} 人・沒有這天的資料</p>}
           </div>
         )}
         <div className="flex flex-col gap-4">

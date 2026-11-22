@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { direction, formatCompact, formatDate, formatMoney, formatNumber, formatPercent, MASK, toneClass } from "@/lib/format"
-import { minusMonths, responseExceedsData, TREND_RANGES, trendState } from "@/lib/trend-range"
+import { minusMonths, responseExceedsData, sharedTwr, TREND_RANGES, trendState } from "@/lib/trend-range"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { niceTicks } from "@/ai/chart-geometry"
@@ -89,6 +89,9 @@ export function PerformanceView() {
   // 看這個帳戶「全部」的序列（區間的回應沒有基準收盤那一點）
   // 分好幾次匯入時每一次一段，一行列出來（「2024/7/29 – 2025/11/28、2026/9/1 – 2026/11/18」）
   const estimateText = composition?.estimated?.length && ownSeries ? trendEstimatedText(ownSeries, range, composition.estimated) : null
+  // 全部帳戶：報酬（時間加權）和首頁走勢讀數的「報酬」同一個數字（同一個來源，`sharedTwr`；2026-11-22）。
+  // 換帳戶時先留著的是上一個帳戶的回應（placeholder）：那時照它自己的
+  const twr = p ? (account === undefined && !perf.isPlaceholderData ? sharedTwr(p, home.data?.series) : p.twr) : null
 
   return (
     <div className="flex flex-col gap-5">
@@ -139,11 +142,12 @@ export function PerformanceView() {
           <DataNotes notes={p.notes?.filter((n) => n !== trendNote && !(heroSaysReference && isReferenceNote(n)))} />
           <div>
             {/* 資產組成只給自己看（決定 11）：查看別人的資產時傳 undefined，「含估計的買入日，不年化」也不寫 */}
-            <Metrics p={p} composition={composition} exceeds={exceeds} />
-            {/* 指標都含估計那一段時說一次（13px 淡墨）：報酬、和基準的差距、最大回撤、波動度都是照那段期間的估計持股算的 */}
+            <Metrics p={p} twr={twr} composition={composition} exceeds={exceeds} />
+            {/* 指標都含估計那一段時寫一次（13px 淡墨）：報酬、和基準的差距、最大回撤、波動度都是照那段期間的估計持股算的。
+                標籤，不是句子（2026-11-22） */}
             {estimateText && (
               <p className="mt-2 text-sm text-ink-2" data-metrics-estimate>
-                這些數字含 {estimateText}，{estimateText.includes("、") ? "那幾段" : "那段"}期間用估計的買入日計算。
+                含估計的買入日・{estimateText}
               </p>
             )}
           </div>
@@ -152,12 +156,12 @@ export function PerformanceView() {
             <Legend
               className="mb-2"
               items={[
-                { label: `${me}的（時間加權）`, color: "var(--chart-mine)", shape: "line", value: <Pct value={p.twr} /> },
+                { label: `${me}的（時間加權）`, color: "var(--chart-mine)", shape: "line", value: <Pct value={twr} /> },
                 { label: p.benchmark?.name ?? "基準", color: "var(--chart-bench)", shape: "line", value: formatPercent(p.benchmark?.twr) },
               ]}
             />
             {p.benchmark && p.benchmark.twr === null && (
-              <p className="mb-2 text-base text-ink">「{p.benchmark.name}」這段期間沒有資料，不能比較。</p>
+              <p className="mb-2 text-base text-ink">{p.benchmark.name}・這段期間沒有資料</p>
             )}
             <ReturnChart series={p.series} showBenchmark benchmarkName={p.benchmark?.name ?? "基準"} mineLabel={`${me}的報酬`} height={300} />
           </Panel>
@@ -229,11 +233,11 @@ function atLeastAYear(p: Performance, exceeds: boolean): boolean {
   return p.start_date <= minusMonths(p.end_date, 12)
 }
 
-function Metrics({ p, composition, exceeds }: { p: Performance; composition: Performance["composition"]; exceeds: boolean }) {
+function Metrics({ p, twr, composition, exceeds }: { p: Performance; twr: number | null; composition: Performance["composition"]; exceeds: boolean }) {
   const you = useWho("你")
   // 基準比區間晚開始（存檔開始以前沒有資料的指數，從它的第一個收盤起算）：期間不同，不比多少
   const benchLate = p.series[0]?.benchmark_index === null && p.series.some((x) => x.benchmark_index !== null)
-  const excess = !benchLate && p.twr !== null && p.benchmark?.twr != null ? p.twr - p.benchmark.twr : null
+  const excess = !benchLate && twr !== null && p.benchmark?.twr != null ? twr - p.benchmark.twr : null
   // 資產組成（原型）：估計的那一段不算年化報酬（後端這時 xirr 是 null），說出原因。`composition` 是外面已經依「只給自己看」擋過的
   const estimated = p.xirr === null && touchesSpan(composition?.estimated, p.start_date, p.end_date)
   // 未滿 1 年：後端算得出來也不放（短期間年化會放大成看起來很嚇人的數字）
@@ -244,7 +248,7 @@ function Metrics({ p, composition, exceeds }: { p: Performance; composition: Per
       // 和首頁走勢讀數的「報酬」同一個數字、同一個名字（2026-11-22 評論：原本寫「時間加權報酬（TWR）」，看起來像另一種報酬）
       label: "報酬（時間加權）",
       help: "不受存入、提出的影響，適合和基準比。",
-      value: <Pct value={p.twr} />,
+      value: <Pct value={twr} />,
       sub: excess !== null && (
         // 和基準的差距不是價格漲跌：不用紅綠，用「多／少」說方向
         // 報酬率相減是「個百分點」，不是百分比；中文名稱前後不加空白（英數字的名稱才加）
@@ -258,7 +262,7 @@ function Metrics({ p, composition, exceeds }: { p: Performance; composition: Per
       label: "年化 XIRR",
       help: `算進每一筆投入與取回的時間，是${you}實際的年化報酬。`,
       value: xirr === null ? <span className="text-ink-2">—</span> : <Pct value={xirr} />,
-      sub: xirr !== null ? "金額加權" : !yearLong ? "未滿 1 年" : estimated ? "含估計的買入日，不年化" : "期間太短或現金流不足，無法計算",
+      sub: xirr !== null ? "金額加權" : !yearLong ? "未滿 1 年" : estimated ? "含估計的買入日・不年化" : "現金流不足・無法計算",
     },
     {
       label: "最大回撤",
@@ -296,9 +300,10 @@ function DividendsByMonth({ p }: { p: Performance }) {
   return (
     <Panel title="每月股利" titleId="divm-title" aside={<span className="num text-md text-ink-2">{privacy ? MASK : `合計 ${formatMoney(total)}`}</span>}>
       {p.dividends_by_month.length === 0 ? (
-        <p className="text-base text-ink">這段期間沒有收到股利。</p>
+        // 標籤（2026-11-22）：合計已經寫在標題旁
+        <p className="text-base text-ink">沒有股利</p>
       ) : privacy ? (
-        <p className="py-10 text-center text-base text-ink">隱私模式開啟中，金額圖表已隱藏。</p>
+        <p className="py-10 text-center text-base text-ink">隱私模式・金額已隱藏</p>
       ) : (
         <div className="h-[200px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -327,10 +332,10 @@ function RealizedByYear({ p }: { p: Performance }) {
   return (
     <Panel title="每年已實現損益" titleId="real-title">
       {p.realized_by_year.length === 0 ? (
-        <p className="text-base text-ink">這段期間沒有賣出，沒有已實現損益。</p>
+        <p className="text-base text-ink">沒有賣出</p>
       ) : p.realized_by_year.length === 1 ? null : privacy ? (
         // 只有一年時不畫圖：一根柱子的半版圖只是把下面那一行再畫一次
-        <p className="py-10 text-center text-base text-ink">隱私模式開啟中，金額圖表已隱藏。</p>
+        <p className="py-10 text-center text-base text-ink">隱私模式・金額已隱藏</p>
       ) : (
         <div className="h-[200px] w-full">
           <ResponsiveContainer width="100%" height="100%">

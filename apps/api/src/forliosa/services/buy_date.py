@@ -106,6 +106,11 @@ def before_change_message(change: ShareChange) -> str:
     return f"{ymd_text(change.date)} {change.text}，買進日期不能早於這一天"
 
 
+def before_change_label(change: ShareChange) -> str:
+    """The import row's ``before_share_change`` flag (a label, 2026-11-22): 「2025/6/18 股票分割・買入日不能更早」."""
+    return f"{ymd_text(change.date)} {change.text}・買入日不能更早"
+
+
 @dataclass
 class TradedHistory:
     """One symbol's daily bars as traded (oldest first), and the last day taken from the history backfill (``None``:
@@ -147,21 +152,20 @@ _ymd = ymd_text
 
 def no_crossing_message(cost: Decimal, currency: str, us: bool, first: date | None, start: date,
                         change: ShareChange | None = None) -> str:
-    """Why there is no estimate (appendix B's sentences). The searched prices began later than the search's start
-    (a stock listed later, a symbol the backfill has no rows of, the backfill switched off): that day is named
-    instead of 「五年內」; the search stopped at a share-count change (``change``: a split, a capital reduction, a
-    stock dividend): said so."""
+    """Why there is no estimate (appendix B's reasons; short labels since 2026-11-22). The searched prices began
+    later than the search's start (a stock listed later, a symbol the backfill has no rows of, the backfill switched
+    off): that day is named instead of 「五年內」; the search stopped at a share-count change (``change``: a split, a
+    capital reduction, a stock dividend): said so."""
     shown = cost_text(cost, currency)
     if first is None:
-        return "沒有這一檔的股價，沒辦法估買入日。"
+        return "沒有股價・估不到買入日"
     if change is not None and first >= change.date:
-        return (f"{_ymd(change.date)} 以後的股價都沒有經過均價 {shown}，沒辦法估買入日（那天{change.text}，"
-                "之前的股價和現在的均價比不起來）。")
+        return f"{_ymd(change.date)} {change.text}以後沒有經過均價 {shown}・估不到買入日"
     if (first - start).days > COVERAGE_GRACE_DAYS + 4:  # a weekend and a holiday after the start are no gap
-        return f"{_ymd(first)} 以後的股價都沒有經過均價 {shown}，沒辦法估買入日。"
+        return f"{_ymd(first)} 以後沒有經過均價 {shown}・估不到買入日"
     if us:
-        return f"美股的股價只有 {_ymd(US_HISTORY_FROM)} 以後的，都沒有經過均價 {shown}，沒辦法估買入日。"
-    return f"五年內的股價都沒有經過均價 {shown}，沒辦法估買入日。"
+        return f"{_ymd(US_HISTORY_FROM)} 以後沒有經過均價 {shown}・估不到買入日"
+    return f"五年內沒有經過均價 {shown}・估不到買入日"
 
 
 @dataclass(frozen=True)

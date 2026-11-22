@@ -161,35 +161,35 @@ def test_reads_a_statement_and_flags_each_row(client, pool, fake, env, db):
                  "is_day_trade": False, "note": ""}
     assert by[1]["raw"]["trade_date"] == "2026/10/02" and by[1]["raw"]["page"] == 1
     assert by[2]["candidate"]["trade_date"] == "2026-10-05" and flags(by[2]) == ["duplicate"]
-    assert by[2]["flags"][0]["message"] == "10/5 已經記過一筆一樣的。" and by[2]["include"] is False
+    assert by[2]["flags"][0]["message"] == "10/5 已記過一樣的" and by[2]["include"] is False
     # by name, 3 張 → 3,000 shares; 融資 imported as an ordinary buy, tagged
     assert (by[3]["candidate"]["symbol"], by[3]["candidate"]["quantity"]) == ("2317.TW", 3000)
     assert flags(by[3]) == ["margin"] and by[3]["include"] is True
-    assert by[3]["flags"][0]["message"] == "融資買進，當成一般買進匯入。"
+    assert by[3]["flags"][0]["message"] == "融資・當成一般買進匯入"
     assert flags(by[4]) == ["day_trade"] and by[4]["include"] is False and by[4]["candidate"]["is_day_trade"] is True
     assert flags(by[5]) == ["dividend_auto"] and by[5]["include"] is False
-    assert by[5]["flags"][0]["message"] == "股利已經自動入帳。" and by[5]["candidate"]["type"] == "cash_dividend"
+    assert by[5]["flags"][0]["message"] == "股利・已自動入帳" and by[5]["candidate"]["type"] == "cash_dividend"
     assert flags(by[6]) == ["short_sale"] and by[6]["include"] is False
-    assert flags(by[7]) == ["unknown_symbol"] and by[7]["flags"][0]["message"] == "找不到「長榮」。"
+    assert flags(by[7]) == ["unknown_symbol"] and by[7]["flags"][0]["message"] == "找不到「長榮」"
     assert by[7]["candidate"]["symbol"] is None and by[7]["include"] is False
-    assert flags(by[8]) == ["ambiguous_symbol"] and by[8]["flags"][0]["message"] == "「國泰」對得到好幾檔，選一檔。"
+    assert flags(by[8]) == ["ambiguous_symbol"] and by[8]["flags"][0]["message"] == "「國泰」對到好幾檔・選一檔"
     assert flags(by[9]) == ["ambiguous_symbol"] and "代號 2454 是聯發科" in by[9]["flags"][0]["message"]
     assert flags(by[10]) == ["amount_mismatch"] and by[10]["include"] is True
-    assert by[10]["flags"][0]["message"] == "股數 × 價格和成交金額差 299,700，股數可能是張數（1 張＝1,000 股）。"
-    assert flags(by[11]) == ["fee_out_of_range"] and by[11]["flags"][0]["message"] == "手續費 5,000 比一般高很多。"
+    assert by[10]["flags"][0]["message"] == "股數 × 價格和成交金額差 299,700・可能是張數（1 張＝1,000 股）"
+    assert flags(by[11]) == ["fee_out_of_range"] and by[11]["flags"][0]["message"] == "手續費 5,000・比一般高很多"
     assert flags(by[12]) == ["tax_out_of_range"]
-    assert by[12]["flags"][0]["message"] == "賣出的交易稅是 100，一般是成交金額的 0.3%（918）。"
+    assert by[12]["flags"][0]["message"] == "交易稅 100・一般是成交金額的 0.3%（918）"
     assert flags(by[13]) == ["side_inconsistent"]
-    assert by[13]["flags"][0]["message"] == "買進卻有交易稅，買賣可能看反了。"
-    assert flags(by[14]) == ["not_trading_day"] and by[14]["flags"][0]["message"] == "10/10（六）不是交易日。"
+    assert by[13]["flags"][0]["message"] == "買進有交易稅・買賣可能看反了"
+    assert flags(by[14]) == ["not_trading_day"] and by[14]["flags"][0]["message"] == "10/10（六）不是交易日"
     assert flags(by[15]) == ["outside_period"]
-    assert by[15]["flags"][0]["message"] == "11/3 不在對帳單的期間（10/1–10/31）裡。"
+    assert by[15]["flags"][0]["message"] == "11/3 不在對帳單期間 10/1–10/31"
     assert flags(by[16]) == ["fractional_tw_qty"] and by[16]["include"] is False
-    assert flags(by[17]) == ["unreadable"] and by[17]["flags"][0]["message"] == "這一列的價格沒讀清楚。"
+    assert flags(by[17]) == ["unreadable"] and by[17]["flags"][0]["message"] == "沒讀清楚・價格"
     assert by[17]["candidate"]["price"] is None and by[17]["include"] is False
     assert flags(by[18]) == ["currency_mismatch"] and by[18]["candidate"]["currency"] == "USD"
     assert flags(by[19]) == ["oversell"] and by[19]["include"] is False
-    assert by[19]["flags"][0]["message"] == "賣出 5,000 股，超過當時持有的 3,000 股。"
+    assert by[19]["flags"][0]["message"] == "賣出 5,000 股・當時只有 3,000 股"
     assert flags(by[20]) == ["side_inconsistent"]
     assert not any(x["candidate"]["note"] for x in got)
 
@@ -292,7 +292,7 @@ def test_a_us_fee_too_high_for_dollars_is_flagged(client, pool, fake, env):
                       r("2026/10/21", "AAPL", "APPLE INC", qty="10", price="230", amount="2300", fee="15", tax="0",
                         currency="USD")]))
     rows = read(client, kind="images").json()["rows"]
-    assert [f["message"] for f in rows[0]["flags"]] == ["手續費 150 以美元來說太高，可能是新台幣。"]
+    assert [f["message"] for f in rows[0]["flags"]] == ["手續費 150・以美元太高，可能是新台幣"]
     assert flags(rows[0]) == ["currency_mismatch"] and rows[0]["include"] is False
     assert flags(rows[1]) == [] and rows[1]["include"] is True
 
@@ -313,7 +313,7 @@ def test_price_far_from_the_archived_close(client, pool, fake, env, engine):
     answer(fake, doc([r(price="103", amount="103000", fee="146"), r(price="1035", amount="1035000", fee="1474")]))
     out = read(client).json()
     assert flags(out["rows"][0]) == ["price_far_from_close"] and out["rows"][0]["include"] is True
-    assert out["rows"][0]["flags"][0]["message"] == "那天收盤 1,030，這裡是 103。"
+    assert out["rows"][0]["flags"][0]["message"] == "那天收盤 1,030・這裡 103"
     assert flags(out["rows"][1]) == []
 
 
@@ -334,7 +334,7 @@ def test_a_trade_before_the_archive_is_checked_against_the_reference_close(clien
     answer(fake, doc(rows))
     out = read(client).json()
     assert flags(out["rows"][0]) == ["price_far_from_close"] and out["rows"][0]["include"] is True
-    assert out["rows"][0]["flags"][0]["message"] == "那天參考收盤 1,030（非官方資料），這裡是 103。"
+    assert out["rows"][0]["flags"][0]["message"] == "那天參考收盤 1,030（非官方資料）・這裡 103"
     assert flags(out["rows"][1]) == []
 
 
@@ -347,7 +347,7 @@ def test_the_archive_wins_over_the_reference_close(client, pool, fake, env, engi
         s.commit()
     answer(fake, doc([r(price="103", amount="103000", fee="146"), r(price="1035", amount="1035000", fee="1474")]))
     out = read(client).json()
-    assert out["rows"][0]["flags"][0]["message"] == "那天收盤 1,030，這裡是 103。"  # official, not 參考
+    assert out["rows"][0]["flags"][0]["message"] == "那天收盤 1,030・這裡 103"  # official, not 參考
     assert flags(out["rows"][1]) == []  # compared with the official 1,030, not the backfill's 50
 
 
@@ -359,7 +359,7 @@ def test_a_reference_before_the_previous_day_uses_the_previous_reference(client,
         s.commit()
     answer(fake, doc([r(price="103", amount="103000", fee="146")]))
     out = read(client).json()
-    assert out["rows"][0]["flags"][0]["message"] == "前一個交易日參考收盤 1,020（非官方資料），這裡是 103。"
+    assert out["rows"][0]["flags"][0]["message"] == "前一個交易日參考收盤 1,020（非官方資料）・這裡 103"
 
 
 def test_a_split_between_the_previous_day_and_the_trade_is_divided_back_out(client, pool, fake, env, engine):
@@ -384,8 +384,8 @@ def test_a_split_between_the_previous_day_and_the_trade_is_divided_back_out(clie
     answer(fake, doc(rows, period=("2024/03/01", "2025/06/30")))
     out = read(client).json()
     assert flags(out["rows"][0]) == []
-    assert out["rows"][1]["flags"][0]["message"] == "那天參考收盤 47.2（非官方資料），這裡是 188。"
-    assert out["rows"][2]["flags"][0]["message"] == "那天參考收盤 150.45（非官方資料），這裡是 37.6。"
+    assert out["rows"][1]["flags"][0]["message"] == "那天參考收盤 47.2（非官方資料）・這裡 188"
+    assert out["rows"][2]["flags"][0]["message"] == "那天參考收盤 150.45（非官方資料）・這裡 37.6"
 
     # no close of the trade day itself and a split since the previous one: nothing to show both numbers alike with
     with Session(engine) as s:
@@ -411,7 +411,7 @@ def test_holdings_screenshots_are_pointed_to_the_holdings_import(client, pool, f
     answer(fake, doc([r()], kind="holdings_snapshot", period=("", "")))
     out = client.post(URL, json={"kind": "images", "pages": pages(1, data=JPEG, media_type="image/jpeg")}).json()
     assert (out["document_kind"], out["rows"], out["period"], out["retried"]) == ("holdings_snapshot", [], None, False)
-    assert out["notice"] == "這是庫存畫面，沒有買進日期。請改用「匯入庫存」。"
+    assert out["notice"] == "這是庫存畫面・改用匯入庫存"
     assert len(fake.requests) == 1
 
 

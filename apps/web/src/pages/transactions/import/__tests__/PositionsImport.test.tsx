@@ -141,12 +141,12 @@ describe("匯入庫存", () => {
     // 名稱是這一列最主要的字：墨色（沒勾的列也是）
     expect(within(dialog).getByText("台積電", { selector: "button span" })).toHaveClass("text-ink", "text-base")
     // 融資不寫句子：代號旁的「融資」
-    expect(within(dialog).queryByText("融資的庫存，當成一般持股匯入。")).toBeNull()
+    expect(within(dialog).queryByText("融資・當成一般持股匯入")).toBeNull()
     expect(within(dialog).getByText("融資")).toHaveClass("status-tag")
     // 只有總成本：均價是算出來的；找不到、融券
     expect(within(dialog).getByRole("textbox", { name: "第 4 檔的均價" })).toHaveValue("120")
     expect(within(dialog).getByRole("textbox", { name: "第 4 檔的總成本" })).toHaveValue("180,000")
-    expect(within(dialog).getByText("找不到「台光電」。")).toBeInTheDocument()
+    expect(within(dialog).getByText("找不到「台光電」")).toBeInTheDocument()
     expect(within(dialog).getByRole("checkbox", { name: "匯入：台光電（還沒選股票）" })).not.toBeChecked()
     expect(within(dialog).getByRole("button", { name: "略過 1 檔融券" })).toBeInTheDocument()
     const count = Number(sign.getAttribute("aria-label")!.match(/\d+/)![0])
@@ -203,7 +203,7 @@ describe("匯入庫存", () => {
     await user.click(within(dialog).getByLabelText("庫存的文字"))
     await user.paste("2026/10/13 買進 2330 台積電 1,000 股 1,030")
     await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
-    expect(await within(dialog).findByText("這是交易明細，不是庫存。請改用「匯入對帳單」。", {}, T)).toBeInTheDocument()
+    expect(await within(dialog).findByText("這是交易明細・改用匯入對帳單", {}, T)).toBeInTheDocument()
     await user.click(within(dialog).getByRole("button", { name: "改用匯入對帳單" }))
     expect(await screen.findByRole("dialog", { name: "匯入對帳單" }, T)).toBeInTheDocument()
   }, 45_000)
@@ -380,7 +380,7 @@ describe("匯入庫存：估計的買入日（資產組成原型）", () => {
     const apply = within(dialog).getByRole("button", { name: "套用第 1 檔的估計買入日 2023/5/8" })
     expect(apply).toHaveTextContent(/^套用$/)
     // 中華電：五年內股價都沒有經過均價，沒有建議；日期下面「估計 —」，不寫原因的句子（「—」是什麼收在「日期怎麼算」）
-    expect(within(dialog).queryByText(/沒辦法估買入日/)).toBeNull()
+    expect(within(dialog).queryByText(/估不到買入日/)).toBeNull()
     const cannot = within(dialog).getByText("估不到")
     expect(cannot).toHaveClass("sr-only")
     expect(cannot.parentElement).toHaveTextContent(/^估計 —估不到$/)

@@ -18,7 +18,7 @@ import {
   type TransactionBatchInput,
   type TransactionBatchResult,
 } from "../types"
-import { beforeShareChangeMessage, shareChangeOn } from "./auto-dividends"
+import { beforeShareChangeLabel, shareChangeOn } from "./auto-dividends"
 import { US_ARCHIVE_START } from "./commercial"
 import { findInstrument, type MockInstrumentSpec } from "./instruments"
 import { addDays, closeOn, parseDay } from "./market"
@@ -38,9 +38,9 @@ function basisErrors(spec: MockInstrumentSpec, estimated: string | null, date: s
     const fiveYears = `${Number(back.slice(0, 4)) - 5}${back.slice(4)}`
     let lo = spec.market === "US" && US_ARCHIVE_START > fiveYears ? US_ARCHIVE_START : fiveYears
     if (change && change.date > lo) lo = change.date
-    if (estimated < lo || estimated > today) out.push(flag("bad_estimated_date", `估計的買入日 ${ymd(estimated)} 不在估得到的期間（${ymd(lo)} – ${ymd(today)}）。`, "error"))
+    if (estimated < lo || estimated > today) out.push(flag("bad_estimated_date", `估計的買入日 ${ymd(estimated)}・不在 ${ymd(lo)} – ${ymd(today)}`, "error"))
   }
-  if (change && date < change.date) out.push(flag("before_share_change", `${beforeShareChangeMessage(change)}。`, "error"))
+  if (change && date < change.date) out.push(flag("before_share_change", beforeShareChangeLabel(change), "error"))
   return out
 }
 
@@ -96,41 +96,41 @@ export function checkCandidates(rows: ImportCandidate[], ctx: CheckContext): Imp
     if (!r.symbol) return
     const spec = findInstrument(r.symbol)
     if (!spec) {
-      flags.push(flag("unknown_symbol", `找不到「${r.symbol}」。`, "error"))
+      flags.push(flag("unknown_symbol", `找不到「${r.symbol}」`, "error"))
       return
     }
     const qty = r.quantity ?? 0
     const price = r.price ?? 0
     const tw = spec.market !== "US"
-    if (tw && !Number.isInteger(qty)) flags.push(flag("fractional_tw_qty", "台股的股數要是整數。", "error"))
+    if (tw && !Number.isInteger(qty)) flags.push(flag("fractional_tw_qty", "台股股數要是整數", "error"))
     const day = parseDay(r.trade_date).getUTCDay()
-    if (day === 0 || day === 6) flags.push(flag("not_trading_day", `${md(r.trade_date)}（${WEEK[day]}）不是交易日。`))
+    if (day === 0 || day === 6) flags.push(flag("not_trading_day", `${md(r.trade_date)}（${WEEK[day]}）不是交易日`))
     if (ctx.period && (r.trade_date < ctx.period.from || r.trade_date > ctx.period.to)) {
-      flags.push(flag("outside_period", `${md(r.trade_date)} 不在對帳單的期間（${md(ctx.period.from)}–${md(ctx.period.to)}）裡。`))
+      flags.push(flag("outside_period", `${md(r.trade_date)} 不在對帳單期間 ${md(ctx.period.from)}–${md(ctx.period.to)}`))
     }
     if (price > 0) {
       const close = closeOn(spec, r.trade_date)
-      if (Math.abs(price / close - 1) > (tw ? 0.105 : 0.2)) flags.push(flag("price_far_from_close", `那天收盤 ${priceText(close)}，這裡是 ${priceText(price)}。`))
+      if (Math.abs(price / close - 1) > (tw ? 0.105 : 0.2)) flags.push(flag("price_far_from_close", `那天收盤 ${priceText(close)}・這裡 ${priceText(price)}`))
     }
     const gross = Math.round(qty * price * 100) / 100
-    if (r.amount != null && Math.abs(gross - r.amount) > 1) flags.push(flag("amount_mismatch", `股數 × 價格和成交金額差 ${n0(Math.abs(Math.round(gross - r.amount)))}。`))
+    if (r.amount != null && Math.abs(gross - r.amount) > 1) flags.push(flag("amount_mismatch", `股數 × 價格和成交金額差 ${n0(Math.abs(Math.round(gross - r.amount)))}`))
     const fee = r.fee ?? 0
     const base = r.amount ?? gross
-    if (tw && fee > Math.max(Math.floor(base * 0.001425), 20) + 1) flags.push(flag("fee_out_of_range", `手續費 ${n0(fee)} 比一般高很多。`))
+    if (tw && fee > Math.max(Math.floor(base * 0.001425), 20) + 1) flags.push(flag("fee_out_of_range", `手續費 ${n0(fee)}・比一般高很多`))
     const tax = r.tax ?? 0
-    if (r.type === "buy" && tax > 0) flags.push(flag("side_inconsistent", "買進卻有交易稅，買賣可能看反了。"))
+    if (r.type === "buy" && tax > 0) flags.push(flag("side_inconsistent", "買進有交易稅・買賣可能看反了"))
     if (r.type === "sell" && tw) {
       const rate = r.is_day_trade ? 0.0015 : spec.type === "etf" ? 0.001 : 0.003
       const expected = Math.floor(base * rate)
       if (Math.abs(tax - expected) > Math.max(1, expected * 0.02)) {
-        flags.push(flag("tax_out_of_range", `賣出的交易稅是 ${n0(tax)}，一般是成交金額的 ${Number((rate * 100).toFixed(2))}%（${n0(expected)}）。`))
+        flags.push(flag("tax_out_of_range", `交易稅 ${n0(tax)}・一般是成交金額的 ${Number((rate * 100).toFixed(2))}%（${n0(expected)}）`))
       }
     }
     // 重複：帳本裡、或這一批前面已經有同一天同一檔同方向同股數的
     const others = [...mine.filter((t) => t.source !== "auto"), ...rows.slice(0, i).map((x) => ({ ...x, source: "import" as const }))]
     const same = others.filter((t) => t.symbol === r.symbol && t.type === r.type && t.trade_date === r.trade_date && t.quantity === r.quantity)
-    if (same.some((t) => t.price === r.price)) flags.push(flag("duplicate", `${md(r.trade_date)} 已經記過一筆一樣的。`))
-    else if (same.length) flags.push(flag("possible_duplicate", `${md(r.trade_date)} 已經記過一筆股數一樣、價格不同的${r.type === "sell" ? "賣出" : "買進"}。`))
+    if (same.some((t) => t.price === r.price)) flags.push(flag("duplicate", `${md(r.trade_date)} 已記過一樣的`))
+    else if (same.length) flags.push(flag("possible_duplicate", `${md(r.trade_date)} 已記過同股數的${r.type === "sell" ? "賣出" : "買進"}・價格 ${n0(same[0]!.price ?? 0)}`))
   })
   // 賣超：帳本＋這一批照日期重播（同一天買在前、賣在後）
   type Ev = { date: string; order: number; symbol: string; delta: number; ratio?: number; row?: number }
@@ -157,7 +157,7 @@ export function checkCandidates(rows: ImportCandidate[], ctx: CheckContext): Imp
       continue
     }
     if (e.delta < 0 && before + e.delta < -1e-9 && e.row !== undefined) {
-      out[e.row]!.push(flag("oversell", `賣出 ${n0(-e.delta)} 股，超過當時持有的 ${n0(Math.max(before, 0))} 股。`, "error"))
+      out[e.row]!.push(flag("oversell", `賣出 ${n0(-e.delta)} 股・當時只有 ${n0(Math.max(before, 0))} 股`, "error"))
       continue
     }
     held.set(e.symbol, before + e.delta)
@@ -220,12 +220,12 @@ function statementFixture(txns: Transaction[], accountId: string): FixtureRow[] 
   const seeded = (symbol: string, date: string) => txns.find((t) => t.account_id === a && t.symbol === symbol && t.type === "buy" && t.trade_date === date)
   const dca0050 = seeded("0050.TW", "2026-10-06")
   const dca00878 = seeded("00878.TW", "2026-10-12")
-  const dayTrade = [flag("day_trade", "當沖：同一天買進又賣出，先不匯入。", "warning")]
+  const dayTrade = [flag("day_trade", "當沖・不匯入", "warning")]
   const c = closeOf
   return [
     row(a, "2026-10-01", "buy", "2603", "長榮", 1000, c("2603", "2026-10-01"), { kind: "當沖", dayTrade: true, flags: dayTrade }),
     row(a, "2026-10-01", "sell", "2603", "長榮", 1000, c("2603", "2026-10-01"), { kind: "當沖", dayTrade: true, flags: dayTrade }),
-    row(a, "2026-10-01", "buy", "2317", "鴻海", 3000, c("2317", "2026-10-01"), { kind: "融資", flags: [flag("margin", "融資買進，當成一般買進匯入。", "warning")] }),
+    row(a, "2026-10-01", "buy", "2317", "鴻海", 3000, c("2317", "2026-10-01"), { kind: "融資", flags: [flag("margin", "融資・當成一般買進匯入", "warning")] }),
     row(a, "2026-10-02", "buy", "2412", "中華電", 1000, c("2412", "2026-10-02")),
     row(a, "2026-10-05", "buy", "2317", "鴻海", 580, c("2317", "2026-10-05"), { kind: "零股" }),
     ...(dca0050 ? [row(a, "2026-10-06", "buy", "0050", "元大台灣50", dca0050.quantity, dca0050.price, { kind: "定期定額", fee: dca0050.fee })] : []),
@@ -242,21 +242,21 @@ function statementFixture(txns: Transaction[], accountId: string): FixtureRow[] 
       : []),
     // 只買過 1,000 股就賣 2,000 股：「補一筆買進」
     row(a, "2026-10-13", "sell", "2603", "長榮", 2000, c("2603", "2026-10-13")),
-    row(a, "2026-10-14", "buy", "", "台積", 1000, c("2330", "2026-10-14"), { unresolved: true, flags: [flag("unknown_symbol", "找不到「台積」。", "error")] }),
-    row(a, "2026-10-14", "buy", "", "國泰", 1000, 20.1, { unresolved: true, flags: [flag("ambiguous_symbol", "「國泰」對得到好幾檔，選一檔。", "error")] }),
+    row(a, "2026-10-14", "buy", "", "台積", 1000, c("2330", "2026-10-14"), { unresolved: true, flags: [flag("unknown_symbol", "找不到「台積」", "error")] }),
+    row(a, "2026-10-14", "buy", "", "國泰", 1000, 20.1, { unresolved: true, flags: [flag("ambiguous_symbol", "「國泰」對到好幾檔・選一檔", "error")] }),
     row(a, "2026-10-15", "sell", "2317", "鴻海", 1000, c("2317", "2026-10-15"), { tax: 0 }),
     row(a, "2026-10-15", "buy", "6488", "環球晶", 100, c("6488", "2026-10-15"), { kind: "零股", tax: 117 }),
     row(a, "2026-10-16", "buy", "2330", "台積電", 10.5, c("2330", "2026-10-16"), { kind: "零股" }),
-    row(a, "2026-10-16", "buy", "AAPL", "APPLE INC", 10, 7200, { kind: "複委託", flags: [flag("currency_mismatch", "美股的價格寫的是新台幣，可能是複委託換算過的。", "warning")] }),
-    row(a, "2026-10-19", "buy", "2881", "富邦金", 3000, null, { fee: 0, flags: [flag("unreadable", "這一列沒讀清楚。", "error")] }),
+    row(a, "2026-10-16", "buy", "AAPL", "APPLE INC", 10, 7200, { kind: "複委託", flags: [flag("currency_mismatch", "美股價格是新台幣・可能是複委託換算的", "warning")] }),
+    row(a, "2026-10-19", "buy", "2881", "富邦金", 3000, null, { fee: 0, flags: [flag("unreadable", "沒讀清楚・價格", "error")] }),
     row(a, "2026-10-20", "sell", "2330", "台積電", 500, c("2330", "2026-10-20")),
     row(a, "2026-10-21", "buy", "0050", "元大台灣50", 64, c("0050", "2026-10-21"), { kind: "零股" }),
     row(a, "2026-11-03", "buy", "2382", "廣達", 1000, c("2382", "2026-11-03")),
     // 不匯入的：股利已經自動入帳、融券
-    row(a, "2026-10-08", "cash_dividend", "2454", "聯發科", 200, 25, { kind: "股利", amount: 5000, flags: [flag("dividend_auto", "股利已經自動入帳。", "warning")] }),
-    row(a, "2026-10-16", "cash_dividend", "2330", "台積電", 1500, 5, { kind: "股利", amount: 7500, flags: [flag("dividend_auto", "股利已經自動入帳。", "warning")] }),
-    row(a, "2026-10-23", "stock_dividend", "6488", "環球晶", 10, null, { kind: "配股", amount: 0, flags: [flag("dividend_auto", "股利已經自動入帳。", "warning")] }),
-    row(a, "2026-10-22", "sell", "2603", "長榮", 1000, c("2603", "2026-10-22"), { kind: "融券", flags: [flag("short_sale", "融券不匯入。", "warning")] }),
+    row(a, "2026-10-08", "cash_dividend", "2454", "聯發科", 200, 25, { kind: "股利", amount: 5000, flags: [flag("dividend_auto", "股利・已自動入帳", "warning")] }),
+    row(a, "2026-10-16", "cash_dividend", "2330", "台積電", 1500, 5, { kind: "股利", amount: 7500, flags: [flag("dividend_auto", "股利・已自動入帳", "warning")] }),
+    row(a, "2026-10-23", "stock_dividend", "6488", "環球晶", 10, null, { kind: "配股", amount: 0, flags: [flag("dividend_auto", "股利・已自動入帳", "warning")] }),
+    row(a, "2026-10-22", "sell", "2603", "長榮", 1000, c("2603", "2026-10-22"), { kind: "融券", flags: [flag("short_sale", "融券・不匯入", "warning")] }),
   ]
 }
 
@@ -348,9 +348,9 @@ export function createImportStore(deps: {
       const flags: ImportFlag[] = []
       const h = spec ? (held.get(spec.symbol) ?? null) : null
       const date = r.trade_date ?? day
-      if (!spec) flags.push(flag("unknown_symbol", `找不到「${r.symbol}」。`, "error"))
+      if (!spec) flags.push(flag("unknown_symbol", `找不到「${r.symbol}」`, "error"))
       else {
-        if (h && !replacing.has(spec.symbol)) flags.push(flag("in_ledger", `帳本裡已經有 ${n0(h.quantity)} 股。勾「以券商為準」才會換掉，不然這一列不要匯入。`, "error"))
+        if (h && !replacing.has(spec.symbol)) flags.push(flag("in_ledger", `已在帳本 ${n0(h.quantity)} 股・選換成券商才匯入`, "error"))
         if (spec.market !== "US" && !Number.isInteger(r.quantity)) flags.push(flag("validation_error", "台股的股數要是整數。", "error"))
       }
       if (date > deps.today || date < "1990-01-01") flags.push(flag("bad_date", "日期要在 1990/1/1 到今天之間。", "error"))
@@ -379,7 +379,7 @@ export function createImportStore(deps: {
       const held = new Map(accounts.map((a) => [a.id, heldIn(txns, a.id, deps.today)]))
       const ctx = { account, accounts, held, brokerName: "永豐金證券", today: deps.today }
       if (body.kind === "text" && /買進|賣出|成交/.test(body.text!) && /\d{4}[/-]\d{1,2}[/-]\d{1,2}/.test(body.text!)) {
-        return { ...readPositions([], ctx, "text"), document_kind: "trade_records", notice: "這是交易明細，不是庫存。請改用「匯入對帳單」。" }
+        return { ...readPositions([], ctx, "text"), document_kind: "trade_records", notice: "這是交易明細・改用匯入對帳單" }
       }
       const read = body.kind === "images" ? holdingsFixture(held.get(account.id) ?? new Map()) : parsePastedHoldings(body.text!)
       return readPositions(read, ctx, body.kind)

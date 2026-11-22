@@ -49,7 +49,7 @@ export function LimitsEditor({ limits, mode, open, onClose }: { limits: Allocati
         <DrawerContent>
           <DrawerHeader className="pb-0">
             <DrawerTitle>設定上限</DrawerTitle>
-            <DrawerDescription>超過時，配置和 AI 都會標出來。</DrawerDescription>
+            <DrawerDescription className="sr-only">超過時，配置和 AI 都會標出來。</DrawerDescription>
           </DrawerHeader>
           <LimitsForm key={round} limits={limits} onDone={onClose} className="safe-bottom px-4 pb-4" />
         </DrawerContent>
@@ -62,7 +62,6 @@ export function LimitsEditor({ limits, mode, open, onClose }: { limits: Allocati
       <h3 id="limits-title" className="text-lg font-bold">
         設定上限
       </h3>
-      <p className="mt-1 text-base text-ink">超過時，配置和 AI 都會標出來。</p>
       <LimitsForm limits={limits} onDone={onClose} inline />
     </section>
   )

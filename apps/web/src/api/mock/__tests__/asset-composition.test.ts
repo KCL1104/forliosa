@@ -111,14 +111,14 @@ describe("mock：資產組成原型的示範帳本", () => {
     const early = h.candles.find((c) => c.t < "2025-06-18" && (c.h < lo || c.l > hi))!
     const read = await api.parsePositions({ kind: "text", text: `0050 元大台灣50 1000 ${early.c}`, account_id: "acc_01JSINOPAC" })
     expect(read.rows[0]!.estimated_date).toBeNull()
-    expect(read.rows[0]!.flags.find((f) => f.code === "no_crossing")!.message).toMatch(/^2025\/6\/18 以後的股價都沒有經過均價 .*（那天股票分割，之前的股價和現在的均價比不起來）。$/)
+    expect(read.rows[0]!.flags.find((f) => f.code === "no_crossing")!.message).toMatch(/^2025\/6\/18 股票分割以後沒有經過均價 .*・估不到買入日$/)
     // 送出：日期早於分割那天、估計不是估得到的日子
     const row = { symbol: "0050.TW", quantity: 1000, price: 50, currency: "TWD" as const, replace: true }
     const check = await api.checkPositions({ account_id: "acc_01JSINOPAC", rows: [{ ...row, trade_date: "2025-06-17", date_basis: "picked", estimated_date: "2025-06-10" }] })
     expect(check.ok).toBe(false)
     expect(check.rows[0]!.flags.map((f) => [f.code, f.message])).toEqual(expect.arrayContaining([
-      ["before_share_change", "2025/6/18 股票分割，買進日期不能早於這一天。"],
-      ["bad_estimated_date", "估計的買入日 2025/6/10 不在估得到的期間（2025/6/18 – 2026/11/12）。"],
+      ["before_share_change", "2025/6/18 股票分割・買入日不能更早"],
+      ["bad_estimated_date", "估計的買入日 2025/6/10・不在 2025/6/18 – 2026/11/12"],
     ]))
     // 分割那天本身可以；寫進去以後改日期也不能早於它
     const done = await api.commitPositions({ account_id: "acc_01JSINOPAC", rows: [{ ...row, trade_date: "2025-06-18", date_basis: "estimated", estimated_date: "2025-06-18" }] })

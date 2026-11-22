@@ -36,7 +36,7 @@ export interface DraftPosition {
   replace: boolean
   /** 這個帳戶現在已經有這一檔（重新檢查時更新） */
   inLedger: LedgerHolding | null
-  /** 伺服器的句子（`in_ledger` 不放在這裡：照 `inLedger` 的數字寫） */
+  /** 伺服器的標籤（`in_ledger` 不放在這裡：照 `inLedger` 的數字寫） */
   flags: ImportFlag[]
   /** 使用者改過的格子（鉛筆變墨水） */
   edited: ReadonlySet<PositionField>

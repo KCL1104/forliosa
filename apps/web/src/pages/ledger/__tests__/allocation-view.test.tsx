@@ -101,7 +101,7 @@ describe("配置分段", () => {
     expect(screen.getByRole("button", { name: /^ETF/ })).toHaveAttribute("aria-expanded", "true")
     expect(within(screen.getByRole("list", { name: "ETF裡面" })).getByText("國內股票型")).toBeInTheDocument()
     expect(screen.getByText("美股半導體")).toBeInTheDocument()
-    expect(screen.getByText("ETF 不算進產業，也不拆成分股。")).toBeInTheDocument()
+    expect(screen.getByText("ETF 不算產業・不拆成分股")).toBeInTheDocument()
   })
 
   it("只看一個帳戶：數字換成那個帳戶的（和持股一樣）", async () => {
@@ -114,26 +114,26 @@ describe("配置分段", () => {
     const total = holdings.reduce((s, h) => s + h.market_value, 0)
     const top = [...holdings].sort((a, b) => b.market_value - a.market_value)[0]!
     expect(screen.getAllByRole("listitem")[0]).toHaveTextContent(`${((top.market_value / total) * 100).toFixed(1)}%`)
-    expect(screen.getByText(/^美股依匯率 \d+\.\d{2} 換成新台幣。$/)).toBeInTheDocument()
+    expect(screen.getByText(/^美元匯率 \d+\.\d{2}$/)).toBeInTheDocument()
   })
 
   it("美股的匯率是後端給的、而且只在這個範圍裡有美元持股時才寫（只有台股的帳戶不寫）", async () => {
     renderApp("/?view=allocation")
     await list()
     const whole = await api.getAllocation()
-    expect(screen.getByText(`美股依匯率 ${whole.fx.USD!.toFixed(2)} 換成新台幣。`)).toBeInTheDocument()
+    expect(screen.getByText(`美元匯率 ${whole.fx.USD!.toFixed(2)}`)).toBeInTheDocument()
     await userEvent.click(screen.getByRole("combobox", { name: "帳戶" }))
     await userEvent.click(await screen.findByRole("option", { name: "永豐・一般" }, T))
-    await waitFor(() => expect(screen.queryByText(/美股依匯率/)).toBeNull(), T)
+    await waitFor(() => expect(screen.queryByText(/美元匯率/)).toBeNull(), T)
     expect((await api.getAllocation("acc_01JSINOPAC")).fx).toEqual({})
   })
 
   it("「最大產業不含 ETF」只說一次：桌面在集中度的格子裡，清單下面那一句只給手機（手機的格子沒地方寫）", async () => {
     renderApp("/?view=allocation")
     await list()
-    const note = screen.getByText(/ETF 算一檔，不拆成分股。/)
-    expect(note).toHaveTextContent("最大產業不含 ETF。ETF 算一檔，不拆成分股。")
-    expect(within(note).getByText("最大產業不含 ETF。")).toHaveClass("lg:hidden")
+    const note = screen.getByText(/ETF 算一檔・不拆成分股/)
+    expect(note).toHaveTextContent("最大產業不含 ETF・ETF 算一檔・不拆成分股")
+    expect(within(note).getByText("最大產業不含 ETF・")).toHaveClass("lg:hidden")
     // 格子裡的「・不含 ETF」反過來只給桌面
     expect(within(screen.getByText("最大產業").closest("div")!).getByText("・不含 ETF")).toHaveClass("max-lg:hidden")
   })
@@ -227,7 +227,7 @@ describe("配置分段", () => {
     expect(screen.getByText("超過你設定的 50%")).toBeInTheDocument()
     const tag = screen.getByText("超過你設定的 30%").closest("span.border-ink")!
     expect(tag.className).not.toMatch(/rise|fall|red|green/)
-    expect(screen.getByText(/直線是你設定的單一個股上限 30%/)).toBeInTheDocument()
+    expect(screen.getByText(/^你設定的單一個股上限 30%/)).toBeInTheDocument()
     expect(within(screen.getAllByRole("listitem")[0]!).getByText("超過上限")).toBeInTheDocument()
     expect(await api.getAllocation()).toMatchObject({ concentration: { limits: { holding: 0.3, industry: 0.5 } } })
     // 「修改」是展開／收合：再按一次收起來，aria-controls 指到編輯區

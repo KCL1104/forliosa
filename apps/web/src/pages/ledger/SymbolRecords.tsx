@@ -119,7 +119,7 @@ export function SymbolRecords({
   return (
     <div className={cn("@container", className)}>
       {entries.length === 0 ? (
-        <p className="py-3 text-base text-ink-2">這一檔還沒有買進或賣出的紀錄。</p>
+        <p className="py-3 text-base text-ink-2">沒有買賣紀錄</p>
       ) : (
         <>
           <div aria-hidden className={cn("form-head h-9 items-end pb-1.5 @max-[43rem]:hidden", GRID)}>
@@ -170,7 +170,7 @@ export function SymbolRecords({
               在紀錄裡看全部 {q.data.more ? `${trades.length} 筆以上` : `${trades.length} 筆`}交易
             </Link>
           )}
-          {diluted && entries.length > 0 && <span className="text-sm text-ink-2 @[43rem]:ml-auto">配過股或分割過，不列每一筆的漲跌。</span>}
+          {diluted && entries.length > 0 && <span className="text-sm text-ink-2 @[43rem]:ml-auto">配過股或分割過・不列每筆漲跌</span>}
           {/* 最重的動作放最後、淡墨（不用紅色：紅色是「漲」）；寬的時候靠右，和上面每一筆的「⋯」同一邊 */}
           {actions && !readOnly && all.length > 0 && (
             <button

@@ -57,7 +57,7 @@ function DigestArticle({ d, groupId }: { d: Digest; groupId: string }) {
         <span className="num text-sm text-ink-2">{formatDateTime(d.created_at)}</span>
       </header>
       {d.status === "pending" ? (
-        <p className="text-base text-ink">週報整理中。</p>
+        <p className="text-base text-ink">週報整理中</p>
       ) : d.status === "failed" ? (
         <p className="text-ink-2">這週的週報沒有產生成功。</p>
       ) : (

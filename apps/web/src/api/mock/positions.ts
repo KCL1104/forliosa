@@ -7,10 +7,10 @@ import { dailyCandles } from "./market"
 import { estimateBuyDate } from "@/lib/buy-date"
 
 /**
- * 匯入庫存的 mock（和後端 `services/positions_import.py` 同一套代碼與句子，只做示範用得到的部分）：
+ * 匯入庫存的 mock（和後端 `services/positions_import.py` 同一套代碼與標籤，只做示範用得到的部分）：
  * - 截圖：不管上傳什麼，回一張永豐金證券 app 的庫存畫面（已在帳本、股數和均價都一樣、只有總成本、零股、融資、
  *   找不到股票、融券各一列；兩張截圖重疊的一列合併）。「已在帳本」照目前的帳本即時算。
- * - 貼上的文字：一行一檔，照「代號 名稱 股數（或 N 張） 均價 [總成本]」讀；讀不到就說「這裡面沒有看到庫存。」
+ * - 貼上的文字：一行一檔，照「代號 名稱 股數（或 N 張） 均價 [總成本]」讀；讀不到就寫「沒有讀到庫存」
  */
 
 const n0 = (n: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 4 }).format(n)
@@ -67,7 +67,7 @@ function resolve(code: string, name: string): { spec?: MockInstrumentSpec; flag?
     const spec = /^[A-Z.]+$/.test(c) ? findInstrument(c) : (findInstrument(`${c}.TW`) ?? findInstrument(`${c}.TWO`))
     if (spec) {
       if (name && spec.market !== "US" && !spec.name.includes(name) && !name.includes(spec.name)) {
-        return { spec, flag: flag("ambiguous_symbol", `代號 ${spec.code} 是${spec.name}，畫面上寫的是「${name}」。`, "error") }
+        return { spec, flag: flag("ambiguous_symbol", `代號 ${spec.code} 是${spec.name}・畫面寫「${name}」`, "error") }
       }
       return { spec }
     }
@@ -76,9 +76,9 @@ function resolve(code: string, name: string): { spec?: MockInstrumentSpec; flag?
   if (n) {
     const hits = INSTRUMENTS.filter((i) => i.name === n || (n.length >= 2 && i.name.startsWith(n)))
     if (hits.length === 1) return { spec: hits[0] }
-    if (hits.length > 1) return { flag: flag("ambiguous_symbol", `「${n}」對得到好幾檔，選一檔。`, "error") }
+    if (hits.length > 1) return { flag: flag("ambiguous_symbol", `「${n}」對到好幾檔・選一檔`, "error") }
   }
-  return { flag: flag("unknown_symbol", `找不到「${n || c}」。`, "error") }
+  return { flag: flag("unknown_symbol", `找不到「${n || c}」`, "error") }
 }
 
 interface Ctx {
@@ -116,35 +116,35 @@ function buildRow(ctx: Ctx, x: ReadPosition, i: number): PositionRow & { key: st
     in_ledger: null as LedgerHolding | null, key: spec && qty && price ? `${spec.symbol}|${kind}|${qty}|${price}` : null,
   }
   if (kind === "short") {
-    add(flag("short_sale", "融券的庫存不匯入。"))
+    add(flag("short_sale", "融券・不匯入"))
     return { ...row, include: false }
   }
-  if (kind === "margin") add(flag("margin", "融資的庫存，當成一般持股匯入。"))
+  if (kind === "margin") add(flag("margin", "融資・當成一般持股匯入"))
   const missing = [...(x.symbol_code || x.name ? [] : ["名稱"]), ...(qty ? [] : ["股數"]), ...(price ? [] : ["成本"])]
-  if (missing.length) add(flag("unreadable", `這一列的${missing.join("、")}沒讀清楚。`, "error"))
+  if (missing.length) add(flag("unreadable", `沒讀清楚・${missing.join("、")}`, "error"))
   if (symbolFlag && (x.symbol_code || x.name)) add(symbolFlag)
   if (spec) {
     if (spec.currency === "USD") {
-      if (printed === "TWD") add(flag("currency_mismatch", "美股的成本寫的是新台幣，要改成美元的成本。", "error"))
-      else if (printed === "not_shown") add(flag("currency_guess", "畫面上沒寫幣別，當成美元。"))
-    } else if (printed === "USD") add(flag("currency_mismatch", "台股的成本寫的是美元。", "error"))
-    if (tw && qty !== null && !Number.isInteger(qty)) add(flag("fractional_tw_qty", "台股的股數要是整數。", "error"))
-    else if (lots && rawQty !== null && !Number.isInteger(rawQty)) add(flag("not_whole_lots", `畫面上是 ${n0(rawQty)} 張，算成 ${n0(qty ?? 0)} 股；不是整張，確認一下。`))
+      if (printed === "TWD") add(flag("currency_mismatch", "美股成本是新台幣・改成美元", "error"))
+      else if (printed === "not_shown") add(flag("currency_guess", "沒寫幣別・當成美元"))
+    } else if (printed === "USD") add(flag("currency_mismatch", "台股成本是美元", "error"))
+    if (tw && qty !== null && !Number.isInteger(qty)) add(flag("fractional_tw_qty", "台股股數要是整數", "error"))
+    else if (lots && rawQty !== null && !Number.isInteger(rawQty)) add(flag("not_whole_lots", `${n0(rawQty)} 張＝${n0(qty ?? 0)} 股・不是整張`))
     if (qty && avg && total) {
       const gross = qty * avg
       if (Math.abs(gross - total) > Math.max(tw ? 1 : 0.02, total * 0.005)) {
-        add(flag("cost_mismatch", `股數 × 均價和總成本差 ${n0(Math.round(Math.abs(gross - total) * 100) / 100)}${tw && !lots && Math.abs(gross * 1000 - total) <= total * 0.005 ? "，股數可能是張數（1 張＝1,000 股）" : ""}。`))
+        add(flag("cost_mismatch", `股數 × 均價和總成本差 ${n0(Math.round(Math.abs(gross - total) * 100) / 100)}${tw && !lots && Math.abs(gross * 1000 - total) <= total * 0.005 ? "・可能是張數（1 張＝1,000 股）" : ""}`))
       }
     }
     const held = ctx.held.get(ctx.account.id)?.get(spec.symbol)
     if (held) {
       row.in_ledger = held
       const same = qty === held.quantity && price !== null && Math.abs(held.avg_cost - price) <= Math.max(0.01, price * 0.0005)
-      add(flag("in_ledger", same ? "帳本裡已經有，股數和均價都一樣。" : `帳本裡已經有 ${n0(held.quantity)} 股，均價 ${n0(held.avg_cost >= 10 ? Math.round(held.avg_cost * 100) / 100 : held.avg_cost)}。`))
+      add(flag("in_ledger", same ? "已在帳本・股數和均價相同" : `已在帳本 ${n0(held.quantity)} 股・均價 ${n0(held.avg_cost >= 10 ? Math.round(held.avg_cost * 100) / 100 : held.avg_cost)}`))
     }
     const others = ctx.accounts.filter((a) => a.id !== ctx.account.id && ctx.held.get(a.id)?.has(spec.symbol))
-    if (others.length === 1) add(flag("in_other_account", `「${others[0]!.name}」帳戶也有 ${n0(ctx.held.get(others[0]!.id)!.get(spec.symbol)!.quantity)} 股。`))
-    else if (others.length > 1) add(flag("in_other_account", `另外 ${others.length} 個帳戶也有這一檔。`))
+    if (others.length === 1) add(flag("in_other_account", `「${others[0]!.name}」帳戶也有 ${n0(ctx.held.get(others[0]!.id)!.get(spec.symbol)!.quantity)} 股`))
+    else if (others.length > 1) add(flag("in_other_account", `另外 ${others.length} 個帳戶也有`))
   }
   return { ...row, include: !flags.some((f) => EXCLUDED.has(f.code) || f.severity === "error") }
 }
@@ -194,7 +194,7 @@ export function parsePastedHoldings(text: string): ReadPosition[] {
 
 /**
  * 估計的買入日（資產組成原型，`lib/buy-date.ts`）：從今天往回，股價最近一次經過成本價的那一天。
- * 台股用 Yahoo 回補的五年（當時的成交價），美股只有 2024/7/1 以後的收盤；都沒有經過時 `estimated_date: null`＋一句原因。
+ * 台股用 Yahoo 回補的五年（當時的成交價），美股只有 2024/7/1 以後的收盤；都沒有經過時 `estimated_date: null`＋原因的標籤。
  * 融券、找不到股票、沒讀到成本的列不估（沒有這個欄位）。
  */
 function estimateFor(r: PositionRow, today: string): Pick<PositionRow, "estimated_date" | "flags"> | Record<string, never> {
@@ -212,10 +212,10 @@ function estimateFor(r: PositionRow, today: string): Pick<PositionRow, "estimate
   const reason = change ? { split: "股票分割", reduction: "減資", stock_dividend: "配股" }[change.reason] : ""
   const message =
     change && first && change.date >= first
-      ? `${day(change.date)} 以後的股價都沒有經過均價 ${cost}，沒辦法估買入日（那天${reason}，之前的股價和現在的均價比不起來）。`
+      ? `${day(change.date)} ${reason}以後沒有經過均價 ${cost}・估不到買入日`
       : us
-        ? `美股的股價只有 2024/7/1 以後的，都沒有經過均價 ${cost}，沒辦法估買入日。`
-        : `五年內的股價都沒有經過均價 ${cost}，沒辦法估買入日。`
+        ? `2024/7/1 以後沒有經過均價 ${cost}・估不到買入日`
+        : `五年內沒有經過均價 ${cost}・估不到買入日`
   return { estimated_date: null, flags: [...r.flags, flag("no_crossing", message)] }
 }
 
@@ -237,7 +237,7 @@ export function readPositions(read: ReadPosition[], ctx: Ctx & { brokerName: str
   for (const r of rows) if (r.symbol) bySymbol.set(r.symbol, [...(bySymbol.get(r.symbol) ?? []), r])
   for (const same of bySymbol.values()) {
     if (same.length < 2) continue
-    for (const r of same) r.flags.push(flag("same_symbol_twice", `這一檔有 ${same.length} 列，都匯入會加在一起（例如整股和零股分開列）。`))
+    for (const r of same) r.flags.push(flag("same_symbol_twice", `同一檔 ${same.length} 列・匯入會加在一起`))
   }
   const out: PositionRow[] = rows.map(({ key: _key, ...r }, i) => ({ ...r, ...estimateFor(r, ctx.today), row_id: `p${i + 1}` }))
   const documentKind = out.length ? "holdings" : "other"
@@ -252,6 +252,6 @@ export function readPositions(read: ReadPosition[], ctx: Ctx & { brokerName: str
     embedded_instructions: [],
     model_used: "claude-haiku-5-5",
     retried: false,
-    notice: out.length ? null : "這裡面沒有看到庫存。",
+    notice: out.length ? null : "沒有讀到庫存",
   }
 }

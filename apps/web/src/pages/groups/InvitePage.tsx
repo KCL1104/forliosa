@@ -52,7 +52,7 @@ export function InvitePage() {
           </header>
           {preview.data.status === "member" ? (
             <div className="flex flex-col items-start gap-3">
-              <p>你已經是這個群組的成員。</p>
+              <p>已是成員</p>
               {/* 已是成員時預覽帶 group_id，直接到那個群組；沒有時（舊的伺服器）到群組清單 */}
               {preview.data.group_id ? (
                 <Link to="/groups/$groupId" params={{ groupId: preview.data.group_id }} className={buttonVariants({ variant: "outline" })}>

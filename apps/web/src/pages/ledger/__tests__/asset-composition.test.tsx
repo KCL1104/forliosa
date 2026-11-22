@@ -270,7 +270,7 @@ describe("D＋G：績效分段的「每月報酬率」與「贏過幾成的台�
     expect(table.textContent).not.toMatch(/2025\/12|12 月/)
     // 和基準差幾個百分點：用多／少（不是紅綠）
     expect(table.textContent).toMatch(/(多|少) [\d.]+ 個百分點/)
-    expect(screen.getByText("含估計的買入日，不年化")).toBeInTheDocument()
+    expect(screen.getByText("含估計的買入日・不年化")).toBeInTheDocument()
   })
 
   it("贏過幾成的台股基金（示範資料）：標籤＋數字、期間與比了幾檔；怎麼比與後端的說明在「計算方式」；標「示範資料」，來源不登記到頁尾", async () => {
@@ -309,7 +309,7 @@ describe("D＋G：績效分段的「每月報酬率」與「贏過幾成的台�
   it("全部都是估計的：一句話、沒有表格；沒有基金的資料：那一行不放", async () => {
     await withPerformance((p) => (p.composition ? { ...p, fund_rank: null, composition: { ...p.composition, months: [], months_estimated: 12 } } : p))
     renderApp("/?view=performance")
-    expect(await screen.findByText("這段期間都是用估計的買入日算的，沒有可以比的月份。", {}, T)).toBeInTheDocument()
+    expect(await screen.findByText("沒有可以比的月份・都是估計的買入日", {}, T)).toBeInTheDocument()
     expect(screen.queryByRole("table", { name: /每個月的本金增減/ })).toBeNull()
     expect(document.querySelector("[data-fund-rank]")).toBeNull()
   })
@@ -329,7 +329,7 @@ describe("D＋G：績效分段的「每月報酬率」與「贏過幾成的台�
     await screen.findByText("最大回撤", {}, T)
     expect(screen.queryByText("每月報酬率")).toBeNull()
     expect(document.querySelector("[data-fund-rank]")).toBeNull()
-    expect(screen.queryByText("含估計的買入日，不年化")).toBeNull()
+    expect(screen.queryByText("含估計的買入日・不年化")).toBeNull()
   })
 })
 
@@ -363,10 +363,10 @@ describe("E：持倉展開的買入日標記與在走勢圖上選日期", { time
     await user.click(await screen.findByRole("menuitem", { name: "在走勢圖上選買入日" }, T))
     const dialog = await screen.findByRole("dialog", { name: "聯發科的買入日" }, T)
     // 照實寫有資料的那幾年；帳本上的日期（11/29 星期六匯入）沒有收盤：打開時不會準備好改成前一天
-    expect(await within(dialog).findByText("2021/11/12 – 2025/11/28 的股價都沒有經過成本 488。", {}, T)).toBeInTheDocument()
+    expect(await within(dialog).findByText("2021/11/12 – 2025/11/28・沒有經過成本 488", {}, T)).toBeInTheDocument()
     expect(within(dialog).getByRole("group", { name: /^價格走勢/ })).toBeInTheDocument()
     expect(within(dialog).getByRole("button", { name: "改日期" })).toBeDisabled()
-    expect(within(dialog).getByText("帳本上記的是 2025/11/29，那天沒有收盤，這是前一個交易日。")).toBeInTheDocument()
+    expect(within(dialog).getByText("帳本 2025/11/29 沒有收盤・前一個交易日")).toBeInTheDocument()
   })
 
   it("隱私模式：不寫成本（縱軸、成本線的字），讀數下面那一句也不放（收盤加差幾 % 就算得出成本）", async () => {
@@ -400,7 +400,7 @@ describe("E：持倉展開的買入日標記與在走勢圖上選日期", { time
     // 還沒改：定案的按鈕不能按
     expect(within(dialog).getByRole("button", { name: "改日期" })).toBeDisabled()
     // 估計的那天：寫那天的最低–最高經過成本，不寫「收盤和成本差幾 %」（不讓估計看起來像估錯）
-    expect(within(dialog).getByText(/^這天股價在 [\d,]+–[\d,]+ 之間，經過你的成本 580。$/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/^當天 [\d,]+–[\d,]+・經過成本 580$/)).toBeInTheDocument()
     // 用鍵盤在圖上往前移：換成那一天的讀數（各種句子見 buy-date-picker.test.tsx 的 readoutLine）
     const g = within(dialog).getByRole("group", { name: /^價格走勢/ })
     act(() => g.focus())

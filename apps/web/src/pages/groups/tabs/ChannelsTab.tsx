@@ -121,7 +121,7 @@ function NotifyToggles({
 }) {
   const patch = usePatchChannel(groupId, kind)
   // 報告暫停或沒開時，盤前、週報照樣在同一個時間送群組的部分（後端 reports/push.py），盤後沒有東西可送：只在這時多一行
-  const note = reports ? null : "市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。"
+  const note = reports ? null : "市場報告未開放・盤前、週報只送群組的部分・盤後不送"
   return (
     <div className="mt-2 border-t border-rule" data-channel-switches="">
       {SWITCHES.map(({ key, label, detail, on }) => {

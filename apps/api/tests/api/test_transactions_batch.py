@@ -85,7 +85,7 @@ def test_any_bad_row_rejects_the_whole_batch(client):
     assert [(e["index"], e["code"]) for e in err["rows"]] == [
         (1, "oversell"), (2, "unknown_symbol"), (3, "unsupported_type"), (4, "bad_date"), (5, "account_mismatch"),
         (6, "validation_error"), (7, "bad_date")]
-    assert err["rows"][0]["message"] == "賣出 2,000 股，超過當時持有的 1,000 股。"
+    assert err["rows"][0]["message"] == "賣出 2,000 股・當時只有 1,000 股"
     assert err["rows"][2]["message"] == "匯入只收買進和賣出。"
     assert err["rows"][3]["message"] == "日期不能在未來。"
     assert txns(client, acc["id"]) == [] and txns(client, other["id"]) == []
@@ -109,10 +109,10 @@ def test_dry_run_flags_rows_without_writing(client):
                              3: [("duplicate", "warning")], 4: [("oversell", "error")],
                              5: [("unknown_symbol", "error")]}
     messages = {r["index"]: [f["message"] for f in r["flags"]] for r in out["rows"]}
-    assert messages[0] == ["2025/3/3 已經記過一筆一樣的。"]
-    assert messages[1] == ["2025/3/10 已經記過一筆同樣股數的賣出，價格 1,050。"]
-    assert messages[3] == ["這次匯入裡，同一天有另一筆一樣的。"]
-    assert messages[4] == ["賣出 3,000 股，超過當時持有的 2,000 股。"]
+    assert messages[0] == ["2025/3/3 已記過一樣的"]
+    assert messages[1] == ["2025/3/10 已記過同股數的賣出・價格 1,050"]
+    assert messages[3] == ["這次匯入裡同一天有一樣的"]
+    assert messages[4] == ["賣出 3,000 股・當時只有 2,000 股"]
     assert len(txns(client, acc["id"])) == 2  # nothing written
     # warnings alone do not stop the import
     ok = batch(client, acc["id"], rows[2:4], dry_run=True).json()
@@ -127,7 +127,7 @@ def test_batch_sell_that_breaks_a_later_sell_is_blamed(client):
     rows = [row("2330.TW", "buy", "2025-03-04", 200, 1000), row("2330.TW", "sell", "2025-03-10", 300, 1020)]
     r = batch(client, acc["id"], rows)
     assert r.status_code == 422, r.text
-    message = "匯入以後帳目對不起來：2025/3/20 賣出台積電 1,000 股，超過當時持有的 900 股。"
+    message = "匯入後帳目對不起來・2025/3/20 賣出台積電 1,000 股，超過當時持有的 900 股"
     assert r.json()["error"]["rows"] == [{"index": 1, "code": "ledger_inconsistent", "message": message}]
     assert len(txns(client, acc["id"])) == 2
 
@@ -142,7 +142,7 @@ def test_books_already_inconsistent_are_a_problem_of_the_whole_batch(client):
     rows = [row("2330.TW", "buy", "2025-03-04", 1000, 1000)]
     out = batch(client, acc["id"], rows, dry_run=True).json()
     assert out["ok"] is False and flags_of(out) == {0: []}
-    problem = "匯入以後帳目對不起來：2025/3/3 賣出鴻海 100 股，超過當時持有的 0 股。"
+    problem = "匯入後帳目對不起來・2025/3/3 賣出鴻海 100 股，超過當時持有的 0 股"
     assert out["problems"] == [{"code": "ledger_inconsistent", "message": problem}]
     r = batch(client, acc["id"], rows)
     assert r.status_code == 422

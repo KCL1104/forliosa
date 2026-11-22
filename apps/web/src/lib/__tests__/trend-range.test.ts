@@ -9,6 +9,7 @@ import {
   rangeReturn,
   rangeStartIndex,
   responseExceedsData,
+  sharedTwr,
   sliceRange,
   TREND_RANGES,
   trendDomain,
@@ -307,5 +308,20 @@ describe("dateAxis 與 needsYear", () => {
     expect(needsYear(["2026-11-12", "2026-11-16"])).toBe(false)
     expect(needsYear(["2026-12-31", "2027-01-04"])).toBe(true)
     expect(needsYear(["2025-11-14", "2026-11-13"])).toBe(true)
+  })
+})
+
+describe("sharedTwr：績效分段全部帳戶的報酬和首頁走勢讀數同一個來源（2026-11-22）", () => {
+  const all = weekdays("2026-09-01", "2026-11-12").map((x, i) => ({ ...x, twr_index: Math.round((1 + i * 0.00123) * 1e6) / 1e6 }))
+  it("用首頁走勢的算法（同一個序列、同一個區間），不用後端全精度的 twr", () => {
+    for (const { value: range } of TREND_RANGES) {
+      const hero = rangeReturn(trendWindow(all, range))
+      expect(sharedTwr({ range, twr: (hero ?? 0) + 0.0001 }, all)).toBe(hero)
+    }
+  })
+  it("序列不到 2 點、或不是走勢的區間：照後端的", () => {
+    expect(sharedTwr({ range: "1M", twr: 0.05 }, all.slice(0, 1))).toBe(0.05)
+    expect(sharedTwr({ range: "1M", twr: 0.05 }, undefined)).toBe(0.05)
+    expect(sharedTwr({ range: "1D", twr: 0.01 }, all)).toBe(0.01)
   })
 })

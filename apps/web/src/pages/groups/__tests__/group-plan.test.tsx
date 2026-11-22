@@ -147,7 +147,7 @@ describe("報告分頁：日報｜週報（不加第九個分頁）", () => {
     expect(flat).toHaveTextContent("0.0%")
     expect(flat).not.toHaveTextContent("▼")
     expect(within(article).getByText("小芸").closest("li")).toHaveTextContent("▲1.2%")
-    expect(within(article).getByText("另 2 人沒有這天的資料。")).toBeInTheDocument()
+    expect(within(article).getByText("另 2 人・沒有這天的資料")).toBeInTheDocument()
     expect(within(article).queryByText(/的買賣$/)).toBeNull()
   })
 
@@ -225,7 +225,7 @@ describe("群組設定的方案與人數上限", () => {
     mount()
     renderApp("/groups/grp_hiking?tab=members")
     expect(await screen.findByText("免費・上限 5 人", undefined, T)).toBeInTheDocument()
-    expect(screen.getByText("已經有 5 位成員，上限是 5 人。新的成員不能加入。")).toHaveAttribute("role", "status")
+    expect(screen.getByText("成員 5 人・上限 5 人・新的成員不能加入")).toHaveAttribute("role", "status")
     expect(screen.getByRole("button", { name: "產生邀請連結" })).toBeDisabled()
     // 我的兩個加值：還沒用的（直接用）與用在家族投資的（移過來要先確認）
     expect(await screen.findByText("加值到 12/15・還沒有用在群組", undefined, T)).toBeInTheDocument()

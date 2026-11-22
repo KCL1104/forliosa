@@ -64,7 +64,7 @@ export function closeGap(close: number, cost: number): number {
   return cost ? close / cost - 1 : 0
 }
 
-/** 差多少才在畫面上照實說（「這天收盤 580，和你的成本 612 差 5%」）：3% */
+/** 差多少才在畫面上照實說（「收盤 580・和成本 612 差 5.2%」）：3% */
 export const FAR_FROM_COST = 0.03
 
 export function isFarFromCost(close: number, cost: number): boolean {

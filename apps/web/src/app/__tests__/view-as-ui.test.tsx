@@ -145,7 +145,7 @@ describe("查看模式：稱呼換成授權者", () => {
     expect(await screen.findByText(/爸爸可領約/, undefined, T)).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/你可領|只看我的/)
     await user.click(screen.getByRole("radio", { name: "只看爸爸的" }))
-    expect(await screen.findByText("沒有爸爸的交易或股利紀錄。")).toBeInTheDocument()
+    expect(await screen.findByText("沒有爸爸的交易或股利紀錄")).toBeInTheDocument()
   })
 
   it("自己的帳本照原本寫「你」「我」", async () => {

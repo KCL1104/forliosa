@@ -26,7 +26,7 @@ describe("mock：讀對帳單", () => {
       expect(byCode(code).every((r) => !r.include), code).toBe(true)
     }
     for (const code of ["margin", "amount_mismatch", "not_trading_day", "outside_period"]) expect(byCode(code).every((r) => r.include), code).toBe(true)
-    expect(byCode("oversell")[0]!.flags.find((f) => f.code === "oversell")!.message).toBe("賣出 2,000 股，超過當時持有的 1,000 股。")
+    expect(byCode("oversell")[0]!.flags.find((f) => f.code === "oversell")!.message).toBe("賣出 2,000 股・當時只有 1,000 股")
     expect(doc.totals_check).toEqual({ ok: false, diff: -12450 })
     expect(doc.embedded_instructions).toHaveLength(1)
   })
@@ -71,7 +71,7 @@ describe("mock：一次寫入多筆、整批復原", () => {
     const err = await api.createTransactionBatch({ account_id: TW, origin: "import", rows: [buy(), sell] }).catch((e) => e)
     expect(err).toBeInstanceOf(ApiError)
     expect(err).toMatchObject({ status: 422, code: "batch_rejected" })
-    expect(err.extra.rows).toEqual([{ index: 1, code: "oversell", message: "賣出 2,000 股，超過當時持有的 1,000 股。" }])
+    expect(err.extra.rows).toEqual([{ index: 1, code: "oversell", message: "賣出 2,000 股・當時只有 1,000 股" }])
     expect((await api.listTransactions({ limit: 200 })).items.length).toBe(before)
 
     const res = await api.createTransactionBatch({ account_id: TW, origin: "import", rows: [buy(), buy({ trade_date: "2026-10-08" }), sell] })
