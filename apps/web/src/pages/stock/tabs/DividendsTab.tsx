@@ -80,8 +80,9 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
           />
         ) : (
           <p className="text-base text-ink">
-            持有 {us ? "1 股" : "1 張"}，以過去一年的配息估算，一年約可領 <Fig>{ttm > 0 ? formatMoney(ttm * lot, { currency: cur }) : "—"}</Fig>。
-            <span className="text-ink-2">未來配息不一定相同。</span>
+            {/* 標籤，不寫句子（產品負責人 2026-11-23） */}
+            每 {us ? "1 股" : "1 張"}一年約 <Fig>{ttm > 0 ? formatMoney(ttm * lot, { currency: cur }) : "—"}</Fig>
+            <span className="text-ink-2">・近一年配息估算・未來不一定相同</span>
           </p>
         )}
       </Section>

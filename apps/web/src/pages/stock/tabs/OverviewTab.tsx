@@ -314,11 +314,11 @@ function ValuationStrip({
     if (eps !== null && eps <= 0) {
       return (
         <p className="pb-3 text-base text-ink">
-          近四季虧損，本益比沒有意義，改看
+          {/* 標籤，不寫句子（產品負責人 2026-11-23） */}
+          本益比 —・近四季虧損・
           <Link to="/stock/$symbol" params={{ symbol: inst.symbol }} search={{ tab: "valuation" }} resetScroll={false} className="underline decoration-ctl underline-offset-3 hover:decoration-ink">
-            股價淨值比
+            看股價淨值比
           </Link>
-          。
         </p>
       )
     }
