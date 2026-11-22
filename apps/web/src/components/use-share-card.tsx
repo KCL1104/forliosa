@@ -1,7 +1,7 @@
 import { appToday } from "@/api"
 import { usePerformance, useSummary } from "@/api/queries"
 import { useLedgerClose } from "@/hooks/use-close"
-import { isReferenceNote } from "@/lib/data-notes"
+import { isReferenceNote, REFERENCE_TAIL, referenceLine } from "@/lib/data-notes"
 import { direction, directionGlyph, formatDateShort, formatPercent } from "@/lib/format"
 
 /**
@@ -24,9 +24,9 @@ export function useShareCard() {
   const noMonth = month === null
   const until = monthKnown ? (mtd.data?.reference_until ?? null) : null
   const referenceNote = until
-    ? ((mtd.data?.notes ?? []).find(isReferenceNote) ?? `${until.replaceAll("-", "/")} 以前用 Yahoo 參考價計算，不是官方資料`)
+    ? ((mtd.data?.notes ?? []).find(isReferenceNote) ?? referenceLine(until))
     : null
-  const monthText = monthKnown ? `本月 ${glyphPct(month)}${until ? `（${formatDateShort(until, false)} 以前用 Yahoo 參考價）` : ""}，` : ""
+  const monthText = monthKnown ? `本月 ${glyphPct(month)}${until ? `（${formatDateShort(until, false)} ${REFERENCE_TAIL}）` : ""}，` : ""
   const line = s ? `${dayLead} ${glyphPct(s.day_change_pct)}，${monthText}總報酬 ${glyphPct(s.total_return_pct)}（Forliosa ${formatDateShort(today, false)}）` : ""
   const cells: { label: React.ReactNode; key: string; value: number | null | undefined }[] = [
     { key: "day", label: day, value: s?.day_change_pct },

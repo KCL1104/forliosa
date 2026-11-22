@@ -147,3 +147,24 @@ describe("個股頁", () => {
     expect(screen.queryByText("沒有報價")).toBeNull()
   })
 })
+
+describe("資料來源頁：存檔開始以前的歷史日線不寫廠商名（產品負責人 2026-11-22）", () => {
+  it("後端開著回補時：寫「非官方」，沒有 Yahoo 的名字，也沒有連到它的網站或條款", async () => {
+    const get = api.getAttributions
+    vi.spyOn(api, "getAttributions").mockImplementation(async () => {
+      const a = await get()
+      const history = {
+        key: "yahoo-history", agency: "非官方資料", dataset: "存檔開始以前的歷史日線", url: null, used_for: "走勢圖",
+        year: 2026, license: "非官方資料", license_url: null, commercial: false, attribution: "存檔開始以前的歷史日線（非官方資料）",
+      }
+      return { ...a, datasets: [...a.datasets, history] }
+    })
+    const user = userEvent.setup()
+    renderApp("/data-sources?auth=signed-in")
+    expect(await screen.findByText(/用的是非官方的歷史日線/, undefined, T)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /^非官方資料/ }))
+    expect(screen.getByText("存檔開始以前的歷史日線（非官方資料）")).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/Yahoo Finance/)
+    expect([...document.querySelectorAll("a")].some((el) => /yahoo/i.test(el.getAttribute("href") ?? ""))).toBe(false)
+  })
+})

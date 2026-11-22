@@ -22,13 +22,13 @@ export const US_ARCHIVE_START = "2024-07-01"
  */
 export const BACKFILL_START = "2021-11-12"
 /** 和後端 `services.reference_close.REFERENCE_NOTE` 相同 */
-export const REFERENCE_NOTE = "來自 Yahoo Finance，不是官方資料"
-/** 和後端 `services.reference_close.reference_note` 相同：這一天（含）以前用 Yahoo 參考價計算 */
-export const referenceNote = (until: string) => `${ymd(until)} 以前用 Yahoo 參考價計算，不是官方資料`
+export const REFERENCE_NOTE = "非官方資料"
+/** 和後端 `services.reference_close.reference_note` 相同：這一天（含）以前用參考價計算 */
+export const referenceNote = (until: string) => `${ymd(until)} 以前・參考價`
 /** 和後端 `services.reference_close.price_only_note` 相同：股票基準在存檔開始以前沒有除息資料，只算價格 */
 export const priceOnlyNote = (name: string, until: string) => `${name}在 ${ymd(until)} 以前只算價格，不含股利`
 /** 和後端 `datapolicy` 的 `yahoo-history` 標示相同（資料來源頁尾） */
-export const YAHOO_HISTORY_LABEL = "Yahoo Finance（歷史日線，非官方資料）"
+export const YAHOO_HISTORY_LABEL = "存檔開始以前的歷史日線（非官方資料）"
 
 /** 和後端 `coverage.ymd` 一樣：說明裡的日期寫成 2026/06/01 */
 export const ymd = (iso: string) => iso.replaceAll("-", "/")

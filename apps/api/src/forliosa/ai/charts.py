@@ -28,7 +28,7 @@ from forliosa.marketdata.catalog import KNOWN_REDUCTIONS
 from forliosa.marketdata.service import MarketData
 from forliosa.services.coverage import covers, series_notes, ymd
 from forliosa.services.instruments import reduction_how, split_how
-from forliosa.services.reference_close import PRICE_ONLY_TAIL
+from forliosa.services.reference_close import PRICE_ONLY_TAIL, REFERENCE_TAIL
 from forliosa.timeutil import today_taipei
 
 KINDS = ["price", "compare", "revenue", "eps", "performance"]
@@ -298,7 +298,7 @@ def performance_chart(db: Any, md: MarketData, user: Any, range_: str, benchmark
     price_only = any(n.endswith(PRICE_ONLY_TAIL) for n in notes)
     notes.append("報酬率是時間加權報酬率" if price_only else "報酬率是時間加權報酬率；基準含股利")
     # days before the archive valued with the history backfill's closes (產品負責人 2026-11-18): its notes say so too
-    sources = ["ledger", *(["yahoo-history"] if any("Yahoo 參考價" in n for n in notes) else [])]
+    sources = ["ledger", *(["yahoo-history"] if any(n.endswith(REFERENCE_TAIL) for n in notes) else [])]
     return _card("performance", title, "pct", "date", series, notes, sources, bool(perf.get("is_demo")),
                  range_=range_)
 

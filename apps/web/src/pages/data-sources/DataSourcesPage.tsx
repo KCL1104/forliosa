@@ -37,7 +37,7 @@ export function DataSourcesPage() {
     for (const d of a?.datasets ?? []) map.set(d.agency, [...(map.get(d.agency) ?? []), d])
     return [...map.entries()]
   }, [a])
-  const mainLicense = a?.datasets.find((d) => d.commercial)?.license_url
+  const mainLicense = a?.datasets.find((d) => d.commercial)?.license_url ?? undefined
   // 美股收盤價：後端只在美股收盤價有開的時候列出這個資料集
   const usCloses = !!a?.datasets.some((d) => d.key.startsWith("databento-equs/"))
   // 上市收盤價下午就進來：證交所在政府資料開放平臺登記的下載網址（產品負責人 2026-11-16）開著時，後端列出 `twse-opendata/` 的資料集
@@ -98,11 +98,11 @@ export function DataSourcesPage() {
 
             {/* 觸控時段落之間多一點：只有一行的段落裡的網址連結上下各有 12px 的可按範圍 */}
             <Section title="授權條款" titleId="ds-license" bodyClassName="flex flex-col gap-2 pointer-coarse:gap-3">
-              {/* 跟著資料走：正式環境開了 Yahoo 的歷史日線回補時，不能說「都來自政府開放資料」（2026-11-14 第七次評分） */}
+              {/* 跟著資料走：正式環境開了歷史日線回補時，不能說「都來自政府開放資料」（2026-11-14 第七次評分）；不寫廠商名（產品負責人 2026-11-22） */}
               <p className="max-w-prose text-base">
                 {usCloses ? "台股行情" : "行情"}、匯率、公司資料與公告來自政府開放資料，以及我們每天從這些資料存下來的紀錄。
                 {/* 2026-11-17 起也是記一筆、匯入對帳單時舊日期的參考收盤；2026-11-18 起也算存檔開始以前的績效與報酬（持股市值仍是官方收盤） */}
-                {a.datasets.some((d) => d.key === "yahoo-history") && "走勢圖裡較早的日線、記一筆和匯入對帳單時舊日期的參考收盤，以及存檔開始以前的績效與報酬，來自 Yahoo Finance，不是官方資料，也沒有轉載授權。"}
+                {a.datasets.some((d) => d.key === "yahoo-history") && "走勢圖裡較早的日線、記一筆和匯入對帳單時舊日期的參考收盤，以及存檔開始以前的績效與報酬，用的是非官方的歷史日線，畫面標「參考價」。"}
               </p>
               {usCloses && (
                 <p className="max-w-prose text-base">
@@ -205,7 +205,9 @@ function AgencyGroup({ agency, rows, open, onToggle, mainLicense }: { agency: st
               {(d.license_url !== mainLicense || !d.commercial) && (
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-sm text-ink-2 pointer-coarse:mt-3">
                   {/* 政府資料開放授權條款已列在最上面；授權不同的資料集（例如非商用來源）才逐筆連結 */}
-                  {d.license_url !== mainLicense && (
+                  {d.license_url === null ? (
+                    <span>{d.license}</span>
+                  ) : d.license_url !== mainLicense && (
                     <a href={d.license_url} target="_blank" rel="noopener noreferrer" className={cn(EXTERNAL, "inline-flex items-center gap-0.5 hover:text-ink pointer-coarse:min-h-11")}>
                       {d.license}
                       <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0" />
@@ -231,8 +233,11 @@ function AgencyGroup({ agency, rows, open, onToggle, mainLicense }: { agency: st
  */
 function Attribution({ d, twin = false }: { d: AttributionDataset; twin?: boolean }) {
   // 同一組裡有同名的資料集（同一份資料的兩個網址）：報讀時多唸網站，兩個連結聽得出不同
-  const host = twin ? hostOf(d.url) : ""
-  const link = (
+  const host = twin && d.url ? hostOf(d.url) : ""
+  // 沒有網址（不寫廠商名的來源）：資料集名稱只是文字
+  const link = !d.url ? (
+    <>{d.dataset}</>
+  ) : (
     // 「另開新視窗」寫在 aria-label：聲明的文字（textContent）保持後端給的原文，中間不插別的字
     <a href={d.url} target="_blank" rel="noopener noreferrer" aria-label={`${d.dataset}（${host ? `${host}，` : ""}資料集，另開新視窗）`} className={cn(EXTERNAL, INLINE_TOUCH)}>
       {d.dataset}

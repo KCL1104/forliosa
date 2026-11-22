@@ -48,8 +48,11 @@ from forliosa.marketdata.catalog import KNOWN_REDUCTIONS
 from forliosa.marketdata.service import MarketData
 from forliosa.models import PriceDaily
 
-# Shown next to a reference close (the stock chart says the same of these days: 「…來自 Yahoo Finance，不是官方資料」)
-REFERENCE_NOTE = "來自 Yahoo Finance，不是官方資料"
+# Shown next to a reference close. Pages never name the vendor (產品負責人 2026-11-22): the label
+# 「參考價／參考收盤」 and the data sources page's 「非官方」 carry it.
+REFERENCE_NOTE = "非官方資料"
+# The tail of every note about days valued or drawn with reference closes: 「2025/11/11 以前・參考價」
+REFERENCE_TAIL = "以前・參考價"
 IN_CHUNK = 500  # symbols per ``IN (…)`` list, as the archive's batched reads (``archive_provider.IN_CHUNK``)
 
 
@@ -138,8 +141,8 @@ def _known_splits(md: MarketData, symbol: str) -> list[tuple[date, Decimal]]:
 # -- valuing a ledger over time before the archive (產品負責人 2026-11-18) -------------------------------------------
 def reference_note(until: date) -> str:
     """The one line a page computed with reference closes shows (the ledger's 績效, group boards, digests): the last
-    day valued with them, inclusive, like the charts' 「… 以前的日線來自 Yahoo Finance」."""
-    return f"{until.strftime('%Y/%m/%d')} 以前用 Yahoo 參考價計算，不是官方資料"
+    day valued with them, inclusive, like the charts' 「… 以前・參考價（分割已換算）」."""
+    return f"{until.strftime('%Y/%m/%d')} {REFERENCE_TAIL}"
 
 
 PRICE_ONLY_TAIL = "以前只算價格，不含股利"

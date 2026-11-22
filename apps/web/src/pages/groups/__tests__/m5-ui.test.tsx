@@ -134,10 +134,10 @@ describe("群組畫面不透露誰沒分享", () => {
     const user = userEvent.setup()
     renderInRouter(<RankingTab group={family} />)
     await screen.findByRole("table", { name: "今日排行" }, T)
-    expect(screen.queryByText(/以前用 Yahoo 參考價計算/)).toBeNull()
+    expect(screen.queryByText(/以前・參考價/)).toBeNull()
     await user.click(screen.getByRole("radio", { name: "今年" }))
     await screen.findByRole("table", { name: "今年排行" }, T)
-    expect(await screen.findByText("2026/05/29 以前用 Yahoo 參考價計算，不是官方資料", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("2026/05/29 以前・參考價", undefined, T)).toBeInTheDocument()
     expect(screen.getByText(/12\/31 收盤 → 11\/12 收盤/)).toBeInTheDocument()
   })
 
@@ -227,11 +227,11 @@ describe("群組畫面不透露誰沒分享", () => {
     expect(screen.getByRole("heading", { name: /持股/ })).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "金額" })).toBeNull()
     // 今年用到存檔開始以前的 Yahoo 參考價：報酬率下面一行（和排行同一句）
-    expect(screen.getByText("2026/05/29 以前用 Yahoo 參考價計算，不是官方資料")).toBeInTheDocument()
+    expect(screen.getByText("2026/05/29 以前・參考價")).toBeInTheDocument()
     cleanup()
     renderInRouter(<SharedPortfolioView p={{ ...mom, returns: { ...mom.returns!, reference_until: undefined } }} groupId="grp_family" isMe={false} />)
     await screen.findByRole("heading", { name: "報酬率" }, T)
-    expect(screen.queryByText(/以前用 Yahoo 參考價計算/)).toBeNull()
+    expect(screen.queryByText(/以前・參考價/)).toBeNull()
   })
 
   it("金額在隱私模式下遮住，百分比照常", async () => {

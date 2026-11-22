@@ -27,7 +27,7 @@ afterEach(() => {
 })
 
 const T = { timeout: 8000 }
-const NOTE = "2026/11/11 以前用 Yahoo 參考價計算，不是官方資料"
+const NOTE = "2026/11/11 以前・參考價"
 
 function renderGroups() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -55,7 +55,7 @@ describe("分享卡的本月用到 Yahoo 參考價", { timeout: 20_000 }, () => 
     renderGroups()
     const card = (await screen.findByRole("heading", { name: "分享卡" }, T)).closest("section")!
     expect(await within(card).findByText(NOTE, undefined, T)).toBeInTheDocument()
-    expect(await within(card).findByText(/本月 .+3\.21%（11\/11 以前用 Yahoo 參考價），總報酬/, undefined, T)).toBeInTheDocument()
+    expect(await within(card).findByText(/本月 .+3\.21%（11\/11 以前・參考價），總報酬/, undefined, T)).toBeInTheDocument()
   })
 
   it("本月都是官方收盤：不寫", async () => {

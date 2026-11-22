@@ -4759,3 +4759,13 @@ AI 工具給的價格不受影響。CLAUDE.md 的 Yahoo 例外多了一句。
   - 前端：收合門檻改成和兩欄排同一個（主欄 768px）；按「收起」把圖捲回畫面；排行的共用規則移到選項下面、前面寫組名；並排的表用 subgrid 對齊表頭。
 - **測試**：`tests/reports/test_v2_blocks.py`（conftest 市場：各區塊、可用時間、期間切換、連乘與參考價、融資、週報、A1、寫手）、
   `tests/reports/test_v2_golden_1117.py`（`fixtures/dry_1117.json.gz`：dry DB 11/17 的官方存檔，規格裡的 11/17 數字當標準答案）。
+
+## 2026-11-22 頁面不寫歷史日線的廠商名（產品負責人照建議選「拿掉名字，留標籤」）
+
+- **說明一行**：`reference_close.reference_note` 從「2026/11/11 以前用 Yahoo 參考價計算，不是官方資料」改成「2026/11/11 以前・參考價」
+  （`REFERENCE_TAIL`；前端 `lib/data-notes.isReferenceNote` 認新舊兩種）；個股日線 `coverage.backfill_note` 改成「… 以前・參考價（分割已換算）」；
+  `GET /instruments/{symbol}/history?prices=as_traded`（選買入日）的那一行是「… 以前・參考價」。
+- **記一筆的參考收盤**：`note` 改成「非官方資料」，前端不再顯示那一行（「參考收盤」就是標示）。
+- **來源**：`yahoo-history` 的標示改成「存檔開始以前的歷史日線（非官方資料）」；`/meta/attributions` 那一筆 `agency`「非官方資料」、
+  `dataset`「存檔開始以前的歷史日線」、`license`「非官方資料」，`url`、`license_url` 是 `null`（前端那一列不放連結）。`key` 照舊（內部用）。
+- 管理後台照舊寫 Yahoo Finance（只有站方看得到）；授權風險不變，見 CLAUDE.md。

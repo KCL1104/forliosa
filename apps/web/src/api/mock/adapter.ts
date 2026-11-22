@@ -923,7 +923,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
           const refUntil = rows.filter((c) => c.t < ARCHIVE_START).at(-1)?.t
           return {
             symbol: s.symbol, interval: "1d", candles: rows, is_demo: false,
-            sources: [priceSource(s), YAHOO_HISTORY_LABEL], notes: refUntil ? [`${ymd(refUntil)} 以前的股價來自 Yahoo Finance，不是官方資料`] : [],
+            sources: [priceSource(s), YAHOO_HISTORY_LABEL], notes: refUntil ? [referenceNote(refUntil)] : [],
             ...pickFrom,
           }
         }

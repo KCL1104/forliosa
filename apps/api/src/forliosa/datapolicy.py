@@ -342,7 +342,7 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "yahoo": ("Yahoo Finance" + NON_COMMERCIAL_SUFFIX, False),
     # Daily candles from before the archive began: an explicit owner opt-in (PRICE_HISTORY_SOURCE=yahoo), read by
     # charts, and as a reference close by the buy form and the import check — see :func:`history_backfill_enabled`.
-    "yahoo-history": ("Yahoo Finance（歷史日線，非官方資料）", False),
+    "yahoo-history": ("存檔開始以前的歷史日線（非官方資料）", False),  # no vendor name (產品負責人 2026-11-22)
     # News headline sources (forliosa.news; labelled through DATASETS where a dataset exists).
     "gdelt": ("", True),
     "ai-search": ("AI 網路搜尋補充（只取搜尋結果的標題、媒體、時間與連結）", True),
@@ -369,7 +369,6 @@ def _key(part: str) -> str:
 
 
 HISTORY_SOURCE = "yahoo-history"
-HISTORY_LICENSE_URL = "https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html"
 US_PRICE_SOURCE = "databento-equs"  # forliosa.us_prices.SOURCE
 
 
@@ -590,12 +589,12 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
     if history_backfill_enabled():
         hist = (status or {}).get(f"{HISTORY_SOURCE}/price") or {}
         items.append({
-            "key": HISTORY_SOURCE, "agency": "Yahoo Finance", "dataset": "個股與 ETF 的歷史日線",
-            "url": "https://finance.yahoo.com/",
+            "key": HISTORY_SOURCE, "agency": "非官方資料", "dataset": "存檔開始以前的歷史日線",
+            "url": None,  # pages never name the vendor (產品負責人 2026-11-22)
             "used_for": "走勢圖、技術指標與走勢小圖裡，Forliosa 開始每天存檔以前的日線；"
                         "記一筆和匯入對帳單時，舊日期的參考收盤；存檔開始以前的績效、報酬與群組排行（換算成當時的成交價）",
-            "year": year, "license": "Yahoo 服務條款（非官方資料，沒有轉載授權）",
-            "license_url": HISTORY_LICENSE_URL, "license_status": "non_commercial", "license_basis": None,
+            "year": year, "license": "非官方資料",
+            "license_url": None, "license_status": "non_commercial", "license_basis": None,
             "commercial": False, "served": True, "last_updated": hist.get("data_date"),
             "last_fetched": hist.get("fetched_at"), "attribution": label(HISTORY_SOURCE)})
     stale = []

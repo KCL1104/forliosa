@@ -95,7 +95,7 @@ def test_a_day_before_the_archive_gets_the_backfill_close_as_a_reference(client,
     assert r.status_code == 200, r.text
     assert r.json() == {"symbol": "2330.TW", "date": YAHOO_DAY.isoformat(), "close": 600.5, "currency": "TWD",
                         **REFERENCE}
-    assert REFERENCE_NOTE == "來自 Yahoo Finance，不是官方資料"  # what the stock chart says of these days
+    assert REFERENCE_NOTE == "非官方資料"  # no vendor name on pages (產品負責人 2026-11-22)
     # the archive wins: an archived day is the official close, never a reference
     assert close(client, "2330.TW", DAY).json() == {"symbol": "2330.TW", "date": "2026-11-12", "close": 1085.0,
                                                      "currency": "TWD", **OFFICIAL}

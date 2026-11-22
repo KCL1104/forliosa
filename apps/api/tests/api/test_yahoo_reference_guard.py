@@ -71,7 +71,7 @@ def test_ledger_value_and_pnl_ignore_the_backfill_and_performance_says_where_it_
     official = {d.isoformat() for d in setup["official"]}
     assert p["start_date"] == setup["buy"].isoformat()
     assert p["reference_until"] == setup["yahoo"][-1].isoformat()
-    assert f"{setup['yahoo'][-1]:%Y/%m/%d} 以前用 Yahoo 參考價計算，不是官方資料" in p["notes"]
+    assert f"{setup['yahoo'][-1]:%Y/%m/%d} 以前・參考價" in p["notes"]
     assert all(pt["market_value"] == 1000.0 for pt in p["series"] if pt["t"] not in official)
     assert [pt["market_value"] for pt in p["series"] if pt["t"] in official] == [
         1000.0 * (1000 + 10 * i) for i in range(len(setup["official"]))]

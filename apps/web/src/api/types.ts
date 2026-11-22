@@ -1381,11 +1381,12 @@ export interface AttributionDataset {
   key: string
   agency: string
   dataset: string
-  url: string
+  /** 不寫廠商名的來源（存檔開始以前的歷史日線，產品負責人 2026-11-22）是 null */
+  url: string | null
   used_for: string
   year: number
   license: string
-  license_url: string
+  license_url: string | null
   commercial: boolean
   /** ogdl | public | open | licensed（付費資料商，例如 Databento）| conditional | non_commercial；舊版後端沒有 */
   license_status?: string

@@ -40,7 +40,7 @@ def covers(first: date | None, start: date) -> bool:
 
 def backfill_note(until: date) -> str:
     """Charts that include the history backfill say so: which days, whose data, and that splits are folded in."""
-    return f"{ymd(until)} 以前的日線來自 Yahoo Finance，不是官方資料；股票分割前的價格已經換算"
+    return f"{ymd(until)} 以前・參考價（分割已換算）"
 
 
 def series_notes(md: MarketData, symbol: str, start: date, first: date | None,

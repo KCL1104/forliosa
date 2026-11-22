@@ -134,13 +134,13 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
     const region = await trend()
     const chips = within(region).getByRole("radiogroup", { name: "走勢區間" })
     // 1 月（10/12 起）都是存檔以後的官方收盤
-    expect(within(region).queryByText(/以前用 Yahoo 參考價計算/)).toBeNull()
+    expect(within(region).queryByText(/以前・參考價/)).toBeNull()
     await userEvent.click(within(chips).getByRole("radio", { name: "1年" }))
-    expect(within(region).getByText("2026/5/29 以前用 Yahoo 參考價計算，不是官方資料")).toBeInTheDocument()
+    expect(within(region).getByText("2026/5/29 以前・參考價")).toBeInTheDocument()
     // 資料夠長了：不寫「只有 … 的資料」
     expect(within(region).queryByText(/^只有 /)).toBeNull()
     await userEvent.click(within(chips).getByRole("radio", { name: "6月" }))
-    expect(within(region).getByText("5/29 以前用 Yahoo 參考價計算，不是官方資料")).toBeInTheDocument()
+    expect(within(region).getByText("5/29 以前・參考價")).toBeInTheDocument()
   })
 
   it("鍵盤：End 到最後一個收盤、← 前一天、Esc 收起；讀數寫那一天的總資產、投入本金、報酬；大數字不變", async () => {
@@ -389,13 +389,13 @@ describe("和績效分段分工：整頁只有一排區間按鈕", { timeout: 20
     renderApp("/?view=performance")
     await screen.findByText("最大回撤", undefined, T)
     const region = await trend()
-    await within(region).findByText("2026/5/29 以前用 Yahoo 參考價計算，不是官方資料", undefined, T)
-    expect(screen.getAllByText(/以前用 Yahoo 參考價計算/)).toHaveLength(1)
+    await within(region).findByText("2026/5/29 以前・參考價", undefined, T)
+    expect(screen.getAllByText(/以前・參考價/)).toHaveLength(1)
     cleanup()
     act(() => useLedgerPrefs.setState({ showTrend: false }))
     renderApp("/?view=performance")
-    await screen.findByText("2026/05/29 以前用 Yahoo 參考價計算，不是官方資料", undefined, T)
-    expect(screen.getAllByText(/以前用 Yahoo 參考價計算/)).toHaveLength(1)
+    await screen.findByText("2026/05/29 以前・參考價", undefined, T)
+    expect(screen.getAllByText(/以前・參考價/)).toHaveLength(1)
   })
 
   it("「自訂」關掉走勢時：區間按鈕在績效分段的工具列（整頁還是只有一排）", async () => {

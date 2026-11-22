@@ -72,7 +72,7 @@ function datasets(): AdminDataset[] {
       stale: !!late,
     }
   })
-  rows.push({ key: "yahoo-history/price", name: "Yahoo Finance（歷史日線，非官方資料）", agency: null, data_date: "2026-11-11", fetched_at: FETCHED, days_behind: 1, stale: false })
+  rows.push({ key: "yahoo-history/price", name: "存檔開始以前的歷史日線（非官方資料）", agency: null, data_date: "2026-11-11", fetched_at: FETCHED, days_behind: 1, stale: false })
   // 美股收盤價：資料日期是紐約的交易日（11/11），紐約 17:00（台北 11/12 06:00）之後抓到
   rows.push({ key: DATABENTO_ROW.key, name: DATABENTO_ROW.name, agency: DATABENTO_ROW.agency, data_date: US_SESSION, fetched_at: "2026-11-12T06:04:00+08:00", days_behind: 1, stale: false })
   // 最久沒有新資料的在前（日期相同時依 key）

@@ -105,7 +105,9 @@ def test_the_live_file_answers_when_the_archive_fails_or_comes_later(archive_db)
 
 def test_ex_rights_skip_only_the_market_whose_notices_are_archived(archive_db):
     archived(archive_db, "twse-openapi/price", hours_ago=1)
-    archived(archive_db, "tpex-openapi/price", hours_ago=30)  # the TPEx run is old: its live file is asked
+    # the TPEx run is old (an hour past ``notices_trusted_since``; a fixed 30 hours was still fresh on a Sunday)
+    now = datetime.now(UTC)
+    archived(archive_db, "tpex-openapi/price", hours_ago=(now - notices_trusted_since(now)).total_seconds() / 3600 + 1)
     md, twse, tpex = facade(archive_db)
     quotes = md.quotes(["2308.TW", "6488.TWO"])
     assert quotes["2308.TW"].reference_price == D(1240) and quotes["6488.TWO"].reference_price == D(1240)

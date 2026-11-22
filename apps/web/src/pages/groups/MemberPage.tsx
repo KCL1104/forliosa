@@ -9,6 +9,7 @@ import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { UserAvatar } from "@/components/avatar"
 import { Money, Pct } from "@/components/finance"
 import { DataNotes } from "@/components/data-notes"
+import { referenceLine } from "@/lib/data-notes"
 import { DemoTag, Section } from "@/components/section"
 import { SourcesFooter } from "@/components/sources"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
@@ -120,7 +121,7 @@ export function SharedPortfolioView({ p, groupId, role, isMe }: { p: SharedPortf
                 />
                 {/* 本月、今年用到存檔開始以前的 Yahoo 參考價時（和排行同一句；產品負責人 2026-11-18） */}
                 {p.returns.reference_until && (
-                  <DataNotes className="mt-2" notes={[`${p.returns.reference_until.replaceAll("-", "/")} 以前用 Yahoo 參考價計算，不是官方資料`]} />
+                  <DataNotes className="mt-2" notes={[referenceLine(p.returns.reference_until)]} />
                 )}
               </Section>
             )}

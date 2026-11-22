@@ -23,7 +23,7 @@ from forliosa.marketdata.service import MarketData, dividend_sort_key
 from forliosa.models import PriceDaily
 from forliosa.services.coverage import series_notes
 from forliosa.services.portfolio import range_start
-from forliosa.services.reference_close import REFERENCE_NOTE, reference_closes
+from forliosa.services.reference_close import REFERENCE_NOTE, REFERENCE_TAIL, reference_closes
 from forliosa.timeutil import iso_taipei, today_taipei
 
 HISTORY_RANGES = ("5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX")
@@ -188,7 +188,7 @@ def traded_history_out(db: Session, md: MarketData, symbol: str, range_: str,
     limit = share_changes(md, [info.symbol], min(until or today, today)).get(info.symbol)
     notes: list[str] = []
     if ref_until is not None:
-        notes.append(f"{ymd(ref_until)} 以前的股價來自 Yahoo Finance，不是官方資料")
+        notes.append(f"{ymd(ref_until)} {REFERENCE_TAIL}")
     first = th.candles[0].t if th.candles else None
     for e in md.corporate_events(info.symbol):  # a broker's cost is in today's shares: the picker must know
         if limit is not None and e.date <= limit.date:

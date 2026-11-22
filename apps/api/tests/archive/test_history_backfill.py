@@ -232,15 +232,18 @@ def test_only_charts_read_the_backfill_and_only_when_switched_on(db, clock, opte
     assert set(chart.source.split("+")) == {HISTORY_SOURCE, "twse-openapi"}
     assert md.backfill_until("0050.TW") == date(2026, 11, 11)
     notes = coverage.series_notes(md, "0050.TW", date(2021, 11, 14), date(2021, 11, 15), backfill=True)
-    assert notes == ["2026/11/11 以前的日線來自 Yahoo Finance，不是官方資料；股票分割前的價格已經換算"]
+    assert notes == ["2026/11/11 以前・參考價（分割已換算）"]
     # a series that starts later than asked says where it starts, then names the source
     short = coverage.series_notes(md, "0050.TW", date(2016, 11, 14), date(2021, 11, 15), backfill=True)
     assert short[0] == "資料從 2021/11/15 開始" and len(short) == 2
     assert HISTORY_SOURCE in allowed_sources("commercial", backfill=True)
     assert HISTORY_SOURCE not in allowed_sources("commercial")
-    assert label(HISTORY_SOURCE) == "Yahoo Finance（歷史日線，非官方資料）"
+    assert label(HISTORY_SOURCE) == "存檔開始以前的歷史日線（非官方資料）"
     listed = [d for d in attributions("commercial")["datasets"] if d["key"] == HISTORY_SOURCE]
     assert listed and listed[0]["commercial"] is False and listed[0]["license_status"] == "non_commercial"
+    # pages never name the vendor (產品負責人 2026-11-22): no name, no link to its site or terms
+    assert "yahoo" not in json.dumps({**listed[0], "key": None}, ensure_ascii=False).lower()  # the key is internal
+    assert listed[0]["url"] is None and listed[0]["license_url"] is None
 
 
 def test_switched_off_nothing_reads_the_rows(db, clock):
@@ -265,8 +268,9 @@ def test_history_endpoint_shows_the_backfill_with_its_note(db, clock, opted_in, 
                         lambda _md, s: type("I", (), {"symbol": "0050.TW", "market": "TWSE"})())
     out = instruments.history(md, "0050.TW", "5Y")
     assert out["candles"][0]["t"] == date(2021, 11, 15) and out["candles"][-1]["t"] == date(2026, 11, 12)
-    assert any("Yahoo Finance" in s for s in out["sources"])
-    assert out["notes"] == ["2026/11/11 以前的日線來自 Yahoo Finance，不是官方資料；股票分割前的價格已經換算"]
+    assert "存檔開始以前的歷史日線（非官方資料）" in out["sources"]
+    assert "Yahoo" not in json.dumps([out["sources"], out["notes"]], ensure_ascii=False)
+    assert out["notes"] == ["2026/11/11 以前・參考價（分割已換算）"]
 
 
 def test_drop_removes_every_backfilled_row_and_keeps_official_ones(db, clock):

@@ -43,10 +43,10 @@ YAHOO_DAYS = tw_trading_days(date(2024, 5, 2), date(2026, 11, 11))
 SPLIT_0050 = date(2025, 6, 18)
 HALT_0050 = (date(2025, 6, 11), date(2025, 6, 17))
 REDUCTION_2363 = date(2024, 7, 29)
-NOTE = "2026/11/11 以前用 Yahoo 參考價計算，不是官方資料"
+NOTE = "2026/11/11 以前・參考價"
 BENCH_NOTE = "元大台灣50在 2026/11/11 以前只算價格，不含股利"  # no ex-dividend dates before the archive
 INDEX_LATE = "發行量加權股價報酬指數從 2026/11/12 收盤起算，之前沒有資料"
-YAHOO_LABEL = "Yahoo Finance（歷史日線，非官方資料）"
+YAHOO_LABEL = "存檔開始以前的歷史日線（非官方資料）"
 GOLDEN = Path(__file__).parent / "fixtures" / "reference_valuation_golden.json"
 
 OFFICIAL = {

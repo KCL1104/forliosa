@@ -30,6 +30,7 @@ from forliosa.marketdata.base import Candle
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
 from forliosa.models import MarketEvent, Transaction
+from forliosa.services.reference_close import REFERENCE_TAIL
 from forliosa.timeutil import today_taipei
 from tests.ai.fake_anthropic import FakeAnthropic
 from tests.api.m5 import API, account, trade, trading_day
@@ -38,6 +39,7 @@ from tests.composition_fixture import build_archive
 from tests.test_migrations import _config, _insert
 
 COMMIT = f"{API}/imports/positions/commit"
+HIST = "存檔開始以前的歷史日線（非官方資料）"  # the backfill's source label; pages never name the vendor
 SPLIT_0050 = date(2025, 6, 18)  # catalog.KNOWN_SPLITS: 1 -> 4
 
 
@@ -310,8 +312,8 @@ def test_history_as_traded_multiplies_the_backfill_back_for_a_split(client, arch
     # the split is the earliest day a buy imported today may have (``pick_from``): the picker says so itself, the
     # notes leave the split out
     assert h["pick_from"] == {"date": SPLIT_0050.isoformat(), "reason": "split"}
-    assert h["notes"] == [f"{last_yahoo.strftime('%Y/%m/%d')} 以前的股價來自 Yahoo Finance，不是官方資料"]
-    assert any("Yahoo Finance" in s for s in h["sources"]) and any("證券交易所" in s for s in h["sources"])
+    assert h["notes"] == [f"{last_yahoo.strftime('%Y/%m/%d')} 以前・參考價"]
+    assert HIST in h["sources"] and any("證券交易所" in s for s in h["sources"])
     assert h["symbol"] == "0050.TW" and h["interval"] == "1d" and h["is_demo"] is False
     # a buy imported before the split: no limit, and the split note is back (the picker shows days before it)
     before = client.get(f"{API}/instruments/0050/history",
@@ -322,7 +324,7 @@ def test_history_as_traded_multiplies_the_backfill_back_for_a_split(client, arch
     plain = client.get(f"{API}/instruments/0050/history", params={"range": "5Y"}).json()
     plain_pre = next(c for c in plain["candles"] if c["t"] == pre)
     assert plain_pre["c"] == pytest.approx(by_day[pre]["c"] / 4, abs=1e-3)
-    assert "股票分割前的價格已經換算" in plain["notes"][0]
+    assert plain["notes"][0].endswith("以前・參考價（分割已換算）")
     assert plain["pick_from"] is None
 
 
@@ -331,15 +333,15 @@ def test_history_as_traded_5d_says_yahoo_only_when_a_returned_bar_is_from_it(cli
     sources name Yahoo (they did, from the bars read before slicing)."""
     h = client.get(f"{API}/instruments/2330/history", params={"range": "5D", "prices": "as_traded"}).json()
     assert len(h["candles"]) == 5 and h["candles"][0]["t"] >= arch.archive_start.isoformat()
-    assert not any("Yahoo" in n for n in h["notes"]) and not any("Yahoo" in s for s in h["sources"])
+    assert not any(n.endswith(REFERENCE_TAIL) for n in h["notes"]) and HIST not in h["sources"]
     month = client.get(f"{API}/instruments/2330/history", params={"range": "1M", "prices": "as_traded"}).json()
-    assert any("Yahoo" in n for n in month["notes"]) and any("Yahoo" in s for s in month["sources"])
+    assert any(n.endswith(REFERENCE_TAIL) for n in month["notes"]) and HIST in month["sources"]
 
 
 def test_history_as_traded_of_a_us_stock_and_with_the_backfill_off(client, arch, monkeypatch):
     us = client.get(f"{API}/instruments/VOO/history", params={"range": "5Y", "prices": "as_traded"}).json()
     assert us["candles"][0]["t"] == "2024-07-01" and us["notes"] == ["資料從 2024/07/01 開始"]
-    assert not any("Yahoo" in s for s in us["sources"])
+    assert HIST not in us["sources"]
     monkeypatch.setenv("PRICE_HISTORY_SOURCE", "")
     get_settings.cache_clear()
     off = client.get(f"{API}/instruments/2330/history", params={"range": "5Y", "prices": "as_traded"}).json()

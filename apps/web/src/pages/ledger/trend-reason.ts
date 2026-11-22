@@ -1,5 +1,5 @@
 import type { Performance } from "@/api/types"
-import { isCoverageNote } from "@/lib/data-notes"
+import { isCoverageNote, REFERENCE_TAIL } from "@/lib/data-notes"
 import { formatDateShort } from "@/lib/format"
 import { trendState, trendWindow, type TrendRange } from "@/lib/trend-range"
 
@@ -42,5 +42,5 @@ export function trendReferenceLine(p: Pick<Performance, "series" | "reference_un
   if (!p || !until || p.series.length === 0) return null
   const first = trendWindow(p.series, range).points[0]
   if (!first || first.t > until) return null
-  return `${withYear ? `${until.slice(0, 4)}/` : ""}${formatDateShort(until, false)} 以前用 Yahoo 參考價計算，不是官方資料`
+  return `${withYear ? `${until.slice(0, 4)}/` : ""}${formatDateShort(until, false)} ${REFERENCE_TAIL}`
 }

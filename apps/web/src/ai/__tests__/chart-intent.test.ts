@@ -127,10 +127,10 @@ describe("buildLocalChart：用 API 的資料組出和後端同樣形狀的圖�
     expect(plain.chart!.sources).toEqual(["帳本紀錄"])
     expect(plain.chart!.notes).toEqual(["報酬率是時間加權報酬率；基準含股利"])
     const real = fakeApi().getPerformance
-    const notes = ["2026/11/11 以前用 Yahoo 參考價計算，不是官方資料", "元大台灣50在 2026/11/11 以前只算價格，不含股利"]
+    const notes = ["2026/11/11 以前・參考價", "元大台灣50在 2026/11/11 以前只算價格，不含股利"]
     const api = fakeApi({ getPerformance: async (q) => ({ ...(await real(q)), reference_until: "2026-11-11", notes }) })
     const out = await buildLocalChart({ kind: "performance", targets: [], range: "1Y" }, deps(api))
-    expect(out.chart!.sources).toEqual(["帳本紀錄", "Yahoo Finance（歷史日線，非官方資料）"])
+    expect(out.chart!.sources).toEqual(["帳本紀錄", "存檔開始以前的歷史日線（非官方資料）"])
     expect(out.chart!.notes).toEqual([...notes, "報酬率是時間加權報酬率"])
   })
 

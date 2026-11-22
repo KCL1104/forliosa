@@ -237,7 +237,7 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
   it("績效：存檔開始以前用 Yahoo 參考價算（回補開著，產品負責人 2026-11-18）：1 年不再從存檔起點切，多一句說明與 reference_until；0050 那段只算價格；美股沒有回補", async () => {
     const all = await api.getPerformance({ range: "1Y" })
     expect(all.series[0]!.t < "2026-06-01").toBe(true)
-    expect(all.notes).toEqual(["2026/05/29 以前用 Yahoo 參考價計算，不是官方資料", "元大台灣50在 2026/05/29 以前只算價格，不含股利"])
+    expect(all.notes).toEqual(["2026/05/29 以前・參考價", "元大台灣50在 2026/05/29 以前只算價格，不含股利"])
     expect(all.reference_until).toBe("2026-05-29")
     // 指數基準含息、沒有回補：不寫「只算價格」
     expect((await api.getPerformance({ range: "1Y", benchmark: "^TAIEXTR" })).notes?.join("")).not.toContain("只算價格")
@@ -249,7 +249,7 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     const usAll = await api.getPerformance({ range: "ALL", account_id: us.id })
     expect(usAll.notes).toEqual([
       "績效從 2024/07/01 收盤開始算，之前沒有資料",
-      "2026/05/29 以前用 Yahoo 參考價計算，不是官方資料",
+      "2026/05/29 以前・參考價",
       "元大台灣50在 2026/05/29 以前只算價格，不含股利",
     ])
     expect(usAll.reference_until).toBeNull()
