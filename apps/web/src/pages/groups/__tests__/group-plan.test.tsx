@@ -100,17 +100,19 @@ describe("報告分頁：日報｜週報（不加第九個分頁）", () => {
     expect(articles).toHaveLength(4)
     const [latest, older] = articles as [HTMLElement, HTMLElement]
     expect(within(latest).getByRole("heading", { level: 2 })).toHaveTextContent("11/12（四） 日報")
-    // AI 段落（2–4 句、不點名）與數字：今日報酬只有開了報酬率的人（阿弟沒開）
-    expect(latest.querySelector(".ai-voice")).toHaveTextContent(/^今天有分享報酬的 4 個人/)
+    // AI 段落不放（2026-11-22 評論：頁面只放標籤和數字；推播照樣帶）。數字：今日報酬只有開了報酬率的人（阿弟沒開）
+    expect(latest.querySelector(".ai-voice")).toBeNull()
+    expect(latest.textContent).not.toMatch(/有分享報酬的 \d+ 個人/)
     expect(within(latest).getByText("今日報酬")).toBeInTheDocument()
     expect(within(latest).queryByText("阿弟")).toBeNull()
     expect(within(latest).getByText("今天的買賣")).toBeInTheDocument()
     expect(within(latest).getByRole("link", { name: "收盤重點 →" })).toHaveAttribute("href", "/market#market-summary")
     expect(within(latest).getByText("為什麼漲跌")).toBeInTheDocument()
     expect(within(latest).getByRole("link", { name: "台積電" })).toHaveAttribute("href", "/stock/2330.TW")
-    // 免責：全站同一句（AI 寫的內容下面是 `ai` 那一句），13px 淡墨
-    expect(within(latest).getByText(DISCLAIMER.ai)).toHaveAttribute("data-disclaimer", "ai")
-    expect(within(older).getByText(DISCLAIMER.ai)).toHaveClass("text-sm", "text-ink-2")
+    // 免責：頁面上只有伺服器算的數字，全站那一句，13px 淡墨
+    expect(within(latest).getByText(DISCLAIMER.short)).toHaveAttribute("data-disclaimer", "short")
+    expect(within(older).getByText(DISCLAIMER.short)).toHaveClass("text-sm", "text-ink-2")
+    expect(within(latest).queryByText(DISCLAIMER.ai)).toBeNull()
     expect(within(older).getByText("當日報酬")).toBeInTheDocument()
     expect(within(older).getByText("那天的買賣")).toBeInTheDocument()
     expect(within(older).queryByRole("link")).toBeNull()
@@ -159,13 +161,13 @@ describe("報告分頁：日報｜週報（不加第九個分頁）", () => {
     expect(router.state.location.search).toMatchObject({ tab: "digests", report: "weekly" })
   })
 
-  it("有人關掉報酬率：AI 段落收回、寫為什麼，那個人的數字也不見", async () => {
+  it("有人關掉報酬率：那個人的數字不見；後端說 AI 摘要收回的那一句也不放（頁面本來就沒有段落）", async () => {
     mount()
     await api.putShare("grp_family", { returns: false, holdings: true, amounts: false, trades: true, trade_prices: false, push: false })
     renderApp("/groups/grp_family?tab=digests")
     const [latest] = (await screen.findAllByRole("article", undefined, T)) as [HTMLElement]
     expect(latest.querySelector(".ai-voice")).toBeNull()
-    expect(within(latest).getByText(/摘要不再顯示/)).toBeInTheDocument()
+    expect(within(latest).queryByText(/摘要/)).toBeNull()
     expect(within(latest).queryByText("示範使用者")).toBeNull()
   })
 

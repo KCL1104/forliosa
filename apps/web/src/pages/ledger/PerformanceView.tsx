@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { direction, formatCompact, formatDate, formatMoney, formatNumber, formatPercent, MASK, toneClass } from "@/lib/format"
-import { responseExceedsData, TREND_RANGES, trendState } from "@/lib/trend-range"
+import { minusMonths, responseExceedsData, TREND_RANGES, trendState } from "@/lib/trend-range"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { niceTicks } from "@/ai/chart-geometry"
@@ -139,7 +139,7 @@ export function PerformanceView() {
           <DataNotes notes={p.notes?.filter((n) => n !== trendNote && !(heroSaysReference && isReferenceNote(n)))} />
           <div>
             {/* 資產組成只給自己看（決定 11）：查看別人的資產時傳 undefined，「含估計的買入日，不年化」也不寫 */}
-            <Metrics p={p} composition={composition} />
+            <Metrics p={p} composition={composition} exceeds={exceeds} />
             {/* 指標都含估計那一段時說一次（13px 淡墨）：報酬、和基準的差距、最大回撤、波動度都是照那段期間的估計持股算的 */}
             {estimateText && (
               <p className="mt-2 text-sm text-ink-2" data-metrics-estimate>
@@ -166,7 +166,8 @@ export function PerformanceView() {
             <DividendsByMonth p={p} />
             <RealizedByYear p={p} />
           </div>
-          <Definitions />
+          {/* 每月報酬率的「本金增減」與基金排名的說明：只在那兩塊有出現時才寫（查看別人的資產時兩塊都不放） */}
+          <Definitions composition={composition} fund={readOnly ? null : p.fund_rank} />
         </div>
       )}
     </div>
@@ -218,16 +219,30 @@ function pricedAccount<A extends { id: string }>(accounts: A[], holdings?: Holdi
   return accounts.find((a) => held.has(a.id) && !unpriced.has(a.id))
 }
 
-function Metrics({ p, composition }: { p: Performance; composition: Performance["composition"] }) {
+/**
+ * 期間滿 1 年才年化（2026-11-22 評論：「1月」的 XIRR 年化成 ▲184.64%）。「1年」的起始日是名目起始日當天或之後的
+ * 第一個收盤、報酬從它前一個收盤算起，所以沒有比資料長時就是整整一年；其他區間看起訖日期。
+ */
+function atLeastAYear(p: Performance, exceeds: boolean): boolean {
+  if (!p.start_date || !p.end_date) return false
+  if (p.range === "1Y" && !exceeds) return true
+  return p.start_date <= minusMonths(p.end_date, 12)
+}
+
+function Metrics({ p, composition, exceeds }: { p: Performance; composition: Performance["composition"]; exceeds: boolean }) {
   const you = useWho("你")
   // 基準比區間晚開始（存檔開始以前沒有資料的指數，從它的第一個收盤起算）：期間不同，不比多少
   const benchLate = p.series[0]?.benchmark_index === null && p.series.some((x) => x.benchmark_index !== null)
   const excess = !benchLate && p.twr !== null && p.benchmark?.twr != null ? p.twr - p.benchmark.twr : null
   // 資產組成（原型）：估計的那一段不算年化報酬（後端這時 xirr 是 null），說出原因。`composition` 是外面已經依「只給自己看」擋過的
   const estimated = p.xirr === null && touchesSpan(composition?.estimated, p.start_date, p.end_date)
+  // 未滿 1 年：後端算得出來也不放（短期間年化會放大成看起來很嚇人的數字）
+  const yearLong = atLeastAYear(p, exceeds)
+  const xirr = yearLong ? p.xirr : null
   const items: { label: string; help: string; value: React.ReactNode; sub?: React.ReactNode }[] = [
     {
-      label: "時間加權報酬（TWR）",
+      // 和首頁走勢讀數的「報酬」同一個數字、同一個名字（2026-11-22 評論：原本寫「時間加權報酬（TWR）」，看起來像另一種報酬）
+      label: "報酬（時間加權）",
       help: "不受存入、提出的影響，適合和基準比。",
       value: <Pct value={p.twr} />,
       sub: excess !== null && (
@@ -242,15 +257,8 @@ function Metrics({ p, composition }: { p: Performance; composition: Performance[
     {
       label: "年化 XIRR",
       help: `算進每一筆投入與取回的時間，是${you}實際的年化報酬。`,
-      value: p.xirr === null ? <span className="text-ink-2">—</span> : <Pct value={p.xirr} />,
-      sub:
-        p.xirr === null
-          ? p.range === "1D" || p.range === "5D"
-            ? "5 天以內不年化"
-            : estimated
-              ? "含估計的買入日，不年化"
-              : "期間太短或現金流不足，無法計算"
-          : "金額加權",
+      value: xirr === null ? <span className="text-ink-2">—</span> : <Pct value={xirr} />,
+      sub: xirr !== null ? "金額加權" : !yearLong ? "未滿 1 年" : estimated ? "含估計的買入日，不年化" : "期間太短或現金流不足，無法計算",
     },
     {
       label: "最大回撤",
@@ -368,8 +376,11 @@ function RealizedByYear({ p }: { p: Performance }) {
   )
 }
 
-/** 「計算方式 ⌄」：和「怎麼看 ⌄」「怎麼算的 ⌄」同一種開關（不用瀏覽器的 ▶；觸控 44px） */
-function Definitions() {
+/**
+ * 「計算方式 ⌄」：和「怎麼看 ⌄」「怎麼算的 ⌄」同一種開關（不用瀏覽器的 ▶；觸控 44px）。
+ * 每月報酬率的「本金增減」與基金排名的說明（後端的原文）也在這裡（2026-11-22 評論：頁面上只放標籤和數字）。
+ */
+function Definitions({ composition, fund }: { composition: Performance["composition"]; fund: Performance["fund_rank"] }) {
   const how = useHowToRead("計算方式")
   return (
     <div className="border-y border-rule py-2">
@@ -379,7 +390,15 @@ function Definitions() {
         <p>價格用未還原收盤價；股利另以交易紀錄計入。</p>
         <p>投資組合價值是每天收盤後所有持股的市值（美股依中央銀行公布的當日新臺幣對美元收盤匯率換算成新台幣），不含現金部位。</p>
         <p>每日報酬 = （當日市值 + 當日流出）÷（前一日市值 + 當日流入）− 1。買進成本（含手續費）視為開盤前流入；賣出淨收入與現金股利（扣二代健保）視為收盤後流出。</p>
-        <p>時間加權報酬（TWR）把每日報酬連乘；XIRR 以投資人的現金流（買進為負、賣出與股利為正、期末市值為正）求年化內部報酬率；最大回撤以 TWR 指數計算。</p>
+        <p>時間加權報酬（TWR）把每日報酬連乘；XIRR 以投資人的現金流（買進為負、賣出與股利為正、期末市值為正）求年化內部報酬率，期間未滿 1 年不年化；最大回撤以 TWR 指數計算。</p>
+        {composition && <p>本金增減：買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢，股利不算。</p>}
+        {(composition?.months_import_day ?? 0) > 0 && <p>匯入時找不到買入日的持股，從成本到匯入那天的漲跌都算在匯入那天，那個月不列。</p>}
+        {fund && (
+          <p>
+            贏過的台股基金：同一段期間的時間加權報酬，和每一檔基金的淨值報酬比。
+            {(fund.notes ?? []).map((n) => (n.endsWith("。") ? n : `${n}。`)).join("")}
+          </p>
+        )}
       </div>,
       )}
     </div>

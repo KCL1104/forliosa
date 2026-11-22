@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import type { Transaction } from "@/api/types"
 
-/** 打開完整表單時先填好的欄位（從記一筆、減少持股過來時不用再填一次） */
+/** 打開完整表單時先填好的欄位（從記一筆、賣出過來時不用再填一次） */
 export interface TradePrefill {
   /** 完整表單先選好的類型（股利入帳用） */
   type?: "cash_dividend"
@@ -13,7 +13,7 @@ export interface TradePrefill {
   fee?: number
 }
 
-/** 跨元件的暫時 UI 狀態（不存檔）：⌘K 搜尋、記一筆、減少持股、刪除這檔、清除所有持倉、匯入 */
+/** 跨元件的暫時 UI 狀態（不存檔）：⌘K 搜尋、記一筆、賣出、刪除這檔、清除所有持倉、匯入 */
 interface UiState {
   searchOpen: boolean
   setSearchOpen: (open: boolean) => void
@@ -23,12 +23,12 @@ interface UiState {
    */
   tradeForm: { open: boolean; symbol?: string; edit?: Transaction; full?: boolean; sell?: boolean; prefill?: TradePrefill; accountId?: string }
   /**
-   * `sell`：完整表單一開始就選「賣出」（從「減少持股」的「改日期或價格」過來）。
+   * `sell`：完整表單一開始就選「賣出」（從「賣出」的「改日期或價格」過來）。
    * `accountId`：記一筆先選好這個帳戶
    */
   openTradeForm: (opts?: { symbol?: string; edit?: Transaction; full?: boolean; sell?: boolean; prefill?: TradePrefill; accountId?: string }) => void
   closeTradeForm: () => void
-  /** 減少持股／全部賣出：只填股數，用最新的收盤價記成賣出（`all`：股數先填成全部） */
+  /** 賣出／全部賣出：只填股數，用最新的收盤價記成賣出（`all`：股數先填成全部） */
   reduce: { open: boolean; symbol?: string; all?: boolean }
   openReduce: (symbol: string, all?: boolean) => void
   closeReduce: () => void

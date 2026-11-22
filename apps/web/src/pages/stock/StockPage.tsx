@@ -289,7 +289,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
         {/* 有持股時：賣出也在這裡（手機上不用先展開部位明細、往下捲；2026-11-14 第六次評分） */}
         {held && (
           <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => reduce(inst.symbol)}>
-            減少持股
+            賣出
           </Button>
         )}
       </span>}
@@ -678,7 +678,7 @@ function HoldingTray({ inst, position: p, rounds, priced = true }: { inst: Instr
             price={priced ? (quote.data?.price ?? null) : null}
           />
           <div className="mt-3 flex flex-wrap gap-2">
-            {/* 「記一筆」「減少持股」在標題列已經有，這裡不重複 */}
+            {/* 「記一筆」「賣出」在標題列已經有，這裡不重複 */}
             <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className={buttonVariants({ variant: "outline", size: "sm", className: "pointer-coarse:h-11" })}>
               在帳本中查看
             </Link>

@@ -63,7 +63,7 @@ export function QuickAdd({
   onFull,
   sheet = false,
 }: {
-  /** 從個股頁、持倉的「加碼」打開：直接到第二步 */
+  /** 從個股頁、持倉的「買進」打開：直接到第二步 */
   initialSymbol?: string
   /** 先選好的帳戶 */
   initialAccountId?: string

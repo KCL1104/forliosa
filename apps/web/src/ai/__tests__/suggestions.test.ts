@@ -196,7 +196,9 @@ describe("規則版回答：只用使用者自己的資料，隱私模式遮金�
     // 現在式：只說現在能做什麼，不承諾時程，也不扮演 AI 的人格
     expect(f.text).toBe("這題要查網路資料，現在沒辦法。")
     expect(f.text).not.toMatch(/下一階段|開放|猜的答案/)
-    expect(f.links!.length).toBeGreaterThan(0)
+    // 和問題無關的連結不放（2026-11-22 評論：問護城河原本連到「看持倉」）；問到績效、交易時才連過去
+    expect(f.links).toEqual([])
+    expect(fallbackAnswer("我的報酬跟大盤比怎麼樣，幫我上網查", ctx).links!.map((l) => l.label)).toEqual(["看績效"])
   })
 })
 

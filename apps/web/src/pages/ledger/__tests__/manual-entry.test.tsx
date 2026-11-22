@@ -195,7 +195,7 @@ describe("完整表單：存檔後再記一筆", () => {
   }, 20_000)
 })
 
-describe("減少持股（賣出不用開表單）", () => {
+describe("賣出（不用開表單；2026-11-22 以前叫「減少持股」）", () => {
   it("只填股數：用最新的收盤價、今天的日期記成一筆賣出；超過持有的股數會擋下", async () => {
     renderApp("/")
     await screen.findByRole("tablist", { name: "帳本內容" }, T)
@@ -204,7 +204,7 @@ describe("減少持股（賣出不用開表單）", () => {
     useUi.getState().openReduce("2317.TW")
     const dialog = await screen.findByRole("dialog", {}, T)
     const form = within(dialog)
-    expect(await form.findByRole("heading", { name: "減少持股" }, T)).toBeInTheDocument()
+    expect(await form.findByRole("heading", { name: "賣出" }, T)).toBeInTheDocument()
     await form.findByText(/記成賣出。$/, {}, T)
     const qty = dialog.querySelector<HTMLInputElement>("#reduce-qty")!
     const inLots = dialog.querySelector('label[for="reduce-qty"]')!.textContent!.endsWith("張數")
@@ -313,12 +313,12 @@ describe("減少持股（賣出不用開表單）", () => {
     expect(within(dialog).getByText(`最多 ${new Intl.NumberFormat("zh-TW").format(held.quantity)} 股`)).toBeInTheDocument()
   })
 
-  it("持倉的每一列有動作選單：加碼、減少持股、全部賣出，最後是刪除這檔", async () => {
+  it("持倉的每一列有動作選單：買進、賣出、全部賣出，最後是刪除這檔（一個動作一個動詞，2026-11-22）", async () => {
     renderApp("/")
     const table = await screen.findByRole("table", { name: "持倉" }, T)
     await userEvent.click(await within(table).findByRole("button", { name: "鴻海的動作" }, T))
     const menu = await screen.findByRole("menu", {}, T)
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["加碼", "減少持股", "全部賣出", "刪除這檔"])
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["買進", "賣出", "全部賣出", "刪除這檔"])
     await userEvent.click(within(menu).getByRole("menuitem", { name: "全部賣出" }))
     expect(useUi.getState().reduce).toMatchObject({ open: true, symbol: "2317.TW", all: true })
   })

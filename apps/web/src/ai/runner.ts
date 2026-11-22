@@ -151,7 +151,7 @@ export function useAiRunner(ctx: AiContext) {
         if (held < shares) notes.push(`你只有 ${formatQuantity(held, "lot", inst.market)}，比要賣的少，這筆不能入帳。`)
       }
       // 使用者寫的日期優先。美股賣出記在收盤日以前要先看這個帳戶這一檔有沒有更晚的交易（例如今天剛記的買進）：
-      // 有的話記今天，否則簽名時後端依日期重算會擋下（和「減少持股」同一個規則，`closeSellDate`）
+      // 有的話記今天，否則簽名時後端依日期重算會擋下（和「賣出」同一個規則，`closeSellDate`）
       const tradeDate =
         intent.date ??
         (intent.side === "sell" ? await closeSellDate(api, { accountId: account.id, symbol: inst.symbol, closeDate, today }) : (closeDate ?? today))

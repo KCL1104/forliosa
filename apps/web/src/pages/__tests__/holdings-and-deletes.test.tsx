@@ -181,7 +181,7 @@ describe("記一筆：先選股票，再填股數、買進日期、價格（產�
     expect(await api.getDailyClose("2330.TW", "2024-03-15")).toMatchObject({ close: null, reference: false })
   })
 
-  it("持倉的「加碼」直接到第二步（那一檔選好），焦點在股數", async () => {
+  it("持倉的「買進」直接到第二步（那一檔選好），焦點在股數", async () => {
     mount()
     renderApp("/")
     await screen.findByRole("table", { name: "持倉" }, T)
@@ -192,7 +192,7 @@ describe("記一筆：先選股票，再填股數、買進日期、價格（產�
   })
 })
 
-/** 記一筆直接到第二步（持倉的「加碼」那條路）：這一檔已經選好；`accountId` 是先選好的帳戶 */
+/** 記一筆直接到第二步（持倉的「買進」那條路）：這一檔已經選好；`accountId` 是先選好的帳戶 */
 async function openQuickAddFor(symbol: string, accountId?: string) {
   await screen.findByRole("table", { name: "持倉" }, T)
   act(() => useUi.getState().openTradeForm({ symbol, accountId }))
@@ -561,15 +561,15 @@ describe("持倉展開每一筆買賣（產品負責人 2026-11-14，參考 Goog
     await waitFor(() => expect(within(screen.getByRole("list", { name: "台積電的每一筆買賣" })).getAllByRole("listitem")).toHaveLength(1), T)
   })
 
-  it("最下面：再加一筆買進（記一筆、這一檔帶好）、減少持股", async () => {
+  it("最下面：買進（記一筆、這一檔帶好）、賣出（一個動作一個動詞，2026-11-22）", async () => {
     mount()
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderApp("/")
     await expand("台積電")
-    await user.click(screen.getByRole("button", { name: "再加一筆買進" }))
+    await user.click(screen.getByRole("button", { name: "買進" }))
     expect(useUi.getState().tradeForm).toMatchObject({ open: true, symbol: "2330" })
     act(() => useUi.getState().closeTradeForm())
-    await user.click(screen.getByRole("button", { name: "減少持股" }))
+    await user.click(screen.getByRole("button", { name: "賣出" }))
     expect(useUi.getState().reduce).toMatchObject({ open: true, symbol: "2330.TW" })
     act(() => useUi.setState({ reduce: { open: false } }))
   })

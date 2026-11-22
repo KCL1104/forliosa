@@ -84,25 +84,27 @@ async function withPerformance(patch: (p: Performance) => Performance) {
 }
 
 describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
-  it("區間（3 個月）：圖下面沒有拆解的句子（使用者只要圖）；圖例寫「目前價差」（累積到最後一天），滑過時寫那一天的「價差」；本金＋價差＝總資產", async () => {
+  it("區間（3 個月）：圖下面沒有拆解的句子（使用者只要圖）；圖例的價差只有名字「目前價差」（2026-11-22：主數字已經有總損益），滑過時也一樣；本金＋價差＝總資產（圖的說明念）", async () => {
     act(() => useLedgerPrefs.setState({ trendRange: "3M" }))
     renderApp("/")
     const region = await trend()
     expect(sentence(region)).toBeNull()
     expect(region.querySelector("[data-bands]")).not.toBeNull()
-    const gainText = legend(region, "gain")!.textContent!
-    expect(gainText).toMatch(/^目前價差 \+NT\$[\d,]+$/)
-    // 最後一天：本金＋價差＝總資產（圖的說明念的「到 NT$…」）
-    const to = /總資產從 NT\$[\d,]+ 到 (NT\$[\d,]+)/.exec(within(region).getByRole("img").getAttribute("aria-label")!)![1]!
-    expect(money(legend(region, "invested")!.textContent!) + money(gainText)).toBe(money(to))
-    // 滑過：那一天的「價差」（讀數有日期，不寫「目前」），本金＋價差＝讀數的總資產
+    expect(legend(region, "gain")!.textContent).toBe("目前價差")
+    // 最後一天：本金＋價差＝總資產（圖的說明念的「到 NT$…」與資產組成）
+    const label = within(region).getByRole("img").getAttribute("aria-label")!
+    const to = /總資產從 NT\$[\d,]+ 到 (NT\$[\d,]+)/.exec(label)![1]!
+    const gain = /價差賺 (NT\$[\d,]+)/.exec(label)![1]!
+    expect(money(legend(region, "invested")!.textContent!) + money(gain)).toBe(money(to))
+    // 滑過：圖例的本金換成那一天的，價差照樣只有名字；本金＋價差＝讀數的總資產（報讀器念那一天的價差）
     const g = chart(region)
     act(() => g.focus())
     fireEvent.keyDown(g, { key: "Home" })
     fireEvent.keyDown(g, { key: "ArrowRight" })
-    expect(legend(region, "gain")!.textContent).toMatch(/^價差 \+NT\$[\d,]+$/)
+    expect(legend(region, "gain")!.textContent).toBe("目前價差")
     const shown = region.querySelector("[data-readout] p .font-semibold")!.textContent!
-    expect(money(legend(region, "invested")!.textContent!) + money(legend(region, "gain")!.textContent!)).toBe(money(shown))
+    const dayGain = /價差賺 (NT\$[\d,]+)/.exec(region.querySelector('[aria-live="polite"]')!.textContent!)![1]!
+    expect(money(legend(region, "invested")!.textContent!) + money(dayGain)).toBe(money(shown))
   })
 
   it("「全部」：圖例寫「價差」（不寫「目前」）；本金＋價差＝主數字的總資產，價差＋全部領過的股利＝主數字的「總損益（含股利）」；畫面上沒有「賺的」；圖的說明念資產組成、本金只算還在股票裡的錢", async () => {
@@ -111,9 +113,12 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     const region = await trend()
     expect(sentence(region)).toBeNull()
     const invested = /^本金 (NT\$[\d,]+)$/.exec(legend(region, "invested")!.textContent!)![1]!
-    const profit = /^價差 \+(NT\$[\d,]+)$/.exec(legend(region, "gain")!.textContent!)![1]!
-    // 主數字寫「總損益（含股利）」，圖例不再有第二個讀成「賺多少」的「賺的」（2026-11-21 評論）
+    // 價差只有名字（2026-11-22）：金額從圖的說明讀
+    expect(legend(region, "gain")!.textContent).toBe("價差")
+    const profit = /價差賺 (NT\$[\d,]+)。/.exec(within(region).getByRole("img").getAttribute("aria-label")!)![1]!
+    // 主數字寫「總損益（含股利）」，圖例不再有第二個讀成「賺多少」的「賺的」（2026-11-21 評論），也沒有第二個金額（2026-11-22）
     expect(region.querySelector("[data-legend-row], [data-legend-grid]")!.textContent).not.toMatch(/賺的|虧的/)
+    expect(legend(region, "gain")!.textContent).not.toMatch(/NT\$/)
     expect(legend(region, "total")!.textContent).toBe("總資產")
     const summary = await api.getPortfolioSummary()
     expect(money(invested) + money(profit)).toBe(Math.round(summary.market_value))
@@ -181,7 +186,7 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     expect(within(region).queryByText("股利")).toBeNull()
   })
 
-  it("虧損、整段都是估計的：圖例「價差 −NT$…」（跌的顏色）、整條是細線、只塗虧的", async () => {
+  it("虧損、整段都是估計的：圖例「價差」（跌的顏色的色塊，金額念在圖的說明）、整條是細線、只塗虧的", async () => {
     const days = ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12"]
     const series: PerformancePoint[] = days.map((t, i) => ({ t, market_value: 1_000_000 - i * 20_000, net_invested: 1_050_000, twr_index: 1 - i * 0.02, benchmark_index: null }))
     await withPerformance((p) => ({ ...p, series, notes: [], reference_until: null, composition: { dividends: [], estimated: [{ from: "2026-01-01", until: "2026-11-12" }], months: [], months_estimated: 1 } }))
@@ -195,9 +200,9 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     expect(region.querySelectorAll('[data-series="total"] path')).toHaveLength(1)
     expect(region.querySelector('[data-band="loss"]')).not.toBeNull()
     expect(region.querySelector('[data-band="gain"]')).toBeNull()
-    expect(legend(region, "gain")!.textContent).toBe("價差 −NT$210,000")
-    expect(legend(region, "gain")!.querySelector(".text-fall")).not.toBeNull()
+    expect(legend(region, "gain")!.textContent).toBe("價差")
     expect(legend(region, "gain")!.querySelector(".bg-fall-tint")).not.toBeNull()
+    expect(within(region).getByRole("img").getAttribute("aria-label")).toContain("價差虧 NT$210,000")
   })
 
   it("隱私模式：圖例的金額都遮掉；% 照常", async () => {
@@ -210,7 +215,7 @@ describe("A＋B＋C：首頁走勢的資產組成", { timeout: 20_000 }, () => {
     const grid = region.querySelector<HTMLElement>("[data-legend-grid]")!
     expect(grid.textContent).not.toMatch(/NT\$/)
     expect(within(legend(region, "invested")!).getByLabelText("已隱藏")).toBeInTheDocument()
-    expect(within(legend(region, "gain")!).getByLabelText("已隱藏")).toBeInTheDocument()
+    expect(legend(region, "gain")!.textContent).toBe("目前價差")
     expect(within(region).getByText(/^報酬/, { selector: "span" }).textContent).toMatch(/%/)
     // 圖的說明不念金額
     expect(within(region).getByRole("img").getAttribute("aria-label")).not.toMatch(/NT\$/)
@@ -250,10 +255,15 @@ describe("D＋G：績效分段的「每月報酬率」與「贏過幾成的台�
     expect(rows).toHaveLength(11)
     // 11 月還沒過完：寫它算的是哪幾天
     expect(rows[0]).toMatch(/^11 月 11\/2 – 11\/12/)
-    expect(screen.getByText("有 1 個月用估計的買入日計算，不列。")).toBeInTheDocument()
-    expect(screen.getByText("有 1 個月不列：那個月匯入的持股找不到買入日，從成本到匯入那天的漲跌都算在那一天。")).toBeInTheDocument()
-    // 決定 5：本金增減只算還在股票裡的錢，表格下面說一次（用和圖一樣的說法：本金）
-    expect(screen.getByText("本金增減：買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢，股利不算。")).toBeInTheDocument()
+    // 2026-11-22 評論：表格下面只放標籤；本金增減的意思與匯入那天的算法在「計算方式」裡
+    expect(screen.getByText("未列 1 個月・估計的買入日")).toBeInTheDocument()
+    expect(screen.getByText("未列 1 個月・匯入時找不到買入日")).toBeInTheDocument()
+    // 決定 5：本金增減只算還在股票裡的錢（用和圖一樣的說法：本金）——收在「計算方式」裡
+    const flowsDef = screen.getByText("本金增減：買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢，股利不算。")
+    expect(flowsDef).not.toBeVisible()
+    await userEvent.click(screen.getByRole("button", { name: /計算方式/ }))
+    expect(flowsDef).toBeVisible()
+    expect(screen.getByText("匯入時找不到買入日的持股，從成本到匯入那天的漲跌都算在匯入那天，那個月不列。")).toBeVisible()
     expect(within(table).getByRole("columnheader", { name: "本金增減" })).toBeInTheDocument()
     // 使用者 2026-11-19：表格上面不放「報酬率最好的是…。最差的是…。」（只要表格）
     expect(screen.queryByText(/報酬率最好的是|最差的是/)).toBeNull()
@@ -263,14 +273,19 @@ describe("D＋G：績效分段的「每月報酬率」與「贏過幾成的台�
     expect(screen.getByText("含估計的買入日，不年化")).toBeInTheDocument()
   })
 
-  it("贏過幾成的台股基金（示範資料）：期間與比了幾檔、後端的說明；標「示範資料」，來源不登記到頁尾", async () => {
+  it("贏過幾成的台股基金（示範資料）：標籤＋數字、期間與比了幾檔；怎麼比與後端的說明在「計算方式」；標「示範資料」，來源不登記到頁尾", async () => {
     renderApp("/?view=performance")
     await screen.findByText("與基準比較", {}, T)
-    const [line, period] = [...document.querySelectorAll<HTMLElement>("[data-fund-rank] p")]
-    expect(line!.textContent).toMatch(/^今年贏過 \d+% 的台股基金示範資料$/)
+    const [line, period, ...rest] = [...document.querySelectorAll<HTMLElement>("[data-fund-rank] p")]
+    // 2026-11-22 評論：標籤和數字，不是一句「今年贏過 72% 的台股基金」
+    expect(line!.textContent).toMatch(/^贏過的台股基金（今年） \d+%示範資料$/)
     expect(within(line!).getByText("示範資料")).toHaveClass("demo-tag")
-    expect(period!.textContent).toBe("1/1 – 11/11 的報酬，和 812 檔境內台股基金的淨值比")
-    expect(screen.getByText("基金淨值不含配息，配息的基金照公告的配息加回")).toBeInTheDocument()
+    expect(period!.textContent).toBe("1/1 – 11/11・812 檔境內台股基金")
+    expect(rest).toHaveLength(0)
+    const how = screen.getByText("贏過的台股基金：同一段期間的時間加權報酬，和每一檔基金的淨值報酬比。基金淨值不含配息，配息的基金照公告的配息加回。")
+    expect(how).not.toBeVisible()
+    await userEvent.click(screen.getByRole("button", { name: /計算方式/ }))
+    expect(how).toBeVisible()
     // 編的數字不掛在金管會的名下：頁尾沒有登記任何來源時只是一個連結
     expect(screen.getByRole("link", { name: "資料來源與授權" })).toBeInTheDocument()
   })

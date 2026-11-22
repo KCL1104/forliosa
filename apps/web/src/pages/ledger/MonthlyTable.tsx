@@ -2,7 +2,6 @@ import { ChevronDownIcon } from "lucide-react"
 import { useId, useState } from "react"
 import { appToday } from "@/api"
 import type { FundRank, Performance, PerformanceMonth } from "@/api/types"
-import { DataNotes } from "@/components/data-notes"
 import { Masked, Pct } from "@/components/finance"
 import { DemoTag, Section as Panel } from "@/components/section"
 import { useSourceNote } from "@/hooks/use-source-note"
@@ -81,13 +80,15 @@ export function MonthlyTable({ p }: { p: Performance }) {
           )}
         </div>
       )}
-      {/* 表格下面的說明（淡墨小字，和資料說明同一層）：本金增減的意思說一次；沒列的月份各自說原因 */}
-      <ul className="mt-2 flex flex-col gap-0.5 text-sm text-ink-2" data-months-notes>
-        {months.length > 0 && <li>本金增減：買股票花的錢減掉賣股票收到的錢，只算還在股票裡的錢，股利不算。</li>}
-        {comp.months_estimated > 0 && <li>有 {comp.months_estimated} 個月用估計的買入日計算，不列。</li>}
-        {/* 暫定（產品負責人還沒決定）：找不到買入日、用匯入那天記的那一筆，成本到那天的漲跌都算在那一天 */}
-        {importMonths > 0 && <li>有 {importMonths} 個月不列：那個月匯入的持股找不到買入日，從成本到匯入那天的漲跌都算在那一天。</li>}
-      </ul>
+      {/* 表格下面（淡墨小字，和資料說明同一層）：沒列的月份，標籤寫幾個月、為什麼（2026-11-22 評論：只放標籤）。
+          「本金增減」的意思與匯入那天的算法在績效分段最下面的「計算方式」 */}
+      {(comp.months_estimated > 0 || importMonths > 0) && (
+        <ul className="mt-2 flex flex-col gap-0.5 text-sm text-ink-2" data-months-notes>
+          {comp.months_estimated > 0 && <li>未列 {comp.months_estimated} 個月・估計的買入日</li>}
+          {/* 暫定（產品負責人還沒決定）：找不到買入日、用匯入那天記的那一筆，成本到那天的漲跌都算在那一天 */}
+          {importMonths > 0 && <li>未列 {importMonths} 個月・匯入時找不到買入日</li>}
+        </ul>
+      )}
     </Panel>
   )
 }
@@ -144,9 +145,10 @@ function MonthRow({ m, years, privacy }: { m: PerformanceMonth; years: boolean; 
 }
 
 /**
- * 「今年贏過 73% 的台股基金」（原型；金管會開放資料的境內基金每日淨值）：期間與比了幾檔寫在下面一行 13px 淡墨，
- * 來源登記到頁尾（`useSourceNote`），後端的說明（基金淨值不含配息…）照原文。沒有資料時整行不放。
- * 今年有估計的那一段時，後端從真實紀錄的第一天比起，這一行就寫「7/1 以來贏過…」。
+ * 「贏過的台股基金（今年） 73%」（原型；金管會開放資料的境內基金每日淨值）：標籤＋數字（2026-11-22 評論：原本是一句
+ * 「今年贏過 73% 的台股基金」），期間與比了幾檔寫在下面一行 13px 淡墨，來源登記到頁尾（`useSourceNote`）。
+ * 怎麼比、後端的說明（基金淨值不含配息…）在績效分段最下面的「計算方式」。沒有資料時整行不放。
+ * 今年有估計的那一段時，後端從真實紀錄的第一天比起，標籤就寫「（7/1 以來）」。
  */
 export function FundRankLine({ r }: { r: FundRank | null | undefined }) {
   // 示範資料（mock 編的數字）不登記來源：不是那個來源的資料
@@ -161,15 +163,14 @@ export function FundRankLine({ r }: { r: FundRank | null | undefined }) {
     <div className="flex flex-col gap-0.5" data-fund-rank>
       <p className="flex flex-wrap items-center gap-x-2 text-base text-ink">
         <span>
-          {period}贏過 <span className="num font-semibold">{pct}</span> 的台股基金
+          贏過的台股基金（{period}） <span className="num font-semibold">{pct}</span>
         </span>
         {/* 示範的數字標「示範資料」（和其他示範資料同一種標記）：截圖傳出去也不會被當成真的 */}
         {r.is_demo && <DemoTag title="這是示範用的數字，不是真的基金排名" />}
       </p>
       <p className="num text-sm text-ink-2">
-        {day(r.start)} – {day(r.end)} 的報酬，和 {r.funds.toLocaleString("zh-TW")} 檔{r.universe}的淨值比
+        {day(r.start)} – {day(r.end)}・{r.funds.toLocaleString("zh-TW")} 檔{r.universe}
       </p>
-      <DataNotes notes={r.notes} />
     </div>
   )
 }

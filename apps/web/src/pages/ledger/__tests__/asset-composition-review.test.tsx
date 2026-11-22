@@ -81,7 +81,7 @@ const seriesOf = (f: (i: number) => Pick<PerformancePoint, "market_value" | "net
   nineDays.map((t, i) => ({ t, ...f(i), twr_index: 1 + i * 0.002, benchmark_index: null }))
 
 describe("審查後的修正：首頁走勢", { timeout: 20_000 }, () => {
-  it("#2 本金是負的（賣股票收到的錢比買的多）：v2 寫「本金已收回」（使用者 2026-11-19），不寫負的金額；價差照實寫（總資產－本金）；為什麼念在圖的說明裡", async () => {
+  it("#2 本金是負的（賣股票收到的錢比買的多）：v2 寫「本金已收回」（使用者 2026-11-19），不寫負的金額；價差照實念（總資產－本金，圖例只有名字）；為什麼念在圖的說明裡", async () => {
     await withPerformance((p) => ({ ...p, series: seriesOf((i) => ({ market_value: 500_000 + i * 1_000, net_invested: -200_000 })), notes: [], reference_until: null, composition: comp0 }))
     await withoutLifetimeDividends()
     act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
@@ -89,7 +89,7 @@ describe("審查後的修正：首頁走勢", { timeout: 20_000 }, () => {
     const region = await trend()
     await waitFor(() => expect(legend(region, "invested")).not.toBeNull(), T)
     expect(legend(region, "invested")!.textContent).toBe("本金已收回")
-    expect(legend(region, "gain")!.textContent).toBe("價差 +NT$708,000")
+    expect(legend(region, "gain")!.textContent).toBe("價差")
     // v2 圖下面沒有句子（使用者只要圖）
     expect(sentence(region)).toBeNull()
     // 本金線畫在 0、0 離總資產太遠：縱軸只跟總資產，縱軸的記號寫「0」（本金線畫在那裡）
@@ -99,7 +99,7 @@ describe("審查後的修正：首頁走勢", { timeout: 20_000 }, () => {
     )
   })
 
-  it("#4 手機（窄）：圖例兩行兩欄、金額寫完整（10 位數也不截斷）；第一欄撐到這段期間最寬的金額（第二審 6：滑過時不跳）", async () => {
+  it("#4 手機（窄）：圖例兩行兩欄、本金的金額寫完整（10 位數也不截斷）；第一欄撐到這段期間最寬的本金（第二審 6：滑過時不跳）", async () => {
     await withPerformance((p) => ({ ...p, series: seriesOf((i) => ({ market_value: 1_234_567_890 + i * 10_000_000, net_invested: 987_654_321 })), notes: [], reference_until: null, composition: comp0 }))
     act(() => useLedgerPrefs.setState({ trendRange: "ALL" }))
     renderApp("/")
@@ -107,14 +107,14 @@ describe("審查後的修正：首頁走勢", { timeout: 20_000 }, () => {
     const grid = await waitFor(() => region.querySelector<HTMLElement>("[data-legend-grid]")!, T)
     expect(grid).not.toHaveClass("overflow-hidden")
     expect(legend(region, "invested")!.textContent).toBe("本金 NT$987,654,321")
-    expect(legend(region, "gain")!.textContent).toBe("價差 +NT$326,913,569")
+    expect(legend(region, "gain")!.textContent).toBe("價差")
     for (const item of grid.querySelectorAll("[data-legend]")) expect(item).toHaveClass("whitespace-nowrap")
-    // 第一欄：本金、價差，加上兩個看不到、不佔高度的撐寬用的（這段期間最寬的本金與價差）
+    // 第一欄：本金、價差，加上一個看不到、不佔高度的撐寬用的（這段期間最寬的本金；價差只有名字，2026-11-22）
     const col = grid.querySelector<HTMLElement>("[data-legend-col]")!
     expect([...col.querySelectorAll("[data-legend]")].map((c) => c.getAttribute("data-legend"))).toEqual(["invested", "gain"])
     const sizers = [...col.querySelectorAll<HTMLElement>("[data-legend-sizer]")]
     // 一樣寬的金額取第一個（數字是等寬字）
-    expect(sizers.map((s) => s.textContent)).toEqual(["本金 NT$987,654,321", "價差 +NT$246,913,569"])
+    expect(sizers.map((s) => s.textContent)).toEqual(["本金 NT$987,654,321"])
     for (const s of sizers) {
       expect(s).toHaveClass("invisible", "h-0", "overflow-hidden")
       expect(s).toHaveAttribute("aria-hidden", "true")
@@ -134,7 +134,8 @@ describe("審查後的修正：首頁走勢", { timeout: 20_000 }, () => {
     expect(within(region).getByText(/^只有 /)).toBeInTheDocument()
     // 從 0 起算（和「全部」一樣）：圖例寫「價差」、不是「目前價差」
     expect(legend(region, "invested")!.textContent).toBe("本金 NT$147,000")
-    expect(legend(region, "gain")!.textContent).toBe("價差 +NT$11,000")
+    expect(legend(region, "gain")!.textContent).toBe("價差")
+    expect(within(region).getByRole("img").getAttribute("aria-label")).toContain("價差賺 NT$11,000")
     const oneYearLegend = region.querySelector("[data-legend-grid]")!.textContent
     const speech = (s: string) => s.replace(/^近 1 年，只有 [^，]+ 的資料，|^[^，]+ 起，/, "")
     const oneYearSpeech = speech(within(region).getByRole("img").getAttribute("aria-label")!)
@@ -185,9 +186,9 @@ describe("審查後的修正：首頁走勢", { timeout: 20_000 }, () => {
     expect(first!.firstElementChild).toBe(first!.querySelector("[data-estimated-day]"))
     expect(first!.querySelector("[data-dividend]")).toBeNull()
     expect(second!.querySelector("[data-dividend]")!.textContent).toBe("領股利 NT$3,000")
-    // 圖例換成那一天的本金與價差
+    // 圖例換成那一天的本金（價差只有名字）；那一天的價差念在報讀器
     expect(legend(region, "invested")!.textContent).toBe("本金 NT$900,000")
-    expect(legend(region, "gain")!.textContent).toMatch(/^價差 \+NT\$10\d,000$/)
+    expect(legend(region, "gain")!.textContent).toBe("價差")
     expect(legend(region, "dividend")!.textContent).toBe("股利")
   })
 

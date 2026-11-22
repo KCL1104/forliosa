@@ -3,7 +3,7 @@ import { holdingsQuery } from "@/api/queries"
 import { useUi } from "@/app/ui-store"
 
 /**
- * 「減少持股」「全部賣出」的入口都用這個：沒有收盤價的持股（商用模式的美股）用不了收盤價，
+ * 「賣出」「全部賣出」的入口都用這個：沒有收盤價的持股（商用模式的美股）用不了收盤價，
  * 直接開完整表單——已選賣出、帳戶帶入，全部賣出時股數先填好（2026-11-14 第七次評分：原本是一個按不下去的對話框）。
  */
 export function useStartReduce() {

@@ -448,7 +448,7 @@ function bandOf(ratio: number, multiples: number[]): string | null {
   return ` ${multiples[idx - 1]}–${multiples[idx]} 倍的帶`
 }
 
-/** 沒辦法用資料回答的問題：誠實說明，並給最接近的手動路徑 */
+/** 沒辦法用資料回答的問題：誠實說明；有相關的手動路徑時附上（沒有就不放） */
 export function fallbackAnswer(text: string, ctx: AiContext): Answer {
   const t = text.replace(/\s/g, "")
   const links: AnswerLink[] = []
@@ -471,7 +471,7 @@ export function fallbackAnswer(text: string, ctx: AiContext): Answer {
     if (/(股利|配息|除息)/.test(t)) links.push({ label: "看股利", to: "/", search: { view: "dividends" } })
     if (/(績效|報酬|XIRR|TWR|回撤)/i.test(t)) links.push({ label: "看績效", to: "/", search: { view: "performance" } })
     if (/(交易|買|賣|紀錄)/.test(t)) links.push({ label: "看交易", to: "/", search: { view: "transactions" } })
-    if (links.length === 0) links.push({ label: "看持倉", to: "/" })
+    // 和問題無關時不放連結（2026-11-22 評論：原本一律補一個「看持倉」，問護城河也連到持倉）
   }
   return {
     text: "這題要查網路資料，現在沒辦法。",
