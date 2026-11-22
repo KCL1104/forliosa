@@ -119,6 +119,39 @@ describe("帳本的「記一筆」", () => {
     ])
   })
 
+  it("零股（產品負責人 2026-11-22）：數量欄旁的「張｜股」，預設是張、整張照舊一樣快；切到股就填股數，也可以直接寫「1張500股」", async () => {
+    renderApp("/")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    useUi.getState().openTradeForm({ symbol: "00878" })
+    const dialog = await screen.findByRole("dialog", {}, T)
+    const form = within(dialog)
+    await waitFor(() => expect(form.getByText("國泰永續高股息")).toBeInTheDocument(), T)
+    const unit = form.getByRole("radiogroup", { name: "數量單位" })
+    expect(within(unit).getByRole("radio", { name: "張" })).toBeChecked()
+    const qty = dialog.querySelector<HTMLInputElement>("#lot-qty-0")!
+    // 整張：打開時焦點在張數，填完按 Tab 直接到日期（「張｜股」排在輸入框前面，不多一站）
+    await waitFor(() => expect(qty).toHaveFocus(), T)
+    await userEvent.keyboard("2")
+    expect(form.getByText("2,000 股")).toBeInTheDocument()
+    await userEvent.tab()
+    expect(form.getByRole("button", { name: "買進日期，還沒選" })).toHaveFocus()
+    // 直接寫單位：不看欄位的單位，下面寫換算
+    await userEvent.clear(qty)
+    await userEvent.type(qty, "1張500股")
+    expect(form.getByText("1,500 股")).toBeInTheDocument()
+    // 切到股：標籤跟著變，195 股不用寫成 0.195 張
+    await userEvent.click(within(unit).getByRole("radio", { name: "股" }))
+    expect(qty).toHaveAccessibleName("股數")
+    await userEvent.clear(qty)
+    await userEvent.type(qty, "195")
+    await pickDate(form.getByRole("button", { name: "買進日期，還沒選" }), 2024, 3, 5)
+    await userEvent.type(dialog.querySelector("#lot-price-0")!, "21.5")
+    await userEvent.click(form.getByRole("button", { name: "新增" }))
+    await waitFor(() => expect(useUi.getState().tradeForm.open).toBe(false), T)
+    const added = (await api.listTransactions({ limit: 200 })).items.filter((t) => t.symbol === "00878.TW" && t.trade_date === "2024-03-05")
+    expect(added.map((t) => [t.type, t.quantity, t.price])).toEqual([["buy", 195, 21.5]])
+  })
+
   it("「賣出、股利或其他」開完整表單，選好的股票留著", async () => {
     renderApp("/")
     await screen.findByRole("tablist", { name: "帳本內容" }, T)

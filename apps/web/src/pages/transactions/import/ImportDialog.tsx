@@ -93,10 +93,10 @@ export function ImportDialog() {
     })
     close()
   }
-  // 以券商為準換掉了舊紀錄：通知照實寫，「復原」先問一次（舊紀錄回不來）
+  // 換成券商刪掉了舊紀錄：通知照實寫，「復原」先問一次（舊紀錄回不來）
   const donePositions = (res: PositionsCommitResult, count: number, replaced: ReplacedName[]) => {
     const lines = [
-      replaced.length ? `以券商為準換掉了${replacedText(replaced)}舊紀錄。` : "",
+      replaced.length ? `換成券商刪掉了${replacedText(replaced)}舊紀錄。` : "",
       res.auto_dividends_added > 0 ? `另外自動記了 ${res.auto_dividends_added} 筆股利。` : "",
     ].filter(Boolean)
     toast.success(`已匯入 ${count} 檔`, {

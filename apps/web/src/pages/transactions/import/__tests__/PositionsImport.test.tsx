@@ -24,6 +24,8 @@ vi.mock("@number-flow/react", () => ({
 }))
 
 const T = { timeout: 8000 }
+/** 簽名之後先重新檢查（dry_run）再寫入，mock 兩次都重播整本帳本（前面的測試匯入過、估計日期往前推之後更重）：CI 上會超過 8 秒 */
+const COMMIT = { timeout: 20_000 }
 let desktop = false
 
 beforeAll(() => {
@@ -92,7 +94,7 @@ async function openFromToolbar(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("匯入庫存", () => {
-  it("工具列的「匯入」→ 選匯入庫存 → 截圖 → 確認表 → 以券商為準 → 簽名 → 已匯入 → 復原先問一次（舊紀錄不會回來）", async () => {
+  it("工具列的「匯入」→ 選匯入庫存 → 截圖 → 確認表 → 換成券商 → 簽名 → 已匯入 → 復原先問一次（舊紀錄不會回來）", async () => {
     desktop = true
     const parse = vi.spyOn(api, "parsePositions")
     const commit = vi.spyOn(api, "commitPositions")
@@ -113,18 +115,34 @@ describe("匯入庫存", () => {
     expect(parse.mock.calls[0]![0]).toMatchObject({ kind: "images" })
     expect(parse.mock.calls[0]![0].pages).toHaveLength(2)
 
-    // 確認表：整批的買進日期（照實說均價到那天收盤的漲跌算進那一天的報酬）、重疊的列只算一次
+    // 確認表：整批的買進日期、重疊的列只算一次；機制的說明（均價到那天收盤的漲跌算進那一天的報酬）收在「日期怎麼算」
     expect(within(dialog).getByLabelText("買進日期")).toBeInTheDocument()
-    // 資產組成原型：伺服器估了買入日（只是建議），說明多一句估計是什麼、要按「套用」（沒有估計的舊版伺服器照舊，見下面）
-    expect(within(dialog).getByText("均價到這天收盤的漲跌算進這天的報酬，這天之前沒有走勢。估計買入日是股價最近一次經過均價的那一天。")).toBeInTheDocument()
+    expect(within(dialog).queryByText(/均價到.*收盤的漲跌/)).toBeNull()
+    const how = within(dialog).getByRole("button", { name: "日期怎麼算" })
+    expect(how).toHaveAttribute("aria-expanded", "false")
+    await user.click(how)
+    // 資產組成原型：伺服器估了買入日（只是建議），多一行估計是什麼；有估不到的列，多一行「—」是什麼（舊版伺服器只有買進日，見下面）
+    expect(within(dialog).getByText("均價到那天收盤的漲跌算進那天的報酬，那天之前沒有走勢。")).toBeInTheDocument()
+    expect(within(dialog).getByText("股價最近一次經過均價的那一天。")).toBeInTheDocument()
+    expect(within(dialog).getByText("股價沒有經過均價，估不到。")).toBeInTheDocument()
     expect(within(dialog).getByText(/永豐金證券・讀到 7 檔・重疊的 1 列只算一次/)).toBeInTheDocument()
-    // 已在帳本：不勾、標「已在帳本」，下面一行帳本的股數與均價＋以券商為準；左邊的勾選照實說勾了會刪掉舊紀錄
-    const tsmc = within(dialog).getByRole("checkbox", { name: /^匯入並以券商為準：台積電，刪掉 \d+ 筆紀錄/ })
-    expect(tsmc).not.toBeChecked()
-    expect(tsmc).toHaveAccessibleDescription(/^帳本裡已經有 1,500 股，均價 [\d.]+。$/)
-    expect(within(dialog).getAllByText("已在帳本").length).toBeGreaterThanOrEqual(2)
-    expect(within(dialog).getByText(/^帳本裡已經有 1,500 股，均價 [\d.]+。$/)).toBeInTheDocument()
-    expect(within(dialog).getByText("帳本裡已經有，股數和均價都一樣。")).toBeInTheDocument()
+    // 已在帳本：沒有勾選框（不把刪掉舊紀錄藏在勾選裡），下面一格帳本的股數與均價（標籤）＋「保留帳本｜換成券商」，預設保留
+    expect(within(dialog).queryByRole("checkbox", { name: /台積電/ })).toBeNull()
+    const tsmc = within(dialog).getByRole("radiogroup", { name: "台積電：保留帳本或換成券商" })
+    expect(within(tsmc).getByRole("radio", { name: "保留帳本" })).toBeChecked()
+    const swap = within(tsmc).getByRole("radio", { name: "換成券商" })
+    expect(swap).not.toBeChecked()
+    // 會刪幾筆：選之前只給報讀器（念在「換成券商」上），選了才看得到
+    expect(swap).toHaveAccessibleDescription(/^會刪 \d+ 筆(（含 .+）)?$/)
+    expect(within(dialog).getByText(/^會刪 \d+ 筆/, { selector: `#${swap.getAttribute("aria-describedby")}` })).toHaveClass("sr-only")
+    expect(within(dialog).queryByText("已在帳本")).toBeNull()
+    expect(within(dialog).getByText(/^已在帳本 1,500 股・均價 [\d.]+$/)).toBeInTheDocument()
+    expect(within(dialog).getByText("已在帳本・股數和均價相同")).toBeInTheDocument()
+    // 名稱是這一列最主要的字：墨色（沒勾的列也是）
+    expect(within(dialog).getByText("台積電", { selector: "button span" })).toHaveClass("text-ink", "text-base")
+    // 融資不寫句子：代號旁的「融資」
+    expect(within(dialog).queryByText("融資的庫存，當成一般持股匯入。")).toBeNull()
+    expect(within(dialog).getByText("融資")).toHaveClass("status-tag")
     // 只有總成本：均價是算出來的；找不到、融券
     expect(within(dialog).getByRole("textbox", { name: "第 4 檔的均價" })).toHaveValue("120")
     expect(within(dialog).getByRole("textbox", { name: "第 4 檔的總成本" })).toHaveValue("180,000")
@@ -133,14 +151,14 @@ describe("匯入庫存", () => {
     expect(within(dialog).getByRole("button", { name: "略過 1 檔融券" })).toBeInTheDocument()
     const count = Number(sign.getAttribute("aria-label")!.match(/\d+/)![0])
 
-    // 以券商為準：勾了就匯入，動作列照實說舊紀錄會刪掉、復原也不會回來
-    const replace = within(dialog).getAllByRole("checkbox", { name: /^以券商為準/ })[0]!
-    await user.click(replace)
-    expect(tsmc).toBeChecked()
-    expect(within(dialog).getByText(/^以券商為準會刪掉台積電 \d+ 筆舊紀錄(，連同(領過的股利|賣出的損益|領過的股利、賣出的損益))?（定期定額不動），復原時也不會回來。$/)).toBeInTheDocument()
+    // 換成券商：選了就匯入，旁邊寫會刪幾筆（墨色標籤），動作列照實說舊紀錄會刪掉、復原也不會回來
+    await user.click(swap)
+    expect(swap).toBeChecked()
+    expect(within(dialog).getByText(/^會刪 \d+ 筆/, { selector: `#${swap.getAttribute("aria-describedby")}` })).not.toHaveClass("sr-only")
+    expect(within(dialog).getByText(/^換成券商會刪掉台積電 \d+ 筆舊紀錄(，連同(領過的股利|賣出的損益|領過的股利、賣出的損益))?（定期定額不動），復原時也不會回來。$/)).toBeInTheDocument()
     await user.click(within(dialog).getByRole("button", { name: `簽名：匯入 ${count + 1} 檔` }))
-    expect(await screen.findByText(`已匯入 ${count + 1} 檔`, {}, T)).toBeInTheDocument()
-    expect(screen.getByText(/^以券商為準換掉了台積電 \d+ 筆舊紀錄。/)).toBeInTheDocument()
+    expect(await screen.findByText(`已匯入 ${count + 1} 檔`, {}, COMMIT)).toBeInTheDocument()
+    expect(screen.getByText(/^換成券商刪掉了台積電 \d+ 筆舊紀錄。/)).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "匯入庫存" })).toBeNull(), T)
 
     // 送出去的：每一檔一筆，只給總成本的送總成本，台積電 replace
@@ -154,7 +172,7 @@ describe("匯入庫存", () => {
     // 復原：先問一次，照實說舊紀錄回不來
     await user.click(screen.getByRole("button", { name: "復原" }))
     const confirm = await screen.findByRole("alertdialog", {}, T)
-    expect(within(confirm).getByText(/以券商為準換掉的舊紀錄（台積電 \d+ 筆）不會回來：復原之後，這個帳戶裡就沒有台積電了，要的話得自己再記。/)).toBeInTheDocument()
+    expect(within(confirm).getByText(/換成券商刪掉的舊紀錄（台積電 \d+ 筆）不會回來：復原之後，這個帳戶裡就沒有台積電了，要的話得自己再記。/)).toBeInTheDocument()
     await user.click(within(confirm).getByRole("button", { name: "復原" }))
     expect(await screen.findByText("已復原這次匯入", {}, T)).toBeInTheDocument()
     expect((await allTxns()).some((t) => t.source === "import" && t.symbol === "2330.TW")).toBe(false)
@@ -209,7 +227,7 @@ describe("匯入庫存", () => {
     expect(within(sheet).getByLabelText("均價")).toHaveValue("88.6")
     await waitFor(() => expect(sign).toBeEnabled(), T)
     await user.click(sign)
-    expect(await screen.findByText(/^已匯入 \d+ 檔$/, {}, T)).toBeInTheDocument()
+    expect(await screen.findByText(/^已匯入 \d+ 檔$/, {}, COMMIT)).toBeInTheDocument()
   }, 45_000)
 })
 
@@ -248,41 +266,50 @@ describe("匯入庫存：換帳戶、沒填好的列", () => {
     await user.click(await screen.findByRole("option", { name }, T))
   }
 
-  it("以券商為準只對勾的那個帳戶：換到也有這一檔的帳戶就不再勾著（檢查途中勾的也一樣），要對新的帳戶重新勾", async () => {
+  it("換成券商只對選的那個帳戶：換到也有這一檔的帳戶就回到保留帳本（檢查途中選的也一樣），要對新的帳戶重新選", async () => {
     desktop = true
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     const dialog = await readToReview(user)
-    const tsmcBox = () => within(dialog).getByRole("checkbox", { name: /^匯入並以券商為準：台積電/ })
-    const replaceBox = () => within(dialog).getAllByRole("checkbox", { name: /^以券商為準/ })[0]!
+    const choice = () => within(dialog).getByRole("radiogroup", { name: "台積電：保留帳本或換成券商" })
+    const swap = () => within(choice()).getByRole("radio", { name: "換成券商" })
+    const keep = () => within(choice()).getByRole("radio", { name: "保留帳本" })
+    const count = () => Number(within(dialog).getByRole("button", { name: /^簽名：匯入 \d+ 檔$/ }).getAttribute("aria-label")!.match(/\d+/)![0])
+    const before = count()
 
-    // 在「永豐・一般」勾了以券商為準，再換到「國泰・複委託」（也有台積電）
-    await user.click(replaceBox())
-    expect(tsmcBox()).toBeChecked()
+    // 在「永豐・一般」選了換成券商（多匯入一檔），再換到「國泰・複委託」（也有台積電）
+    await user.click(swap())
+    expect(swap()).toBeChecked()
+    expect(count()).toBe(before + 1)
     let held = holdCheck(300)
     await pickAccount(user, dialog, /國泰・複委託/)
     await act(async () => held.release())
-    await within(dialog).findByText("帳本裡已經有 300 股，均價 500。", {}, T)
+    await within(dialog).findByText("已在帳本 300 股・均價 500", {}, T)
     expect(held.spy.mock.calls[0]![0]).toMatchObject({ account_id: "acc_01JCATHAYUS" })
-    expect(tsmcBox()).not.toBeChecked()
-    expect(replaceBox()).not.toBeChecked()
-    expect(within(dialog).queryByText(/^以券商為準會刪掉/)).toBeNull()
+    expect(keep()).toBeChecked()
+    expect(swap()).not.toBeChecked()
+    expect(within(dialog).queryByText(/^換成券商會刪掉/)).toBeNull()
     // 新的帳戶的刪除照實說：含股利
-    expect(replaceBox()).toHaveAccessibleName("以券商為準：刪掉帳本裡這一檔的 2 筆紀錄（含 1 筆股利），換成這一筆")
+    expect(swap()).toHaveAccessibleDescription("會刪 2 筆（含 1 筆股利）")
     held.spy.mockRestore()
 
-    // 換回「永豐・一般」，檢查還沒回來時勾了以券商為準（畫面上還是國泰的那一行）：回來之後也不再勾著
+    // 換回「永豐・一般」，檢查還沒回來時選了換成券商（畫面上還是國泰的那一格）：回來之後也回到保留帳本
     held = holdCheck(1500)
     await pickAccount(user, dialog, /永豐・一般/)
-    await user.click(replaceBox())
-    expect(tsmcBox()).toBeChecked()
+    await user.click(swap())
+    expect(swap()).toBeChecked()
     await act(async () => held.release())
-    await within(dialog).findByText("帳本裡已經有 1,500 股，均價 500。", {}, T)
-    expect(tsmcBox()).not.toBeChecked()
-    expect(replaceBox()).not.toBeChecked()
-    // 對這個帳戶重新勾：就照勾的
-    await user.click(replaceBox())
-    expect(tsmcBox()).toBeChecked()
-    expect(within(dialog).getByText("以券商為準會刪掉台積電 2 筆舊紀錄，連同領過的股利（定期定額不動），復原時也不會回來。")).toBeInTheDocument()
+    await within(dialog).findByText("已在帳本 1,500 股・均價 500", {}, T)
+    expect(keep()).toBeChecked()
+    expect(swap()).not.toBeChecked()
+    // 對這個帳戶重新選：就照選的；方向鍵也可以切換（radiogroup）
+    swap().focus()
+    await user.keyboard("{ArrowLeft}")
+    expect(keep()).toBeChecked()
+    await waitFor(() => expect(keep()).toHaveFocus(), T)
+    await user.keyboard("{ArrowRight}")
+    expect(swap()).toBeChecked()
+    expect(within(dialog).getByText("會刪 2 筆（含 1 筆股利）")).not.toHaveClass("sr-only")
+    expect(within(dialog).getByText("換成券商會刪掉台積電 2 筆舊紀錄，連同領過的股利（定期定額不動），復原時也不會回來。")).toBeInTheDocument()
   }, 60_000)
 
   it("手機：按簽名時有沒填好的列——點名那一檔、焦點移到那一格；同一個錯誤只寫一次", async () => {
@@ -339,7 +366,7 @@ describe("匯入庫存：估計的買入日（資產組成原型）", () => {
     return dialog
   }
 
-  it("估計只是建議：日期照整批（匯入那天），日期下面「估計 2023/5/8」＋「套用」；按了才改成那天、送 estimated；找不到的說原因", async () => {
+  it("估計只是建議：日期照整批（匯入那天），日期下面「估計 2023/5/8」＋「套用」；按了才改成那天、送 estimated；估不到的是「估計 —」", async () => {
     desktop = true
     const commit = vi.spyOn(api, "commitPositions")
     const user = userEvent.setup()
@@ -352,8 +379,11 @@ describe("匯入庫存：估計的買入日（資產組成原型）", () => {
     expect(within(dialog).getByText("估計 2023/5/8")).toHaveClass("num")
     const apply = within(dialog).getByRole("button", { name: "套用第 1 檔的估計買入日 2023/5/8" })
     expect(apply).toHaveTextContent(/^套用$/)
-    // 中華電：五年內股價都沒有經過均價，沒有建議，下面一行 13px 淡墨說為什麼
-    expect(within(dialog).getByText("五年內的股價都沒有經過均價 120，沒辦法估買入日。").closest("li")).toHaveClass("text-sm", "text-ink-2")
+    // 中華電：五年內股價都沒有經過均價，沒有建議；日期下面「估計 —」，不寫原因的句子（「—」是什麼收在「日期怎麼算」）
+    expect(within(dialog).queryByText(/沒辦法估買入日/)).toBeNull()
+    const cannot = within(dialog).getByText("估不到")
+    expect(cannot).toHaveClass("sr-only")
+    expect(cannot.parentElement).toHaveTextContent(/^估計 —估不到$/)
     expect(within(dialog).queryByRole("button", { name: /^套用第 4 檔/ })).toBeNull()
 
     // 套用：這一列的日期改成估計的那天（墨色、寫「估計 2023/5/8」），建議不再出現；整批的日期不動
@@ -364,33 +394,37 @@ describe("匯入庫存：估計的買入日（資產組成原型）", () => {
     expect(within(dialog).queryByRole("button", { name: /^套用第 1 檔/ })).toBeNull()
     expect(batch).not.toHaveTextContent("2023")
 
-    // 送出去：台積電（已在帳本，勾以券商為準）是 estimated＋那一天
-    await user.click(within(dialog).getAllByRole("checkbox", { name: /^以券商為準/ })[0]!)
+    // 送出去：台積電（已在帳本，選換成券商）是 estimated＋那一天
+    await user.click(within(dialog).getAllByRole("radio", { name: "換成券商" })[0]!)
     await user.click(within(dialog).getByRole("button", { name: /^簽名：匯入 \d+ 檔$/ }))
-    await waitFor(() => expect(commit).toHaveBeenCalled(), T)
+    await waitFor(() => expect(commit).toHaveBeenCalled(), COMMIT)
     expect(commit.mock.calls[0]![0].rows.find((r) => r.symbol === "2330.TW")).toMatchObject({ trade_date: "2023-05-08", date_basis: "estimated", estimated_date: "2023-05-08" })
   }, 45_000)
 
-  it("舊版伺服器（沒有 estimated_date）：整批一個日期、說明照舊", async () => {
+  it("舊版伺服器（沒有 estimated_date）：整批一個日期，「日期怎麼算」只有買進日", async () => {
     desktop = true
     const real = api.parsePositions.bind(api)
     vi.spyOn(api, "parsePositions").mockImplementation(async (body, opts) => {
       const doc = await real(body, opts)
       return { ...doc, rows: doc.rows.map(({ estimated_date: _e, ...r }) => ({ ...r, flags: r.flags.filter((f) => f.code !== "no_crossing") })) }
     })
-    const commit = vi.spyOn(api, "commitPositions")
     const user = userEvent.setup()
     const dialog = await readShot(user)
-    expect(within(dialog).getByText("均價到這天收盤的漲跌算進這天的報酬，這天之前沒有走勢。")).toBeInTheDocument()
-    expect(within(dialog).queryByText(/^估計 /)).toBeNull()
+    await user.click(within(dialog).getByRole("button", { name: "日期怎麼算" }))
+    expect(within(dialog).getByText("均價到那天收盤的漲跌算進那天的報酬，那天之前沒有走勢。")).toBeInTheDocument()
+    expect(within(dialog).queryByText("股價最近一次經過均價的那一天。")).toBeNull()
+    expect(within(dialog).queryByText(/^估計/)).toBeNull()
+    expect(within(dialog).queryByText("估不到")).toBeNull()
     expect(within(dialog).queryByRole("button", { name: /^套用/ })).toBeNull()
-    expect(within(dialog).queryByText(/沒辦法估買入日/)).toBeNull()
     // 送出去的列不帶日期的來由（舊版伺服器不認得 date_basis、estimated_date）。
-    // 同一個檔案前面的測試可能已經匯入過這幾檔（都「已在帳本」、預設不勾）：勾一個「以券商為準」，一定有東西可以送
-    await user.click(within(dialog).getAllByRole("checkbox", { name: /^以券商為準/ })[0]!)
+    // 同一個檔案前面的測試可能已經匯入過這幾檔（都「已在帳本」、預設保留）：選一個「換成券商」，一定有東西可以送
+    await user.click(within(dialog).getAllByRole("radio", { name: "換成券商" })[0]!)
+    // 看按下簽名時的重新檢查（dry_run，和寫入同一個 `toCommitRow`）：一按就送，不用等 mock 重播整本帳本再寫入
+    // （CI 上那一段曾經超過 8 秒）。檢查停著不回來：後面什麼都不寫，測試結束時沒有還在跑的寫入
+    const check = vi.spyOn(api, "checkPositions").mockImplementation(() => new Promise(() => {}))
     await user.click(within(dialog).getByRole("button", { name: /^簽名：匯入 \d+ 檔$/ }))
-    await waitFor(() => expect(commit).toHaveBeenCalled(), T)
-    const rows = commit.mock.calls[0]![0].rows
+    await waitFor(() => expect(check).toHaveBeenCalled(), T)
+    const rows = check.mock.calls[0]![0].rows
     expect(rows.length).toBeGreaterThan(0)
     for (const r of rows) {
       expect(r).not.toHaveProperty("date_basis")

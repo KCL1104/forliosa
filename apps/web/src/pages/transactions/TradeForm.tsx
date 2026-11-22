@@ -24,7 +24,7 @@ import { FormField as Row } from "@/components/form-field"
 import { SymbolPicker } from "@/components/symbol-picker"
 import { DateField } from "@/components/date-field"
 import { QuickAdd } from "./QuickAdd"
-import { numberText, parseNumber } from "./quantity-input"
+import { parseNumber, quantityError, toShares } from "./quantity-input"
 import { usePrefs } from "@/stores/prefs"
 
 
@@ -207,7 +207,9 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
   // 買賣的價格與費用記在這一檔的計價幣別（後端照商品記，不看帳戶）：台股記進美元帳戶也是新台幣
   const tradeUSD = f.symbol ? f.symbol.currency === "USD" : isUS
   const qty = parseNum(f.qtyText)
-  const shares = qty === null ? null : f.qtyUnit === "lot" && !isUS && (type === "buy" || type === "sell") ? Math.round(qty * 1000) : qty
+  const trade = type === "buy" || type === "sell"
+  // 買賣也可以直接寫單位（「500股」「1張500股」，產品負責人 2026-11-22）
+  const shares = trade ? toShares(f.qtyText, f.qtyUnit === "lot" && !isUS) : qty
   const price = parseNum(f.priceText)
   const amount = parseNum(f.amountText)
   const fee = parseNum(f.feeText)
@@ -234,8 +236,8 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
             ? null
             : !shares || shares <= 0
               ? "請輸入數量"
-              : !isUS && f.qtyUnit === "lot" && (type === "buy" || type === "sell") && /\.\d{4,}$/.test(numberText(f.qtyText))
-                ? "張數最多寫到小數第三位（1 股）"
+              : trade
+                ? quantityError(f.qtyText, f.qtyUnit === "lot" && !isUS, isUS)
                 : !Number.isInteger(shares) && !isUS
                   ? "台股股數必須是整數"
                   : null,
