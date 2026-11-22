@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
  * 和分段同一種淡墨底的軌道（2026-11-20：沒有軌道時，框起來的那一格看起來像一排字裡唯一能按的按鈕）；
  * 選取＝選取語法 (b)（`sel-chip`：白紙格＋墨色內框；深色暖灰底＋內框）。
  * 放不下時橫向捲動（ScrollRow）：被遮住的一邊淡出，選取中的選項捲進畫面。
+ * `describedBy`：選了會怎樣的那一個選項（匯入庫存的「換成券商」→「會刪 15 筆」），選之前報讀器就念得到。
  */
 export function RangeChips<T extends string>({
   value,
@@ -15,7 +16,7 @@ export function RangeChips<T extends string>({
   className,
 }: {
   value: T
-  options: readonly { value: T; label: string }[]
+  options: readonly { value: T; label: string; describedBy?: string }[]
   onChange: (v: T) => void
   label: string
   className?: string
@@ -39,6 +40,7 @@ export function RangeChips<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
+            aria-describedby={o.describedBy}
             tabIndex={active || (!options.some((x) => x.value === value) && i === 0) ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}

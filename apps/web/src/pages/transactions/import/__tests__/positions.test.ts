@@ -7,19 +7,19 @@ import { imageError } from "../read-utils"
 import {
   applyCheck,
   applyEstimate,
-  BATCH_DATE_HINT,
   checkable,
   costTotals,
   costTotalsText,
-  dateHint,
+  dateNotes,
   editPosition,
   inLedgerLine,
   isEstimatedDate,
   isShortSale,
+  noEstimate,
   positionErrors,
   priceText,
+  replaceConsequence,
   replacedIncomeText,
-  replacedRecordsText,
   setInclude,
   setReplace,
   suggestedDate,
@@ -61,7 +61,7 @@ describe("匯入庫存的一列", () => {
     expect(toCommitRow(edited, "2026-11-17")).toEqual({ symbol: "2412.TW", quantity: 1500, price: 121.5, currency: "TWD" })
   })
 
-  it("寫入：日期和整批不同才送；以券商為準才送 replace；美股是美元", () => {
+  it("寫入：日期和整批不同才送；換成券商才送 replace；美股是美元", () => {
     const d = { ...toDraftPosition(row({ symbol: "AAPL", name: "Apple", currency: "USD", quantity: 10.5, price: 230.5, total_cost: null })), date: "2026-10-17" }
     expect(toCommitRow(d, "2026-11-17")).toEqual({ symbol: "AAPL", quantity: 10.5, price: 230.5, currency: "USD", trade_date: "2026-10-17" })
     expect(toCommitRow({ ...d, date: "2026-11-17" }, "2026-11-17")).not.toHaveProperty("trade_date")
@@ -69,7 +69,7 @@ describe("匯入庫存的一列", () => {
     expect(toCommitRow(setReplace(inLedger, true), "2026-11-17")).toMatchObject({ symbol: "2330.TW", replace: true })
   })
 
-  it("已在帳本：預設不勾；勾選和以券商為準綁在一起（不換掉的話伺服器不收）", () => {
+  it("已在帳本：預設不勾；勾選和換成券商綁在一起（不換掉的話伺服器不收）", () => {
     const d = toDraftPosition(row({ in_ledger: held(), include: false, flags: [flag("in_ledger"), flag("margin")] }))
     // in_ledger 的句子照數字寫，不放在旗標裡
     expect(d.flags.map((f) => f.code)).toEqual(["margin"])
@@ -78,25 +78,25 @@ describe("匯入庫存的一列", () => {
     expect([on.include, on.replace]).toEqual([true, true])
     const off = setReplace(on, false)
     expect([off.include, off.replace]).toEqual([false, false])
-    // 不在帳本的列：勾選不碰以券商為準
+    // 不在帳本的列：勾選不碰換成券商
     expect(setInclude(toDraftPosition(row()), true).replace).toBe(false)
   })
 
-  it("以券商為準會刪掉什麼：股利與賣出照實說（損益會跟著變）", () => {
-    expect(replacedRecordsText(held())).toBe("3 筆紀錄")
-    expect(replacedRecordsText(held({ records: 15, dividends: 3, sells: 1 }))).toBe("15 筆紀錄（含 3 筆股利、1 筆賣出）")
-    expect(replacedRecordsText(held({ records: 4, dividends: 2 }))).toBe("4 筆紀錄（含 2 筆股利）")
+  it("換成券商會刪掉什麼（標籤）：股利與賣出照實說（損益會跟著變）", () => {
+    expect(replaceConsequence(held())).toBe("會刪 3 筆")
+    expect(replaceConsequence(held({ records: 15, dividends: 3, sells: 1 }))).toBe("會刪 15 筆（含 3 筆股利、1 筆賣出）")
+    expect(replaceConsequence(held({ records: 4, dividends: 2 }))).toBe("會刪 4 筆（含 2 筆股利）")
     expect(replacedIncomeText([held(), held({ sells: 2 })])).toBe("賣出的損益")
     expect(replacedIncomeText([held({ dividends: 1 }), held({ sells: 2 })])).toBe("領過的股利、賣出的損益")
     expect(replacedIncomeText([held()])).toBe("")
   })
 
-  it("帳本那一行：股數和均價都一樣時直說；不一樣時寫帳本的股數與均價（改了股數就跟著變）", () => {
+  it("帳本那一格（標籤，不是句子）：股數和均價都一樣時直說；不一樣時寫帳本的股數與均價（改了股數就跟著變）", () => {
     const d = toDraftPosition(row({ in_ledger: held() }))
-    expect(inLedgerLine(d)).toBe("帳本裡已經有 1,500 股，均價 692.61。")
+    expect(inLedgerLine(d)).toBe("已在帳本 1,500 股・均價 692.61")
     const same = editPosition(d, { price: "692.61" })
-    expect(inLedgerLine(same)).toBe("帳本裡已經有，股數和均價都一樣。")
-    expect(inLedgerLine(editPosition(same, { qty: "1,000" }))).toBe("帳本裡已經有 1,500 股，均價 692.61。")
+    expect(inLedgerLine(same)).toBe("已在帳本・股數和均價相同")
+    expect(inLedgerLine(editPosition(same, { qty: "1,000" }))).toBe("已在帳本 1,500 股・均價 692.61")
     expect(inLedgerLine(toDraftPosition(row()))).toBeNull()
   })
 
@@ -230,19 +230,27 @@ describe("估計的買入日（資產組成原型；產品負責人 2026-11-21�
     expect(toCommitRow(none, "2026-10-01", IMPORT_DAY)).toMatchObject({ date_basis: "picked", estimated_date: null })
   })
 
-  it("整批日期下面那一句：有估計可以套用時多說估計是什麼（不敘述「套用」，按鈕在每一列）；估不到的、舊版伺服器只有原本那一句", () => {
+  it("「日期怎麼算」收著的幾行（表格裡只有標籤）：買進日一定有；有估計時說估計是什麼、有估不到的列時說「—」是什麼", () => {
+    const terms = (rows: Parameters<typeof dateNotes>[0]) => dateNotes(rows).map(([t]) => t)
     const none = toDraftPosition(row({ estimated_date: null }))
-    expect(dateHint([est(), none])).toBe(`${BATCH_DATE_HINT}估計買入日是股價最近一次經過均價的那一天。`)
-    expect(dateHint([none, none])).toBe(BATCH_DATE_HINT)
-    expect(dateHint([toDraftPosition(row())])).toBe(BATCH_DATE_HINT)
-    // 改了股票、估計都拿掉了：回到原本那一句
-    expect(dateHint([editPosition(est(), { symbol: hongHai }), none])).toBe(BATCH_DATE_HINT)
+    const cannot = { ...none, flags: [flag("no_crossing", "warning", "五年內的股價都沒有經過均價 612.4，沒辦法估買入日。")] }
+    expect(noEstimate(cannot)).toBe(true)
+    expect(noEstimate(none)).toBe(false)
+    expect(dateNotes([est(), cannot])).toEqual([
+      ["買進日", "均價到那天收盤的漲跌算進那天的報酬，那天之前沒有走勢。"],
+      ["估計", "股價最近一次經過均價的那一天。"],
+      ["—", "股價沒有經過均價，估不到。"],
+    ])
+    expect(terms([none, none])).toEqual(["買進日"])
+    expect(terms([toDraftPosition(row())])).toEqual(["買進日"])
+    // 改了股票、估計都拿掉了：只剩買進日
+    expect(terms([editPosition(est(), { symbol: hongHai }), none])).toEqual(["買進日"])
   })
 
-  it("伺服器估計失敗（回應裡每一列都沒有 estimated_date）：當成沒有估的列，不是估不到——整批一個日期、不送 date_basis、只有原本那一句", () => {
+  it("伺服器估計失敗（回應裡每一列都沒有 estimated_date）：當成沒有估的列，不是估不到——整批一個日期、不送 date_basis、只有買進日那一行", () => {
     const rows = [toDraftPosition(row()), toDraftPosition(row({ row_id: "p2", symbol: "2317.TW", name: "鴻海" }))]
     expect(rows.every((d) => d.estimate === undefined && d.date === "")).toBe(true)
-    expect(dateHint(rows)).toBe(BATCH_DATE_HINT)
+    expect(dateNotes(rows)).toHaveLength(1)
     for (const d of rows) expect(toCommitRow(d, IMPORT_DAY)).not.toHaveProperty("date_basis")
   })
 
@@ -279,8 +287,8 @@ describe("重新檢查（dry_run）的結果", () => {
     expect(res.blocking).toBe(0)
   })
 
-  it("以券商為準只對勾的那個帳戶：換到也有這一檔的帳戶，不再勾著、不換掉，算一列變了（要對新的帳戶重新勾）", () => {
-    // 帳戶 A 有 1,500 股，勾了以券商為準
+  it("換成券商只對勾的那個帳戶：換到也有這一檔的帳戶，不再勾著、不換掉，算一列變了（要對新的帳戶重新勾）", () => {
+    // 帳戶 A 有 1,500 股，勾了換成券商
     const a = setReplace(toDraftPosition(row({ in_ledger: held(), include: false, flags: [flag("in_ledger")] })), true)
     expect([a.include, a.replace]).toEqual([true, true])
     // 換到帳戶 B（也有 300 股）：dry_run 帶著 replace，伺服器不標 in_ledger 錯誤，只回 B 的持股
@@ -294,13 +302,13 @@ describe("重新檢查（dry_run）的結果", () => {
     const same = applyCheck([again], [again], { rows: [{ index: 0, flags: [], in_ledger: inB }] }, false)
     expect(same.rows[0]).toMatchObject({ include: true, replace: true })
     expect(same.changed).toBe(0)
-    // 換帳戶時還沒送出去（檢查不了）的列：以券商為準和它綁著的勾選一起拿掉
+    // 換帳戶時還沒送出去（檢查不了）的列：換成券商和它綁著的勾選一起拿掉
     const notSent = { ...a, qty: "" }
     const out = applyCheck([notSent], [], { rows: [] }, true)
     expect(out.rows[0]).toMatchObject({ include: false, replace: false, inLedger: null })
   })
 
-  it("不在帳本了：以券商為準拿掉；使用者沒動過勾選的重新勾上", () => {
+  it("不在帳本了：換成券商拿掉；使用者沒動過勾選的重新勾上", () => {
     const d = toDraftPosition(row({ in_ledger: held(), include: false, flags: [flag("in_ledger")] }))
     const res = applyCheck([d], [d], { rows: [{ index: 0, flags: [], in_ledger: null }] }, true)
     expect(res.rows[0]!.include).toBe(true)

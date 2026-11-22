@@ -6,6 +6,7 @@ import { useCommitPositions } from "@/api/queries"
 import { ApiError, type Account, type BatchRejectedRow, type PositionRow, type PositionsCommitResult, type PositionsImport } from "@/api/types"
 import { DateField } from "@/components/date-field"
 import { FieldError, FormField as Row } from "@/components/form-field"
+import { RangeChips } from "@/components/segmented"
 import { SymbolPicker } from "@/components/symbol-picker"
 import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
@@ -23,18 +24,20 @@ import {
   checkable,
   costTotals,
   currencyOf,
-  dateHint,
+  dateNotes,
   editPosition,
   hasPositionErrors,
   inLedgerLine,
   isEstimatedDate,
   isShortSale,
   namedReplaced,
+  noEstimate,
   POSITION_NOTE_CODES,
+  POSITION_TAG_CODES,
   positionErrors,
   priceText,
+  replaceConsequence,
   replacedIncomeText,
-  replacedRecordsText,
   setInclude,
   setReplace,
   suggestedDate,
@@ -51,8 +54,10 @@ import {
  * 匯入庫存的確認表（DESIGN.md〈匯入庫存〉）：和匯入對帳單同一種草稿語法——石墨淡底、石墨灰虛線、AI 讀的數字是鉛筆的石墨灰，
  * 改過的格子變墨色；算出來的那一格（給的是總成本時的均價、給的是均價時的總成本）是淡墨。
  * 一列一檔：勾選・股票・股數・均價・總成本・買進日期。最上面是帳戶與整批的買進日期（每一檔記成那一天、照券商均價的買進：
- * 均價到那天收盤的漲跌算進那一天的報酬，那一天之前沒有走勢）。沒勾的列退回紙色（不在草稿裡）。
- * 已在帳本的那一檔預設不勾，下面一行寫帳本裡有多少，旁邊「以券商為準」（勾了才匯入，換掉那一檔的舊紀錄——股利、賣出也是）。
+ * 均價到那天收盤的漲跌算進那一天的報酬，那一天之前沒有走勢——這種機制的說明收在「日期怎麼算」，表格裡只有標籤和數字）。
+ * 沒勾的列退回紙色（不在草稿裡）。
+ * 已在帳本的那一檔沒有勾選框：下面一格「已在帳本 1,500 股・均價 692.61」＋「保留帳本｜換成券商」（預設保留、不匯入；
+ * 選了換成券商才匯入，換掉那一檔的舊紀錄——股利、賣出也是，旁邊寫「會刪 15 筆（含 13 筆股利）」）。
  * 簽名格「匯入 N 檔」：先重新檢查（dry_run），有新的問題就停下來；沒有就一次寫入（全部或全不）。
  */
 
@@ -99,7 +104,6 @@ export function PositionsReview({
   const skipped = useMemo(() => doc.rows.filter(isShortSale), [doc.rows])
   const included = rows.filter((r) => r.include)
   const today = appToday()
-  const dateHintId = useId()
   // 資產組成原型：有估計的買入日可以套用時日期欄寬一點（照讀到的看：改了股票、估計拿掉以後也不縮回去）
   const wideDate = useMemo(() => doc.rows.some((r) => typeof r.estimated_date === "string"), [doc.rows])
 
@@ -247,7 +251,6 @@ export function PositionsReview({
                 value={batchDate}
                 onChange={setBatchDate}
                 max={today}
-                describedBy={dateHintId}
                 invalid={showErrors && !batchDate}
                 // 手機和帳戶並排時寫短、不放圖示（320 寬也放得下「11/12（四）」）
                 format={sheet && accounts.length > 1 ? shortDate : undefined}
@@ -255,11 +258,18 @@ export function PositionsReview({
               />
             </Row>
           </div>
-          <p id={dateHintId} className="text-sm text-ink-2">
-            {/* 資產組成原型：有估計的買入日可以套用時多一句（`dateHint`）；舊版伺服器照原本那一句 */}
-            {dateHint(rows)}
-          </p>
           <p className="num text-sm text-ink-2">{facts}</p>
+          {/* 機制的說明整張表一個、預設收著（產品負責人 2026-11-22）；有估計的買入日、估不到的列時多一行 */}
+          <Disclosure label="日期怎麼算">
+            <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-base text-ink">
+              {dateNotes(rows).map(([term, text]) => (
+                <div key={term} className="contents">
+                  <dt className="num font-medium">{term}</dt>
+                  <dd>{text}</dd>
+                </div>
+              ))}
+            </dl>
+          </Disclosure>
           {doc.unreadable.length > 0 && <p className="text-base text-ink">沒讀清楚：{doc.unreadable.join("、")}。</p>}
           {doc.embedded_instructions.length > 0 && (
             <div>
@@ -338,7 +348,7 @@ export function PositionsReview({
       <div className={footerClass(sheet)}>
         {replacing.length > 0 && (
           <p className="w-full text-base text-ink">
-            以券商為準會刪掉{replacedText(replacing)}舊紀錄{replacedIncomeText(replacing) ? `，連同${replacedIncomeText(replacing)}` : ""}（定期定額不動），復原時也不會回來。
+            換成券商會刪掉{replacedText(replacing)}舊紀錄{replacedIncomeText(replacing) ? `，連同${replacedIncomeText(replacing)}` : ""}（定期定額不動），復原時也不會回來。
           </p>
         )}
         {notice && (
@@ -369,7 +379,7 @@ export function PositionsReview({
   )
 }
 
-/** 以券商為準要換掉的（同一檔好幾列只算一次）：名稱與帳本裡的紀錄筆數（其中幾筆股利、幾筆賣出） */
+/** 換成券商要換掉的（同一檔好幾列只算一次）：名稱與帳本裡的紀錄筆數（其中幾筆股利、幾筆賣出） */
 function dedupeReplacing(rows: DraftPosition[]): (ReplacedName & { dividends: number; sells: number })[] {
   const seen = new Map<string, ReplacedName & { dividends: number; sells: number }>()
   for (const d of rows)
@@ -429,8 +439,10 @@ function DesktopRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, 
   const nth = `第 ${n} 檔的`
   const off = !d.include
   const errorText = Object.values(errors).filter(Boolean)
-  const hasNotes = d.flags.length > 0 || errorText.length > 0 || !!d.inLedger
+  const hasNotes = sentenceFlags(d).length > 0 || errorText.length > 0 || !!d.inLedger
   const suggested = suggestedDate(d, batchDate)
+  // 估不到買入日：日期那一欄下面是「估計 —」（原因收在「日期怎麼算」）
+  const estimateCell = !!suggested || noEstimate(d)
   return (
     <tbody className={cn("border-b border-rule last:border-b-0", off && cn(offRow, "[&_input]:text-ink-2"))}>
       <tr className="align-middle">
@@ -447,14 +459,14 @@ function DesktopRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, 
           <RowDate row={d} batchDate={batchDate} label={`${nth}買進日期`} invalid={!!errors.date} onPatch={onPatch} compact />
         </td>
       </tr>
-      {(hasNotes || suggested) && (
+      {(hasNotes || estimateCell) && (
         <tr>
           <td />
-          {/* 有估計的買入日可以套用時，日期那一欄的下面是建議（和上面的日期對齊），句子少一欄 */}
-          <td colSpan={suggested ? 4 : 5} className="px-1.5 pb-2.5 align-top">
+          {/* 有估計的買入日（或估不到的「—」）時，日期那一欄的下面是建議（和上面的日期對齊），其他少一欄 */}
+          <td colSpan={estimateCell ? 4 : 5} className="px-1.5 pb-2.5 align-top">
             {hasNotes && <Notes row={d} errors={errorText} onPick={onPick} onReplace={onReplace} />}
           </td>
-          {suggested && (
+          {estimateCell && (
             <td className="pr-2 pb-2.5 pl-[27px] align-top">
               <EstimateSuggestion row={d} n={n} date={suggested} onApply={onApply} compact />
             </td>
@@ -477,11 +489,12 @@ function MobileRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, o
     <li className={cn("flex gap-1 border-b border-rule py-2.5 pr-3 pl-1 last:border-b-0", off && offRow)}>
       <IncludeBox row={d} onInclude={onInclude} />
       <div className="min-w-0 flex-1 pt-2.5">
-        {/* 名稱不截斷（太長就換行，代號跟在後面）：要靠名稱核對每一列。「已在帳本」不放這裡——下面那一句已經說了 */}
+        {/* 名稱不截斷（太長就換行，代號跟在後面）：要靠名稱核對每一列，所以沒勾的列也是墨色。「已在帳本」不放這裡——下面那一格已經寫了 */}
         <div className="flex items-baseline justify-between gap-3">
-          <p className={cn("min-w-0 text-lg font-medium break-words", off ? "text-ink-2" : d.symbol ? tone(d, "symbol") : "text-ink-2")}>
+          <p className={cn("min-w-0 text-lg font-medium break-words", d.symbol ? "text-ink" : "text-ink-2")}>
             {nameOf(d)}
             {d.symbol && <span className="num ml-1.5 text-sm font-normal whitespace-nowrap text-ink-2">{d.symbol.code}</span>}
+            {isMargin(d) && <span className="status-tag ml-1.5 align-[0.1em] font-normal">融資</span>}
           </p>
           <p className={cn("num shrink-0 text-base font-bold", off ? "text-ink-2" : "text-ai")}>{fmtTotal(d)}</p>
         </div>
@@ -498,10 +511,10 @@ function MobileRow({ row: d, n, errors, batchDate, onPatch, onPick, onInclude, o
             </button>
           )}
         </div>
-        {/* 資產組成原型：估計的買入日只是建議，按「套用」才改（欄位打開時也在這裡，不擠進半欄的日期下面） */}
-        {suggested && <EstimateSuggestion row={d} n={n} date={suggested} onApply={onApply} />}
+        {/* 資產組成原型：估計的買入日只是建議，按「套用」才改（欄位打開時也在這裡，不擠進半欄的日期下面）；估不到的寫「—」 */}
+        {(suggested || noEstimate(d)) && <EstimateSuggestion row={d} n={n} date={suggested} onApply={onApply} />}
         {/* 沒填好的格子：原因只寫在欄位下面（欄位一定是打開的），這裡不再寫一次；打開時「選一檔」就是上面的股票欄位 */}
-        {(d.flags.length > 0 || d.inLedger) && (
+        {(sentenceFlags(d).length > 0 || d.inLedger) && (
           <div className="mt-2">
             <Notes row={d} errors={[]} onPick={onPick} onReplace={onReplace} pick={!open} />
           </div>
@@ -565,19 +578,18 @@ function MobileField({ label, id, error, children }: { label: string; id: string
 }
 
 /**
- * 勾選：看得到的是 18px 的格子，可按範圍 44px。已在帳本的那一檔，勾了就是以券商為準（會刪掉舊紀錄）：
- * 名稱照實說（「匯入並以券商為準：台積電，刪掉 15 筆紀錄（含 3 筆股利）」），說明指到帳本那一句
+ * 勾選：看得到的是 18px 的格子，可按範圍 44px。已在帳本的那一檔沒有勾選框（同樣寬的空位）：匯入不匯入就是下面的
+ * 「保留帳本｜換成券商」（2026-11-22：勾選框藏著會刪掉舊紀錄的選擇，改成看得到的兩個選項）
  */
 function IncludeBox({ row: d, onInclude }: { row: DraftPosition; onInclude: RowProps["onInclude"] }) {
-  const h = d.inLedger
+  if (d.inLedger) return <span aria-hidden className="block size-11 shrink-0" />
   return (
     <label className="grid size-11 shrink-0 cursor-pointer place-items-center">
       <input
         type="checkbox"
         checked={d.include}
         onChange={(e) => onInclude(d.id, e.target.checked)}
-        aria-label={h ? `匯入並以券商為準：${nameOf(d)}，刪掉 ${replacedRecordsText(h)}` : `匯入：${nameOf(d)}${d.symbol ? "" : "（還沒選股票）"}`}
-        aria-describedby={h ? ledgerLineId(d) : undefined}
+        aria-label={`匯入：${nameOf(d)}${d.symbol ? "" : "（還沒選股票）"}`}
         className="size-[18px] cursor-pointer accent-[var(--act)]"
       />
     </label>
@@ -585,6 +597,11 @@ function IncludeBox({ row: d, onInclude }: { row: DraftPosition; onInclude: RowP
 }
 
 const ledgerLineId = (d: DraftPosition) => `pos-ledger-${d.id}`
+const consequenceId = (d: DraftPosition) => `pos-replace-${d.id}`
+/** 融資的庫存（當成一般持股匯入）：代號旁的「融資」，不寫句子 */
+const isMargin = (d: DraftPosition) => d.flags.some((f) => f.code === "margin")
+/** 列下面寫成句子的伺服器旗標（融資、估不到買入日畫成標籤） */
+const sentenceFlags = (d: DraftPosition) => d.flags.filter((f) => !POSITION_TAG_CODES.has(f.code))
 
 /** 數字格：AI 讀的是鉛筆、改過的是墨水，算出來的（`derived`）是淡墨 */
 function NumCell({
@@ -649,16 +666,27 @@ function RowDate({ row: d, batchDate, label, invalid, onPatch, compact }: { row:
 /**
  * 估計的買入日（資產組成原型；產品負責人 2026-11-21：只是建議）：13px 淡墨「估計買入日 2024/8/14」＋文字動作「套用」，
  * 按了這一列的日期才改成那天。桌面寫在日期那一欄的下面（短的「估計 2024/8/14」），手機寫在那一檔的第二行下面。
+ * 估不到（`date` 是 null）：「估計 —」，不寫原因的句子（2026-11-22：收在「日期怎麼算」）。
  */
-function EstimateSuggestion({ row: d, n, date, onApply, compact }: { row: DraftPosition; n: number; date: string; onApply: RowProps["onApply"]; compact?: boolean }) {
+function EstimateSuggestion({ row: d, n, date, onApply, compact }: { row: DraftPosition; n: number; date: string | null; onApply: RowProps["onApply"]; compact?: boolean }) {
   return (
     <p className="flex flex-wrap items-baseline gap-x-3 text-sm text-ink-2">
       <span className="num">
-        {compact ? "估計" : "估計買入日"} {dayText(date)}
+        {compact ? "估計" : "估計買入日"}{" "}
+        {date ? (
+          dayText(date)
+        ) : (
+          <>
+            <span aria-hidden>—</span>
+            <span className="sr-only">估不到</span>
+          </>
+        )}
       </span>
-      <button type="button" onClick={() => onApply(d.id)} className={cn(textAction, "text-sm")} aria-label={`套用第 ${n} 檔的估計買入日 ${dayText(date)}`}>
-        套用
-      </button>
+      {date && (
+        <button type="button" onClick={() => onApply(d.id)} className={cn(textAction, "text-sm")} aria-label={`套用第 ${n} 檔的估計買入日 ${dayText(date)}`}>
+          套用
+        </button>
+      )}
     </p>
   )
 }
@@ -676,10 +704,11 @@ function StockCell({ row: d, n, invalid, onPick, boxed }: { row: DraftPosition; 
         boxed ? "h-11 justify-center border-input bg-raised px-3" : "justify-center border-transparent px-1.5 py-0.5 hover:border-ctl pointer-coarse:min-h-11",
       )}
     >
-      <span className={cn("w-full truncate leading-snug", d.include ? tone(d, "symbol") : "text-ink-2")}>{d.symbol.name}</span>
+      {/* 名稱是這一列最主要的字（2026-11-22）：墨色、16px，沒勾的列也是（要靠名稱核對） */}
+      <span className={cn("w-full truncate leading-snug text-ink", !boxed && "text-base font-medium")}>{d.symbol.name}</span>
       <span className="flex items-center gap-1.5 text-sm leading-tight text-ink-2">
         <span className="num">{d.symbol.code}</span>
-        {!boxed && d.inLedger && <span className="status-tag">已在帳本</span>}
+        {!boxed && isMargin(d) && <span className="status-tag">融資</span>}
       </span>
     </PopoverTrigger>
   ) : (
@@ -713,8 +742,9 @@ function StockCell({ row: d, n, invalid, onPick, boxed }: { row: DraftPosition; 
 }
 
 /**
- * 那一列下面的句子：帳本那一行＋「以券商為準」；伺服器的句子（要處理的 15px 墨色，融資、別的帳戶也有是 13px 淡墨）；
- * 找不到股票旁邊「選一檔」；沒填好的格子
+ * 那一列下面：帳本那一格（標籤「已在帳本 1,500 股・均價 692.61」）＋「保留帳本｜換成券商」，選了換成券商才寫「會刪 15 筆
+ * （含 13 筆股利）」（墨色，不是紅色：紅綠只給價格；報讀器在選之前就念得到）；伺服器的句子（要處理的 15px 墨色，
+ * 別的帳戶也有是 13px 淡墨；融資與估不到買入日畫成標籤）；找不到股票旁邊「選一檔」；沒填好的格子
  */
 function Notes({
   row: d,
@@ -731,22 +761,28 @@ function Notes({
   pick?: boolean
 }) {
   const seen = new Set<string>()
-  const flags = d.flags.filter((f) => (seen.has(f.code) ? false : (seen.add(f.code), true)))
+  const flags = sentenceFlags(d).filter((f) => (seen.has(f.code) ? false : (seen.add(f.code), true)))
   const ledger = inLedgerLine(d)
   return (
     <ul className="flex flex-col gap-1">
       {ledger && d.inLedger && (
-        <li className="flex flex-col gap-0.5">
-          <span id={ledgerLineId(d)} className="text-base text-ink">
+        <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span id={ledgerLineId(d)} className="num text-md text-ink">
             {ledger}
           </span>
-          <label className="flex min-h-9 w-fit cursor-pointer items-center gap-2.5 text-base pointer-coarse:min-h-11">
-            <input type="checkbox" checked={d.replace} onChange={(e) => onReplace(d.id, e.target.checked)} className="size-[18px] shrink-0 cursor-pointer accent-[var(--act)]" />
-            <span>
-              <span className="font-medium text-ink">以券商為準</span>
-              <span className="text-ink-2">：刪掉帳本裡這一檔的 {replacedRecordsText(d.inLedger)}，換成這一筆</span>
-            </span>
-          </label>
+          <RangeChips
+            label={`${nameOf(d)}：保留帳本或換成券商`}
+            value={d.replace ? "replace" : "keep"}
+            options={[
+              { value: "keep", label: "保留帳本" },
+              { value: "replace", label: "換成券商", describedBy: consequenceId(d) },
+            ]}
+            onChange={(v) => onReplace(d.id, v === "replace")}
+          />
+          {/* 選之前只給報讀器（念在「換成券商」上），選了才看得到 */}
+          <span id={consequenceId(d)} className={cn("num text-md font-medium text-ink", !d.replace && "sr-only")}>
+            {replaceConsequence(d.inLedger)}
+          </span>
         </li>
       )}
       {flags.map((f) => {
@@ -795,12 +831,12 @@ function PickInline({ row: d, onPick }: { row: DraftPosition; onPick: RowProps["
   )
 }
 
-/** 「略過 1 檔融券」：預設收著；打開是一行一檔（不能勾） */
-function Skipped({ rows }: { rows: PositionRow[] }) {
+/** 預設收著的一段（「略過 1 檔融券」「日期怎麼算」）：淡墨有底線的字＋⌄，打開是下面那一段 */
+function Disclosure({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false)
   const id = useId()
   return (
-    <div className="mt-4">
+    <div className={className}>
       <button
         type="button"
         aria-expanded={open}
@@ -808,20 +844,27 @@ function Skipped({ rows }: { rows: PositionRow[] }) {
         onClick={() => setOpen(!open)}
         className="inline-flex min-h-9 items-center gap-1 text-md text-ink-2 underline decoration-ctl underline-offset-4 hover:text-ink hover:decoration-ink pointer-coarse:min-h-11"
       >
-        略過 {rows.length} 檔融券
+        {label}
         <ChevronDownIcon aria-hidden className={cn("size-3.5 transition-transform", open && "rotate-180")} />
       </button>
-      {open && (
-        <ul id={id} className="mt-1 border-t border-rule">
-          {rows.map((r) => (
-            <li key={r.row_id} className="flex flex-wrap items-baseline gap-x-3 border-b border-rule py-2 text-md">
-              <span className="text-ink">{r.name}</span>
-              {r.quantity !== null && <span className="num text-ink-2">{formatNumber(r.quantity)} 股</span>}
-              <span className="w-full text-sm text-ink-2 sm:ml-auto sm:w-auto">{r.flags.find((f) => f.code === "short_sale")?.message}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {open && <div id={id}>{children}</div>}
     </div>
+  )
+}
+
+/** 「略過 1 檔融券」：預設收著；打開是一行一檔（不能勾） */
+function Skipped({ rows }: { rows: PositionRow[] }) {
+  return (
+    <Disclosure label={`略過 ${rows.length} 檔融券`} className="mt-4">
+      <ul className="mt-1 border-t border-rule">
+        {rows.map((r) => (
+          <li key={r.row_id} className="flex flex-wrap items-baseline gap-x-3 border-b border-rule py-2 text-md">
+            <span className="text-ink">{r.name}</span>
+            {r.quantity !== null && <span className="num text-ink-2">{formatNumber(r.quantity)} 股</span>}
+            <span className="w-full text-sm text-ink-2 sm:ml-auto sm:w-auto">{r.flags.find((f) => f.code === "short_sale")?.message}</span>
+          </li>
+        ))}
+      </ul>
+    </Disclosure>
   )
 }

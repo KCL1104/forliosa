@@ -6,11 +6,12 @@ import { useEffect, useId, useRef, useState } from "react"
 import { toast } from "sonner"
 import { api, appToday } from "@/api"
 import { useAccounts, useCreateTransaction, useDeleteTransaction, useHoldings, useInstrumentSearch, useQuote, useWatchlist } from "@/api/queries"
-import type { Account, Holding, Instrument, InstrumentType, Market, TransactionInput } from "@/api/types"
+import type { Account, Holding, Instrument, InstrumentType, Market, QuantityUnit, TransactionInput } from "@/api/types"
 import { type TradePrefill, useUi } from "@/app/ui-store"
 import { DateField } from "@/components/date-field"
 import { Pct, Price } from "@/components/finance"
 import { FieldError, FormField as Row } from "@/components/form-field"
+import { RangeChips } from "@/components/segmented"
 import { textAction } from "@/components/text-action"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,6 +41,8 @@ import { useCanImport } from "./import/access"
 interface Lot {
   id: number
   qty: string
+  /** 台股數量欄旁的「張｜股」（預設照偏好；產品負責人 2026-11-22：00878 的 195 股不用寫成 0.195 張）；美股不看 */
+  unit: QuantityUnit
   date: string
   price: string
   /** 選填；空白就不送（後端當 0） */
@@ -47,7 +50,11 @@ interface Lot {
 }
 
 const MAX_LOTS = 12
-const newLot = (id: number): Lot => ({ id, qty: "", date: "", price: "", fee: "" })
+const UNITS = [
+  { value: "lot", label: "張" },
+  { value: "share", label: "股" },
+] as const satisfies readonly { value: QuantityUnit; label: string }[]
+const newLot = (id: number, unit: QuantityUnit): Lot => ({ id, qty: "", unit, date: "", price: "", fee: "" })
 
 /** 填的手續費：空白是 null（不送）；不是數字或小於 0 是 NaN（「請填數字」） */
 const feeOf = (l: Lot): number | null => {
@@ -324,17 +331,17 @@ function DetailsStep({
   const served = useUsClosesServed()
   const nextId = useRef(1)
   const formRef = useRef<HTMLFormElement>(null)
-  const [lots, setLots] = useState<Lot[]>(() => [newLot(0)])
+  const [lots, setLots] = useState<Lot[]>(() => [newLot(0, unitPref)])
   const [submitted, setSubmitted] = useState(false)
   const [busy, setBusy] = useState(false)
   const isUS = symbol.market === "US" || account?.currency === "USD"
-  const inLots = unitPref === "lot" && !isUS
+  const inLots = (l: Lot) => l.unit === "lot" && !isUS
   const today = appToday()
-  const shares = (l: Lot) => toShares(l.qty, inLots)
+  const shares = (l: Lot) => toShares(l.qty, inLots(l))
   const errorOf = (l: Lot) => {
     const p = num(l.price)
     return {
-      qty: quantityError(l.qty, inLots, isUS),
+      qty: quantityError(l.qty, inLots(l), isUS),
       date: !l.date ? "請選買進日期" : l.date > today ? "不能選未來的日期" : null,
       price: !p || p <= 0 ? "請輸入價格" : null,
       fee: Number.isNaN(feeOf(l)) ? "請填數字" : null,
@@ -406,12 +413,13 @@ function DetailsStep({
 
   const addLot = () => {
     const id = nextId.current++
-    setLots((ls) => [...ls, newLot(id)])
+    // 單位跟著上一筆（零股一筆一筆記的，不用每一筆都切到「股」）
+    setLots((ls) => [...ls, newLot(id, ls.at(-1)?.unit ?? unitPref)])
     setSubmitted(false)
     requestAnimationFrame(() => formRef.current?.querySelector<HTMLInputElement>(`#lot-qty-${id}`)?.focus())
   }
 
-  const qtyLabel = inLots ? "張數" : "股數"
+  const qtyLabel = (l: Lot) => (inLots(l) ? "張數" : "股數")
   // 買進的價格與手續費記在這一檔的計價幣別（後端用商品的幣別，不看帳戶）：美股寫「（美元）」，台股記進美元帳戶也不寫
   const inUSD = symbol.currency === "USD"
   const priceLabel = `買進價格${inUSD ? "（美元）" : ""}`
@@ -458,32 +466,45 @@ function DetailsStep({
           const nth = many ? `第 ${i + 1} 筆的` : ""
           const first = i === 0
           return (
-            // 桌面一筆一列四格（＋移除）：日期那一格至少 11rem，「2026/11/12（四）」和日曆圖示不會被切掉。
+            // 桌面一筆一列四格（＋移除）：日期那一格至少 11rem，「2026/11/12（四）」和日曆圖示不會被切掉；股數那一格寬一點
+            // （旁邊有「張｜股」，2026-11-22）。
             // 手機一筆排兩行：股數｜價格，下面日期｜手續費（有好幾筆時手續費右邊是移除，價格跨到最右邊）；
-            // 左欄至少 11.75rem（窄手機最多 57%）放得下日期；第二筆起上面加一條格線分開
+            // 左欄至少 13rem（窄手機最多 57%）放得下日期與「張｜股」；第二筆起上面加一條格線分開
             <div
               key={l.id}
               className={cn(
                 "grid items-start gap-x-2 gap-y-3",
                 many
-                  ? "grid-cols-[minmax(min(11.75rem,57%),1fr)_minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_minmax(11rem,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
-                  : "grid-cols-[minmax(min(11.75rem,57%),1fr)_minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_minmax(11rem,1.3fr)_minmax(0,1fr)_minmax(0,1fr)]",
+                  ? "grid-cols-[minmax(min(13rem,57%),1fr)_minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1.4fr)_minmax(11rem,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+                  : "grid-cols-[minmax(min(13rem,57%),1fr)_minmax(0,1fr)] sm:grid-cols-[minmax(0,1.4fr)_minmax(11rem,1.3fr)_minmax(0,1fr)_minmax(0,1fr)]",
                 i > 0 && "max-sm:border-t max-sm:border-rule max-sm:pt-3",
               )}
             >
-              <Cell label={qtyLabel} id={`lot-qty-${l.id}`} first={first} error={err.qty} note={otherUnit(shares(l), inLots, isUS)}>
-                <Input
-                  id={`lot-qty-${l.id}`}
-                  inputMode="decimal"
-                  autoComplete="off"
-                  aria-label={`${nth}${qtyLabel}`}
-                  // 第二筆起沒有看得見的標籤：提示字直接寫欄位名稱
-                  placeholder={first ? (inLots ? "例如 1" : "例如 1000") : qtyLabel}
-                  value={l.qty}
-                  onChange={(e) => setLot(l.id, { qty: e.target.value })}
-                  aria-invalid={!!err.qty}
-                  className="num"
-                />
+              <Cell label={qtyLabel(l)} id={`lot-qty-${l.id}`} first={first} error={err.qty} note={otherUnit(shares(l), inLots(l), isUS, l.qty)}>
+                <div className="flex gap-2">
+                  {/* 台股的「張｜股」：看起來在輸入框右邊，順序在它前面——填完張數按 Tab 還是直接到日期，和以前一樣快 */}
+                  {!isUS && (
+                    <RangeChips
+                      label={`${nth}數量單位`}
+                      value={l.unit}
+                      options={UNITS}
+                      onChange={(unit) => setLot(l.id, { unit })}
+                      className="order-last shrink-0 rounded-md border px-0.5 pointer-coarse:p-0"
+                    />
+                  )}
+                  <Input
+                    id={`lot-qty-${l.id}`}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    aria-label={`${nth}${qtyLabel(l)}`}
+                    // 第二筆起沒有看得見的標籤：提示字直接寫欄位名稱
+                    placeholder={first ? (inLots(l) ? "例如 1" : "例如 1000") : qtyLabel(l)}
+                    value={l.qty}
+                    onChange={(e) => setLot(l.id, { qty: e.target.value })}
+                    aria-invalid={!!err.qty}
+                    className="num"
+                  />
+                </div>
               </Cell>
               <Cell label="買進日期" id={`lot-date-${l.id}`} first={first} error={err.date} className="max-sm:order-3">
                 <DateField id={`lot-date-${l.id}`} label={`${nth}買進日期`} value={l.date} onChange={(date) => setLot(l.id, { date })} invalid={!!err.date} />

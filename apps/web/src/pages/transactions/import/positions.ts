@@ -7,9 +7,10 @@ import { PICK_SYMBOL_CODES, symbolFromCode, type PickedSymbol } from "./flags"
  * 匯入庫存的確認表（產品負責人 2026-11-17，四項照建議；不碰畫面，測試得到）：
  * - 伺服器回的每一列（`PositionRow`）變成可以改的 `DraftPosition`：股票、股數、均價或總成本（二選一，另一格照它算）、
  *   這一列自己的買進日期（空的就是整批的日期）。
- * - 已在帳本（這個帳戶現在有這一檔）預設不匯入；「以券商為準」和勾選綁在一起：勾了才匯入、匯入時換掉那一檔的舊紀錄。
- *   以券商為準是對一個帳戶、一檔股票勾的：換了帳戶或股票就拿掉，對新的帳戶重新勾。
- *   帳本那一行（「帳本裡已經有 1,500 股，均價 585.27。」）照 `in_ledger` 的數字寫，換帳戶、改了股數或均價都跟著變。
+ * - 已在帳本（這個帳戶現在有這一檔）預設不匯入；「保留帳本｜換成券商」（`replace`，2026-11-22 以前叫「以券商為準」的勾選框）
+ *   和匯入綁在一起：選了換成券商才匯入、匯入時換掉那一檔的舊紀錄。
+ *   換成券商是對一個帳戶、一檔股票選的：換了帳戶或股票就拿掉，對新的帳戶重新選。
+ *   帳本那一格（「已在帳本 1,500 股・均價 585.27」）照 `in_ledger` 的數字寫，換帳戶、改了股數或均價都跟著變。
  * - 重新檢查（`POST /imports/positions/commit` 的 dry_run）：換帳戶、改了股票或日期之後、簽名之前；不呼叫 AI。
  * - 寫入：每一檔一筆買進，手續費 0（券商的均價多半已含手續費），帳本的均價就等於券商的。
  */
@@ -31,7 +32,7 @@ export interface DraftPosition {
   basis: "price" | "total"
   /** 這一列自己的買進日期；空字串＝整批的日期 */
   date: string
-  /** 以券商為準：換掉這個帳戶裡這一檔的舊紀錄 */
+  /** 換成券商：換掉這個帳戶裡這一檔的舊紀錄 */
   replace: boolean
   /** 這個帳戶現在已經有這一檔（重新檢查時更新） */
   inLedger: LedgerHolding | null
@@ -80,7 +81,9 @@ const ESTIMATE_INPUTS: readonly PositionField[] = ["symbol", "qty", "price", "to
 /** 和後端的 EXCLUDED 相同：預設不勾（任何 error 也不勾） */
 const EXCLUDED_CODES: ReadonlySet<string> = new Set(["unknown_symbol", "ambiguous_symbol", "unreadable", "fractional_tw_qty", "currency_mismatch", "short_sale", "in_ledger"])
 /** 標籤（不是要處理的問題）：小一號淡墨 */
-export const POSITION_NOTE_CODES: ReadonlySet<string> = new Set(["margin", "in_other_account", "no_crossing"])
+export const POSITION_NOTE_CODES: ReadonlySet<string> = new Set(["in_other_account"])
+/** 不寫句子、畫成標籤的（2026-11-22）：融資是代號旁的「融資」，估不到買入日是日期下面的「估計 —」 */
+export const POSITION_TAG_CODES: ReadonlySet<string> = new Set(["margin", "no_crossing"])
 
 export const isShortSale = (row: PositionRow) => row.flags.some((f) => f.code === "short_sale")
 
@@ -157,7 +160,7 @@ export function editPosition(d: DraftPosition, patch: Partial<Pick<DraftPosition
   if ("total" in patch) next.basis = "total"
   next.flags = d.flags.filter((f) => !(RESOLVED_BY[f.code] ?? []).some((k) => keys.includes(k)) && !(keys.includes("symbol") && PICK_SYMBOL_CODES.has(f.code)))
   if ("symbol" in patch && patch.symbol?.symbol !== d.symbol?.symbol) {
-    // 換了一檔：帳本裡有沒有要重新檢查，以券商為準先拿掉
+    // 換了一檔：帳本裡有沒有要重新檢查，換成券商先拿掉
     next.inLedger = null
     next.replace = false
   }
@@ -171,39 +174,39 @@ export function editPosition(d: DraftPosition, patch: Partial<Pick<DraftPosition
   return next
 }
 
-/** 勾選：已在帳本的那一檔，勾了就是以券商為準（不換掉的話伺服器不收：會變成兩倍） */
+/** 勾選：已在帳本的那一檔，勾了就是換成券商（不換掉的話伺服器不收：會變成兩倍） */
 export function setInclude(d: DraftPosition, include: boolean): DraftPosition {
   return { ...d, include, replace: d.inLedger ? include : false, includeSet: true }
 }
 
-/** 以券商為準：和勾選綁在一起 */
+/** 換成券商：和勾選綁在一起 */
 export function setReplace(d: DraftPosition, replace: boolean): DraftPosition {
   return { ...d, replace, include: replace, includeSet: true }
 }
 
-/** 以券商為準會刪掉的：「15 筆紀錄（含 3 筆股利、1 筆賣出）」（股利與賣出的損益也跟著不見，要說出來） */
-export function replacedRecordsText(h: LedgerHolding): string {
+/** 換成券商會刪掉的（標籤）：「會刪 15 筆（含 3 筆股利、1 筆賣出）」（股利與賣出的損益也跟著不見，要說出來） */
+export function replaceConsequence(h: LedgerHolding): string {
   const income = [h.dividends ? `${formatNumber(h.dividends)} 筆股利` : "", h.sells ? `${formatNumber(h.sells)} 筆賣出` : ""].filter(Boolean)
-  return `${formatNumber(h.records)} 筆紀錄${income.length ? `（含 ${income.join("、")}）` : ""}`
+  return `會刪 ${formatNumber(h.records)} 筆${income.length ? `（含 ${income.join("、")}）` : ""}`
 }
 
-/** 以券商為準一起刪掉的收入：「領過的股利、賣出的損益」；都沒有是空字串 */
+/** 換成券商一起刪掉的收入：「領過的股利、賣出的損益」；都沒有是空字串 */
 export function replacedIncomeText(list: Pick<LedgerHolding, "dividends" | "sells">[]): string {
   const dividends = list.some((h) => h.dividends > 0)
   const sells = list.some((h) => h.sells > 0)
   return [dividends ? "領過的股利" : "", sells ? "賣出的損益" : ""].filter(Boolean).join("、")
 }
 
-/** 帳本那一行：股數和均價都一樣時直說（和伺服器讀的時候同一句） */
+/** 帳本那一格（標籤，產品負責人 2026-11-22）：「已在帳本 1,500 股・均價 692.61」；股數和均價都一樣時「已在帳本・股數和均價相同」 */
 export function inLedgerLine(d: DraftPosition): string | null {
   const h = d.inLedger
   if (!h) return null
   const q = parseNumber(d.qty)
   const p = unitPrice(d)
   const same = q === h.quantity && p !== null && Math.abs(h.avg_cost - p) <= Math.max(0.01, p * 0.0005)
-  if (same) return "帳本裡已經有，股數和均價都一樣。"
+  if (same) return "已在帳本・股數和均價相同"
   const avg = h.avg_cost >= 10 ? Math.round(h.avg_cost * 100) / 100 : h.avg_cost
-  return `帳本裡已經有 ${numText(h.quantity)} 股，均價 ${numText(avg, 4)}。`
+  return `已在帳本 ${numText(h.quantity)} 股・均價 ${numText(avg, 4)}`
 }
 
 export interface PositionErrors {
@@ -265,24 +268,28 @@ export function toCommitRow(d: DraftPosition, batchDate: string, importDay: stri
   return row
 }
 
-/** 整批日期下面那一句（照實說：每一檔是一筆普通買進，均價到那天收盤的漲跌全部算在那一天） */
-export const BATCH_DATE_HINT = "均價到這天收盤的漲跌算進這天的報酬，這天之前沒有走勢。"
+/** 估不到買入日（伺服器的 `no_crossing`）：日期下面寫「估計 —」，原因收在「日期怎麼算」 */
+export const noEstimate = (d: Pick<DraftPosition, "flags">) => d.flags.some((f) => f.code === "no_crossing")
 
 /**
- * 整批日期下面那一句：有估計的買入日可以套用時多說估計是什麼（估計是從今天往回找「最近一次」經過均價的那一天；
- * 「按「套用」才會用」不寫，「套用」就在每一列）。舊版伺服器、估不到的、改過股票或成本的都沒有建議，只有原本那一句。
+ * 「日期怎麼算」收著的幾行（產品負責人 2026-11-22：確認表只放標籤和數字，機制的說明整張表一個、預設收著）：
+ * 買進日照實說（每一檔是一筆普通買進，均價到那天收盤的漲跌全部算在那一天）；有估計的買入日時說估計是哪一天
+ * （從今天往回找「最近一次」經過均價的那一天）；有估不到的列時說「—」是什麼。舊版伺服器只有第一行。
  */
-export function dateHint(rows: readonly Pick<DraftPosition, "estimate">[]): string {
-  const suggests = rows.some((d) => typeof d.estimate === "string")
-  return suggests ? `${BATCH_DATE_HINT}估計買入日是股價最近一次經過均價的那一天。` : BATCH_DATE_HINT
+export function dateNotes(rows: readonly Pick<DraftPosition, "estimate" | "flags">[]): [term: string, text: string][] {
+  return [
+    ["買進日", "均價到那天收盤的漲跌算進那天的報酬，那天之前沒有走勢。"],
+    ...(rows.some((d) => typeof d.estimate === "string") ? [["估計", "股價最近一次經過均價的那一天。"] as [string, string]] : []),
+    ...(rows.some(noEstimate) ? [["—", "股價沒有經過均價，估不到。"] as [string, string]] : []),
+  ]
 }
 
 /**
  * 重新檢查的結果併進來（`sent`：送出去的列，順序和 `check.rows` 一樣）。
  * - 帳本那一檔：換成這次的 `in_ledger`。新出現的（換了帳戶、換了股票）一律不勾、不換掉（伺服器不收不換掉的）；
- *   不在帳本了的，以券商為準拿掉，使用者沒自己動過勾選、也沒有別的問題的列重新勾上。
- * - `accountChanged`：「別的帳戶也有」是照舊的帳戶算的，拿掉。以券商為準是對舊的帳戶勾的：新的帳戶也有這一檔時，
- *   不勾、不換掉（兩個帳戶都有也一樣），讓使用者對新的帳戶重新勾；沒送出去的列也拿掉以券商為準（和它綁著的勾選一起）。
+ *   不在帳本了的，換成券商拿掉，使用者沒自己動過勾選、也沒有別的問題的列重新勾上。
+ * - `accountChanged`：「別的帳戶也有」是照舊的帳戶算的，拿掉。換成券商是對舊的帳戶勾的：新的帳戶也有這一檔時，
+ *   不勾、不換掉（兩個帳戶都有也一樣），讓使用者對新的帳戶重新勾；沒送出去的列也拿掉換成券商（和它綁著的勾選一起）。
  * 回傳新的表、檢查結果變了的列數（新的錯誤、勾選變了）、勾著卻寫不進去的列數。
  */
 export function applyCheck(
