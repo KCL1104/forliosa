@@ -19,7 +19,7 @@ from forliosa.ai import store
 from forliosa.ai.keypool import get_key_pool
 from forliosa.api.errors import ApiError, not_found, unprocessable
 from forliosa.config import Settings, get_settings
-from forliosa.datapolicy import DATASETS, history_backfill_enabled, label
+from forliosa.datapolicy import DATASETS, HISTORY_SOURCE, history_backfill_enabled, label
 from forliosa.market_calendar import load_official_calendar
 from forliosa.models import DatasetStatus, NewsArticle, NewsBlockedDomain, NewsFetchState, User
 from forliosa.news import ai_search as news_ai
@@ -59,6 +59,8 @@ def ai_summary(db: Session) -> dict[str, Any]:
 def _dataset_name(key: str) -> tuple[str, str | None]:
     if key == backup.STATUS_KEY:  # the nightly pg_dump: flagged here once backups stop (forliosa.backup)
         return "資料庫備份", "Railway Bucket"
+    if key == f"{HISTORY_SOURCE}/price":  # only the owner sees this page: it keeps the vendor (pages don't, 2026-11-22)
+        return "Yahoo Finance（歷史日線，非官方資料）", None
     ds = DATASETS.get(key)
     if ds is not None:
         return ds.title, ds.agency

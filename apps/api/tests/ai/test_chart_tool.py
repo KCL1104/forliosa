@@ -156,7 +156,10 @@ def test_charts_read_the_history_backfill_and_do_not_adjust_it_twice(arch, monke
         out, _ = run(arch, kind="price", symbols=["2454"], range="1Y")
         card = out.chart
         assert card["series"][0]["points"][0]["t"] == old_days[0].isoformat()
-        assert any("Yahoo Finance" in n for n in card["notes"]) and any("Yahoo Finance" in s for s in card["sources"])
+        # the backfill is labelled without the vendor (產品負責人 2026-11-22)
+        assert any("以前・參考價" in n for n in card["notes"])
+        assert "存檔開始以前的歷史日線（非官方資料）" in card["sources"]
+        assert "Yahoo" not in json.dumps([card["notes"], card["sources"]], ensure_ascii=False)
         assert not any("之前是當時的價格" in n for n in card["notes"])
         out, _ = run(arch, kind="compare", symbols=["2330", "2454"], range="1Y")
         mtk = next(s for s in out.chart["series"] if s["symbol"] == "2454.TW")
