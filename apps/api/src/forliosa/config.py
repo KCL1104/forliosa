@@ -145,6 +145,11 @@ class Settings(BaseSettings):
     # falls back to ANTHROPIC_API_KEY (slot 0), plus the optional per-slot AI_KEY_<n>_MONTHLY_BUDGET_USD.
     ai_model: str = "claude-haiku-5-5"
     ai_model_chat: str | None = None
+    # A new conversation that starts with a look-ahead question (「明天可以關注哪些個股？」, ``prompts.is_lookahead``)
+    # runs on this model (產品負責人 2026-11-26: Haiku often skipped the digest's opening line); "" keeps the chat
+    # model.
+    # Chosen when the conversation is created: a thread keeps one model (its replayed thinking is bound to it).
+    ai_model_lookahead: str = "claude-sonnet-5-5"
     ai_model_why: str | None = None
     ai_model_import: str | None = None
     ai_model_report: str | None = None

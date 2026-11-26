@@ -12,7 +12,7 @@ nothing about the whole market. These read what the market page and the market r
 * ``get_market_report`` — the newest published 盤前重點／盤後重點／市場週報: each news page the report cites becomes a
   citable search result holding the report's sentences that cite it, so the answer links the original article.
 * ``get_watchlist`` — the user's watchlist with the latest official close.
-* ``suggest_follow_ups`` — 2–3 questions shown under the answer (``FOLLOW_UPS``); the chat ends the turn when it is the
+* ``suggest_follow_ups`` — 3–5 questions shown under the answer (``FOLLOW_UPS``); the chat ends the turn when it is the
   only tool left, without another model call (``forliosa.ai.chat``).
 
 All of them are read-only and use no web search. The stocks they name are picked by stated rules (yours, market cap,
@@ -49,7 +49,7 @@ SECTORS_N = 5
 LIMIT_N = 10
 REPORT_KINDS = ("latest", "premarket", "close", "weekly")
 REPORT_SENTENCES_MAX = 40
-FOLLOW_UPS_MAX = 3
+FOLLOW_UPS_MAX = 5
 FOLLOW_UP_CHARS = (4, 40)
 # A follow-up the user would ask us to decide for them: never offered (the content line of PRODUCT.md)
 _ADVICE = re.compile(r"該不該(?:買|賣|加碼|減碼|出場|進場)|要不要(?:買|賣|加碼|減碼|出場|進場)|可以(?:買|進場|加碼)|"
@@ -460,6 +460,6 @@ def clean_follow_ups(raw: Any) -> list[str]:
 def suggest_follow_ups(ctx: ToolContext, args: dict[str, Any]) -> Any:
     questions = clean_follow_ups(args.get("questions"))
     if not questions:
-        raise ToolError("questions 要是 2–3 個簡短的問題（每個 4–40 字，不問該不該買賣）")
+        raise ToolError("questions 要是 3–5 個簡短的問題（每個 4–40 字，不問該不該買賣）")
     ctx.follow_ups[:] = questions
     return "已顯示在回答下方。不要再寫任何文字。"

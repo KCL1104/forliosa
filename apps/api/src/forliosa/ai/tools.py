@@ -1592,7 +1592,7 @@ TOOLS: list[ToolSpec] = sorted([
              "among their own stocks.",
              {}, (), get_watchlist, lambda a: "查看觀察清單", strict=False),
     ToolSpec(FOLLOW_UPS_TOOL,
-             "Show 2-3 short follow-up questions under your answer, which the user can tap to ask next. Call it once, "
+             "Show 3-5 short follow-up questions under your answer, which the user can tap to ask next. Call it once, "
              "as the very last thing, after your answer is written, alone (no other tool in the same step); write "
              "nothing after it. Each question is in Traditional Chinese, 4-40 characters, written as the user would "
              "ask it, about the stocks, events or themes of your answer, answerable with your tools (news, why a "
@@ -1600,7 +1600,7 @@ TOOLS: list[ToolSpec] = sorted([
              "a question asking you to decide a trade (該不該買、可以加碼嗎), to predict a price, or one already "
              "answered.",
              {"questions": {"type": "array", "items": {"type": "string"},
-                            "description": "2-3 questions, e.g. [\"台積電法說會通常會公布什麼？\", "
+                            "description": "3-5 questions, e.g. [\"台積電法說會通常會公布什麼？\", "
                                            "\"台達電這次配多少股利？\"]"}},
              ("questions",), suggest_follow_ups, lambda a: "準備接著問的問題", strict=False),
     ToolSpec("get_position",

@@ -77,6 +77,37 @@ def test_a_turn_ending_with_follow_ups_makes_no_further_call(client, pool, fake)
     assert detail["messages"][-1]["follow_ups"] == []
 
 
+def test_follow_ups_before_the_answer_ask_for_the_answer(client, pool, fake):
+    # QA 2026-11-26 (Sonnet): called beside draw_chart before any text; the result must not say 「不要再寫任何文字」
+    from forliosa.ai.chat import FOLLOW_UPS_EARLY
+
+    fake.reply(tool_use("toolu_f", "suggest_follow_ups",
+                        {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？"]}), stop_reason="tool_use")
+    fake.reply(text("11/27 的重點在智邦法說會。"),
+               tool_use("toolu_g", "suggest_follow_ups",
+                        {"questions": ["智邦上次法說會說了什麼？", "健策為什麼被處置？"]}), stop_reason="tool_use")
+    status, events = chat(client, "明天可以關注哪些個股？")
+    assert status == 200 and len(fake.requests) == 2  # the second call's follow-ups end the turn
+    result = fake.requests[1]["body"]["messages"][-1]["content"][0]
+    assert result["type"] == "tool_result" and result["content"] == FOLLOW_UPS_EARLY and result["is_error"] is True
+    assert "".join(d["delta"] for n, d in events if n == "text") == "11/27 的重點在智邦法說會。"
+    # only the questions asked after the answer are kept
+    follow = [d for n, d in events if n == "follow_ups"]
+    assert follow == [{"questions": ["智邦上次法說會說了什麼？", "健策為什麼被處置？"]}]
+
+
+def test_follow_ups_asked_only_before_the_answer_are_used_after_it(client, pool, fake):
+    asked = {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？", "要不要買智邦？"]}
+    fake.reply(tool_use("toolu_f", "suggest_follow_ups", asked), stop_reason="tool_use")
+    fake.reply(text("11/27 的重點在智邦法說會。"))
+    status, events = chat(client, "明天可以關注哪些個股？")
+    assert status == 200 and len(fake.requests) == 2
+    follow = [d for n, d in events if n == "follow_ups"]
+    assert follow == [{"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？"]}]  # cleaned like any other
+    detail = client.get(f"{API}/ai/threads/{events[-1][1]['thread_id']}").json()
+    assert detail["messages"][-1]["follow_ups"] == ["智邦法說會會說什麼？", "健策為什麼被處置？"]
+
+
 def test_follow_ups_beside_other_tools_continue_the_turn(client, pool, fake):
     acc = make_account(client)
     buy(client, acc, "2330", 1000, 600)
@@ -107,9 +138,34 @@ def test_follow_ups_written_as_text_become_follow_ups(client, pool, fake):
     assert detail["messages"][-1]["follow_ups"] == ["我今年領了多少股利？", "台積電目前的走勢如何？"]
 
 
+def test_up_to_five_follow_ups():
+    asked = [f"台積電第 {n} 個問題？" for n in range(1, 8)]
+    assert market_tools.clean_follow_ups(asked) == asked[:5]
+
+
+def test_a_look_ahead_conversation_runs_on_the_look_ahead_model(client, pool, fake):
+    from forliosa.ai.prompts import is_lookahead
+
+    assert is_lookahead("明天可以關注哪些個股？") and is_lookahead("下週有什麼看點")
+    assert not is_lookahead("最近有哪些股票要除息？") and not is_lookahead("台積電現在可以買嗎？")
+    fake.reply(text("11/27 的重點在法說會。"))
+    status, events = chat(client, "明天可以關注哪些個股？")
+    assert status == 200 and fake.requests[0]["body"]["model"] == "claude-sonnet-5-5"
+    thread_id = events[-1][1]["thread_id"]
+    assert events[-1][1]["model"] == "claude-sonnet-5-5"
+    # the conversation keeps its model, whatever is asked next
+    fake.reply(text("台積電 11/26 收 2,145 元。"))
+    chat(client, "台積電呢？", thread_id=thread_id)
+    assert fake.requests[1]["body"]["model"] == "claude-sonnet-5-5"
+    # any other first question: the chat model
+    fake.reply(text("你持有台積電。"))
+    chat(client, "我有哪些持股？")
+    assert fake.requests[2]["body"]["model"] == "claude-haiku-5-5"
+
+
 def test_invalid_follow_ups_are_an_error_the_model_sees(ctx):
     out = execute(ctx, "suggest_follow_ups", {"questions": ["要不要買？"]})
-    assert out.is_error and "2–3" in out.content
+    assert out.is_error and "3–5" in out.content
     out = execute(ctx, "suggest_follow_ups", {"questions": ["台積電的本益比？", "台積電的殖利率？"]})
     assert not out.is_error and out.follow_ups == ["台積電的本益比？", "台積電的殖利率？"]
 
@@ -237,6 +293,7 @@ def test_the_prompt_organises_instead_of_refusing():
     assert "## 明天看點與市場整理" in CHAT_SYSTEM and "不拒絕" in CHAT_SYSTEM
     assert "kind compare，range 3M" in CHAT_SYSTEM
     assert "## 該不該買賣、哪一檔好、現在能不能進場" in CHAT_SYSTEM and "不寫「我不能替你判斷」" in CHAT_SYSTEM
+    assert "估值一定寫本益比、股價淨值比與殖利率" in CHAT_SYSTEM and "給 3 到 5 個" in CHAT_SYSTEM
     assert "## 接著問" in CHAT_SYSTEM and "suggest_follow_ups" in CHAT_SYSTEM
     for name in ("get_market_calendar", "get_market_overview", "get_market_report", "get_watchlist", "get_performance"):
         assert name in CHAT_SYSTEM and name in TOOLS_BY_NAME

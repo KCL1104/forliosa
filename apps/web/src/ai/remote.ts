@@ -358,10 +358,10 @@ export function isChart(c: unknown): c is AiChart {
   )
 }
 
-/** 接著問：只收非空的字串，最多 3 題（後端改版、事件壞掉時不讓對話壞掉） */
+/** 接著問：只收非空的字串，最多 5 題（後端改版、事件壞掉時不讓對話壞掉） */
 export function followUpsOf(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
-  return raw.filter((q): q is string => typeof q === "string" && q.trim().length > 0).map((q) => q.trim()).slice(0, 3)
+  return raw.filter((q): q is string => typeof q === "string" && q.trim().length > 0).map((q) => q.trim()).slice(0, 5)
 }
 
 /** 套用一個串流事件到正在寫的 AI 訊息（純函式，方便測試） */

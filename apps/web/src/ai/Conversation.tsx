@@ -1,4 +1,4 @@
-import { ArrowRightIcon, ArrowUpRightIcon, CircleAlertIcon } from "lucide-react"
+import { ArrowRightIcon, ArrowUpRightIcon, CircleAlertIcon, CornerDownRightIcon } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { PlainLink } from "@/app/links"
 import { useUi } from "@/app/ui-store"
@@ -110,11 +110,11 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
                 />
               ) : null,
             )}
-            {!m.streaming && m.citations && m.citations.length > 0 && <Footnotes items={m.citations} />}
-            {/* 接著問：只跟著最新一則寫完、沒有出錯的回答；點了就問（和規則版回答的追問同一種文字連結） */}
+            {/* 接著問：只跟著最新一則寫完、沒有出錯的回答，緊接在回答與圖下面、出處上面；點了就問 */}
             {i === latestAnswer && !m.streaming && !m.error && m.followUps && m.followUps.length > 0 && (
-              <FollowUps questions={m.followUps} runner={runner} className="mt-3" />
+              <FollowUps questions={m.followUps} runner={runner} className="mt-3" marked />
             )}
+            {!m.streaming && m.citations && m.citations.length > 0 && <Footnotes items={m.citations} />}
             {i === latestAnswer && !m.streaming && <Disclaimer kind="ai" text={m.disclaimer ?? fallbackDisclaimer} className="mt-3" />}
           </div>
         ),
@@ -288,12 +288,17 @@ function Footnotes({ items }: { items: Citation[] }) {
   )
 }
 
-/** 回答後的追問：墨色文字連結（同常用動作），一題一行，點了就問；畫面不寫「接著問」這類說明字樣 */
-function FollowUps({ questions, runner, className }: { questions: string[]; runner: Runner; className: string }) {
+/**
+ * 回答後的追問：墨色文字連結（同常用動作），一題一行，點了就問；畫面不寫「接著問」這類說明字樣。
+ * `marked`（模型的接著問，3–5 題，2026-11-26 產品負責人看 Google 財經的 prompt_suggestion）：每一行前面一個淡墨的 ↳，
+ * 和「←」「›」一樣是帶意思的記號（接著這則回答問），不是裝飾；不讀給螢幕閱讀器。
+ */
+function FollowUps({ questions, runner, className, marked = false }: { questions: string[]; runner: Runner; className: string; marked?: boolean }) {
   return (
     <ul aria-label="接著問" className={cn("flex flex-col text-md", className)}>
       {questions.map((q) => (
-        <li key={q}>
+        <li key={q} className={cn(marked && "flex items-start gap-2")}>
+          {marked && <CornerDownRightIcon aria-hidden className="mt-2.5 size-4 shrink-0 text-ink-2 pointer-coarse:mt-3.5" />}
           <button type="button" onClick={() => void runner.submit(q)} className={textLink}>
             {q}
           </button>

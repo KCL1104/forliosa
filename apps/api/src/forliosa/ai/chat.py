@@ -81,7 +81,7 @@ from forliosa import plans
 from forliosa.ai import grounding, research, scope, store, tw_news
 from forliosa.ai.keypool import Failure, KeyPool, KeysBusy, KeySlot, NoKeyAvailable, classify_failure
 from forliosa.ai.pricing import CallUsage
-from forliosa.ai.prompts import DISCLAIMER, EDITOR_SYSTEM, OFF_TOPIC_REPLY, chat_system, page_context
+from forliosa.ai.prompts import DISCLAIMER, EDITOR_SYSTEM, OFF_TOPIC_REPLY, chat_system, is_lookahead, page_context
 from forliosa.ai.tools import (
     CHAT_BLOCKED_DOMAINS,
     FOLLOW_UPS_TOOL,
@@ -169,6 +169,9 @@ class TurnState:
     # logged, sent or stored)
     redact: dict[str, str] = field(default_factory=dict)
     private_texts: list[str] = field(default_factory=list)
+    # suggest_follow_ups called before any answer text (refused, ``FOLLOW_UPS_EARLY``): its questions, used when the
+    # model does not ask again after the answer
+    early_follow_ups: list[str] = field(default_factory=list)
 
     def add_text(self, s: str) -> None:
         self.display.text += s
@@ -828,6 +831,8 @@ class _HeadingFilter:
         return "".join(out)
 
 
+FOLLOW_UPS_EARLY = ("還沒有寫回答：使用者目前看不到任何回答文字（思考的內容不會顯示）。現在把完整的回答寫出來，"
+                    "寫完再呼叫 suggest_follow_ups。")
 # suggest_follow_ups written as text on a line of its own (``ChatTurn._written_follow_ups``)
 _WRITTEN_FOLLOW_UPS = re.compile(r"\n?[ \t]*`?suggest_follow_ups\s*\(\s*(\{.*?\})\s*\)`?[ \t]*(?=\n|$)", re.S)
 
@@ -940,6 +945,15 @@ class ChatTurn:
         if self.why is not None and self.why.entry is not None:  # the shared research this turn answers from
             text += "\n" + research.note(self.why, tw_news=self.tw_news_on)
         return text
+
+    def _first_model(self, message: str) -> str:
+        """A new conversation's model: ``AI_MODEL_LOOKAHEAD`` when it starts with a look-ahead question (not in
+        省錢模式, which keeps the cheaper chat model), else the chat model. The thread keeps it for every turn."""
+        chat_model = store.model_for("chat", self.settings)
+        ahead = (self.settings.ai_model_lookahead or "").strip()
+        if ahead and not self.economy and is_lookahead(message):
+            return ahead
+        return chat_model
 
     def _find_research(self, message: str, symbol: str | None) -> research.Lookup | None:
         """The shared research of a why-question (not in 深度搜尋, which researches on its own); best effort."""
@@ -1256,7 +1270,7 @@ class ChatTurn:
         db, settings = self.db, self.settings
         self.deep = mode == "deep" and settings.ai_web_search and not self.economy
         created = thread_id is None
-        thread = (store.create_thread(db, self.user, message, store.model_for("chat", settings)) if created
+        thread = (store.create_thread(db, self.user, message, self._first_model(message)) if created
                   else store.owned_thread(db, self.user, thread_id))
         self.thread = thread
         yield "thread", {"id": thread.id, "title": thread.title, "created": created}
@@ -1299,6 +1313,10 @@ class ChatTurn:
             self._route()
             ok = yield from self._loop(thread, new, state, ctx)
             yield from self._written_follow_ups(state)
+            if ok and not state.display.follow_ups and state.early_follow_ups and state.display.text.strip():
+                # asked too early and not again after the answer (QA 2026-11-26, Sonnet 2 of 2): the early questions
+                state.display.follow_ups = state.early_follow_ups
+                yield "follow_ups", {"questions": state.display.follow_ups}
             flagged = grounding.check(state.display.text, state.segments) if ok and state.used_web else []
             if state.held_from is not None:
                 flagged = yield from self._edit(thread, state, flagged, edit=ok and state.display.error is None
@@ -1652,6 +1670,17 @@ class ChatTurn:
         """suggest_follow_ups: kept on the turn (the last valid call wins), no progress line; its tool results."""
         out: dict[str, dict[str, Any]] = {}
         for tu in asks:
+            if not state.display.text.strip():
+                from forliosa.ai.market_tools import clean_follow_ups
+
+                state.early_follow_ups = clean_follow_ups((tu.input or {}).get("questions")
+                                                          if isinstance(tu.input, dict) else None)
+                # called before any answer text (QA 2026-11-26, Sonnet, 2 of 4 runs: right after draw_chart, the answer
+                # drafted only in its thinking, then 「已顯示在回答下方。」 or 「以上是 11/27 的整理。」 as the whole
+                # answer): not kept; an error that says the user has seen nothing yet
+                out[tu.id] = {"type": "tool_result", "tool_use_id": tu.id, "content": FOLLOW_UPS_EARLY,
+                              "is_error": True}
+                continue
             outcome = execute(ctx, tu.name, tu.input)
             result: dict[str, Any] = {"type": "tool_result", "tool_use_id": tu.id, "content": outcome.content}
             if outcome.is_error:
