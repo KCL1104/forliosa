@@ -3,6 +3,8 @@ cap, ETF pages by tracked index and holders — through the API under DATA_POLIC
 
 from __future__ import annotations
 
+from datetime import date
+
 API = "/api/v1"
 
 
@@ -12,7 +14,12 @@ def related(client, symbol):
     return r.json()
 
 
-def test_tsmc_benchmark_affiliate_and_peers(client, stock_archive):
+def test_tsmc_benchmark_affiliate_and_peers(client, stock_archive, monkeypatch):
+    # the sparkline is the closes of the 35 days before today (SPARK_DAYS); the archive's closes end 11/11, so today
+    # is the archive's evening: with the real date the window slid past them (CI on 2026-11-27: 14 closes, not 15)
+    from forliosa.services import related as related_svc
+
+    monkeypatch.setattr(related_svc, "today_taipei", lambda: date(2026, 11, 12))
     out = related(client, "2330.TW")
     cards = out["items"]
     assert [(c["symbol"], c["reason"]) for c in cards] == [
