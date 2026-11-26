@@ -100,9 +100,69 @@ export function tidyAnswer(text: string, { titles = [], year }: TidyOptions = {}
   return out.replace(/(^[-*・][ \t][^\n]*)\n[ \t]*\n(?=[-*・][ \t])/gm, "$1\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "")
 }
 
+/**
+ * 模型談自己的三種固定寫法（2026-11-26 常見問題實測：24 題裡 7 題有），系統提示也禁止，這裡是安全網，只拿掉整句或句首的那一段：
+ * - 開頭交代要做什麼的一行：「我先查兩檔的基本資料、估值與財報。」
+ * - 說自己不替使用者決定：「我不能替你判斷現在該不該買。」「我不替你選一檔。」「我可以提供的是…」；
+ *   後面接「，但…」或「，這要看…」的，只拿掉前半（「我不能替你決定要不要停損，但目前的數字是：…」→「目前的數字是：…」）。
+ * - 結尾的提議與交代資料的句子（寫完才拿，串流中不動，免得字閃掉）：「…可以再問我。」「我可以幫你整理。」
+ *   「收盤數字以官方資料為準。」「以上是媒體整理的…」——句子裡有數字的不動。
+ */
+const PREAMBLE = /^(?:[^。\n]{0,60}[，,])?(?:好的?[，,]\s*)?我(?:先|來|會)?(?:幫你)?(?:查|看|確認|整理|搜尋|比對)[^。\n]{0,40}[。…]?[ \t]*$/
+/** 模型把接著問寫成文字（後端也會拿掉並轉成接著問；串流中寫到一半也先藏起來） */
+const WRITTEN_CALL = /^[ \t]*`?suggest_follow_ups\b.*$/gm
+/** 到第一個逗號或句尾為止；「，但可以把幾個面向講清楚。」這種接著談自己的尾巴一起拿掉 */
+const OFFER_TAIL = "(?:我)?(?:可以|能)(?:把|幫你|替你|提供|整理|說明)[^。！？\\n]*[。！？]"
+const NOT_DECIDING = new RegExp(`我(?:不能|無法|沒辦法|不會|不)?(?:替|幫|為)你(?:判斷|決定|選|挑|推薦)[^。！？\\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?(?:${OFFER_TAIL})?)`, "g")
+const CANNOT_JUDGE = /我(?:不能|無法|沒辦法)(?:判斷|決定|預測|保證|告訴你)[^。！？\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?)/g
+/** 「我可以…」到句尾；同一句前面沒有數字時整句拿掉（「你可以到帳本看殖利率，我可以幫你整理。」） */
+const OFFER_SENTENCE = /(^|[。！？\n])([^。！？\n]*?)我可以(?:提供|幫你|替你|整理|說明|再)[^。！？\n]*[。！？]/g
+const TRAIL_OFFER = /再問我|問我|告訴我|我可以|需要的話|歡迎再|不替你(?:決定|判斷|選)/
+/** 對著沒說過的話認錯（「你說的沒錯，我把 11/26 的走勢寫錯了。」「下面的內容請以這個為準。」）：整句拿掉 */
+const OWN_CORRECTION = /(^|[。！？\n])[^。！？\n]*(?:你說的(?:沒錯|對)|我(?:把|先前|剛才|前面)[^。！？\n]{0,24}(?:寫錯|說錯|弄錯|搞錯)|請以(?:這個|此|上面|下面)為準)[^。！？\n]*[。！？]/g
+/** 句中交代自己接著要做什麼：「…目前沒有，我再找公開資料。」 */
+const NARRATION = /(^|[。！？\n])[^。！？\n]*我(?:再|先|來)(?:找|查|看|搜尋|確認)[^。！？\n]*[。！？]/g
+const TRAIL_FILLER = /以[^。]{0,12}為準|^以上(?:是|為)?[^。]*(?:整理|統計|資料|數據|數字|報導)|不是 ?Forliosa/
+/** 交代資料的結尾句裡的日期，回答別的地方都寫過了才算沒有新資訊 */
+const DATES = /\d{1,2}\/\d{1,2}/g
+
+export function dropAiHabits(text: string, { streaming = false }: { streaming?: boolean } = {}): string {
+  const lines = text.split("\n")
+  const first = lines.findIndex((l) => l.trim())
+  if (first >= 0 && PREAMBLE.test(lines[first]!.trim()) && lines.slice(first + 1).some((l) => l.trim())) lines.splice(first, 1)
+  let out = lines.join("\n").replace(WRITTEN_CALL, "").replace(/^[ \t]*<br\s*\/?>[ \t]*$/gim, "")
+  const narrated = out.replace(OWN_CORRECTION, "$1").replace(NARRATION, "$1")
+  out = (narrated.trim() ? narrated : out).replace(NOT_DECIDING, "").replace(CANNOT_JUDGE, "").replace(OFFER_SENTENCE, (_m, lead: string, before: string) => lead + (/\d/.test(before) ? before.replace(/[，,、\s]+$/, "。") : ""))
+  if (!streaming) {
+    // 結尾：最後一行從後面往前，拿掉沒有數字的提議或交代資料的句子；整行都拿掉時換上一行
+    const rows = out.replace(/\s+$/, "").split("\n")
+    while (rows.length) {
+      const sentences = rows[rows.length - 1]!.match(/[^。！？]+[。！？]?/g) ?? []
+      let keep = sentences.length
+      while (keep > 0) {
+        const s = sentences[keep - 1]!.trim()
+        const elsewhere = [...rows.slice(0, -1), ...sentences.slice(0, keep - 1)].join("\n")
+        const datesOnly = /^以上/.test(s) && (s.match(DATES) ?? []).every((d) => elsewhere.includes(d)) && !/\d/.test(s.replace(DATES, ""))
+        if ((/\d/.test(s) && !datesOnly) || !(TRAIL_OFFER.test(s) || TRAIL_FILLER.test(s))) break
+        keep--
+      }
+      if (keep === sentences.length) break
+      const rest = sentences.slice(0, keep).join("").replace(/\s+$/, "")
+      if (rest.replace(/^\s*[-*]\s*/, "").trim()) {
+        rows[rows.length - 1] = rest
+        break
+      }
+      rows.pop()
+      while (rows.length && !rows[rows.length - 1]!.trim()) rows.pop()
+    }
+    out = rows.join("\n")
+  }
+  return out.replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "")
+}
+
 /** 顯示用：舊的「・」條列換成 Markdown 清單，再整理固定的小毛病 */
 export function displayAnswer(text: string, opts: TidyOptions & { streaming?: boolean } = {}): string {
-  return tidyAnswer(cleanAnswer(text, { streaming: opts.streaming }), opts)
+  return dropAiHabits(tidyAnswer(cleanAnswer(text, { streaming: opts.streaming }), opts), { streaming: opts.streaming })
 }
 
 /**

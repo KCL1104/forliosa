@@ -12,7 +12,7 @@ nothing about the whole market. These read what the market page and the market r
 * ``get_market_report`` — the newest published 盤前重點／盤後重點／市場週報: each news page the report cites becomes a
   citable search result holding the report's sentences that cite it, so the answer links the original article.
 * ``get_watchlist`` — the user's watchlist with the latest official close.
-* ``suggest_follow_ups`` — 2–3 questions shown under the answer (``FOLLOW_UPS``); the chat ends the turn when it is the
+* ``suggest_follow_ups`` — 3–5 questions shown under the answer (``FOLLOW_UPS``); the chat ends the turn when it is the
   only tool left, without another model call (``forliosa.ai.chat``).
 
 All of them are read-only and use no web search. The stocks they name are picked by stated rules (yours, market cap,
@@ -32,7 +32,7 @@ from typing import Any
 from sqlalchemy import select
 
 from forliosa.ai.tools import Citable, ToolContext, ToolError
-from forliosa.models import WatchlistItem
+from forliosa.models import MarketEvent, WatchlistItem
 from forliosa.reports import calendars as cal
 from forliosa.reports import marketcalc as mc
 from forliosa.timeutil import TAIPEI, next_tw_trading_day, now_utc
@@ -41,6 +41,7 @@ log = logging.getLogger(__name__)
 
 CALENDAR_MAX_DAYS = 14
 CALENDAR_MAX_LISTED = 40
+CALENDAR_MAX_ONE_KIND = 80  # a question about one kind (「這週有哪些法說會」「最近哪些要除息」) lists them all
 TOP_RANK = 100  # the reports' 「市值前 100 名」 (``marketcalc.EVENT_RANK``)
 OTHER_EXAMPLES = 5
 MOVERS_N = 10
@@ -48,7 +49,7 @@ SECTORS_N = 5
 LIMIT_N = 10
 REPORT_KINDS = ("latest", "premarket", "close", "weekly")
 REPORT_SENTENCES_MAX = 40
-FOLLOW_UPS_MAX = 3
+FOLLOW_UPS_MAX = 5
 FOLLOW_UP_CHARS = (4, 40)
 # A follow-up the user would ask us to decide for them: never offered (the content line of PRODUCT.md)
 _ADVICE = re.compile(r"該不該(?:買|賣|加碼|減碼|出場|進場)|要不要(?:買|賣|加碼|減碼|出場|進場)|可以(?:買|進場|加碼)|"
@@ -127,9 +128,57 @@ def _md(d: date) -> str:
     return f"{d.month}/{d.day}"
 
 
+def pct(x: Any) -> str | None:
+    """0.0251 → 「+2.51%」, −0.012 → 「−1.20%」: written out, so the model never reads a fraction as a percentage
+    (QA 2026-11-26: TAIEX ▲2.5% came back as 「漲 0.03%」 from 0.025)."""
+    if x is None:
+        return None
+    v = float(x) * 100
+    return f"{'+' if v > 0 else '−' if v < 0 else ''}{abs(v):.2f}%"
+
+
 # -- get_market_calendar -----------------------------------------------------------------------------------------
-def _event_out(e: cal.CalEvent, yours: str | None) -> dict[str, Any]:
+def _kind_arg(args: dict[str, Any]) -> str | None:
+    """「法說會」 or ``investor_conference`` (either the label or the key); None for every kind."""
+    raw = str(args.get("kind") or "").strip()
+    if not raw:
+        return None
+    by_label = {v: k for k, v in cal.KIND_LABELS.items()}
+    aliases = {"除息": "ex_dividend", "除權": "ex_dividend", "處置": "disposition", "注意": "attention"}
+    kind = raw if raw in cal.KIND_LABELS else by_label.get(raw) or aliases.get(raw)
+    if kind is None:
+        raise ToolError(f"kind 可以是 {'、'.join(cal.KIND_LABELS.values())}，或空字串（全部）")
+    return kind
+
+
+def _dividends(ctx: ToolContext, start: date, end: date) -> dict[tuple[str, date], dict[str, Any]]:
+    """(symbol, ex date) -> the official row's cash dividend per share and stock ratio (``market_events.data``)."""
+    rows = ctx.db.execute(select(MarketEvent.symbol, MarketEvent.date, MarketEvent.data).where(
+        MarketEvent.type == "ex_dividend", MarketEvent.date >= start, MarketEvent.date <= end))
+    return {(sym, d): data or {} for sym, d, data in rows}
+
+
+def _amount(data: dict[str, Any] | None) -> str | None:
+    """「每股現金 0.33 元」「每股現金 4 元、每千股配 50 股」; 「金額還沒公告」 when the row has no amount yet."""
+    if data is None:
+        return None
+    parts = []
+    for key, fmt in (("cash", "每股現金 {} 元"), ("stock_ratio", "每千股配 {} 股")):
+        raw = data.get(key)
+        try:
+            value = float(raw) if raw not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            value = 0.0
+        if value > 0:
+            shown = value * 1000 if key == "stock_ratio" else value  # the ratio is shares per share (×10 = 元)
+            parts.append(fmt.format(f"{shown:,.4f}".rstrip("0").rstrip(".")))
+    return "、".join(parts) or "金額還沒公告"
+
+
+def _event_out(e: cal.CalEvent, yours: str | None, amounts: dict[tuple[str, date], dict[str, Any]]) -> dict[str, Any]:
     out: dict[str, Any] = {"date": e.date.isoformat(), "kind": e.kind_label, "title": e.title}
+    if e.kind == "ex_dividend" and (amount := _amount(amounts.get((e.symbol or "", e.date)))):
+        out["amount"] = amount
     if e.time_label:
         out["time"] = e.time_label
     if code := _code(e.symbol):
@@ -155,10 +204,13 @@ def market_calendar(ctx: ToolContext, args: dict[str, Any]) -> Any:
     if (end - start).days >= CALENDAR_MAX_DAYS:
         end = start + timedelta(days=CALENDAR_MAX_DAYS - 1)
         notes.append(f"一次最多查 {CALENDAR_MAX_DAYS} 天：只查到 {_md(end)}")
+    kind = _kind_arg(args)
     events = cal.events_between(ctx.db, start, end, cutoff=now, policy=ctx.md.policy, include_filings=False)
+    if kind is not None:
+        events = [e for e in events if e.kind == kind]
     mine = _mine(ctx)
     ranks = _mcap_ranks([_latest_day(ctx, "TWSE", now), _latest_day(ctx, "TPEX", now)])
-    far = len(ranks) + 1
+    far = 10**9  # not ranked (no close, an ETF): after every ranked company, never among the largest
 
     def rank(e: cal.CalEvent) -> int:
         return ranks.get(e.symbol or "", far)
@@ -168,16 +220,20 @@ def market_calendar(ctx: ToolContext, args: dict[str, Any]) -> Any:
     yours = [e for e in events if e.symbol in mine]
     wide = [e for e in events if e.symbol in (None, "MARKET") or e.kind in ("us_earnings", "us_holiday", "macro")]
     picked = {id(e) for e in yours + wide}
-    room = max(0, CALENDAR_MAX_LISTED - len(picked))
-    big = sorted((e for e in events if id(e) not in picked and rank(e) < TOP_RANK), key=rank)[:room]
-    picked |= {id(e) for e in big}
+    room = max(0, (CALENDAR_MAX_ONE_KIND if kind else CALENDAR_MAX_LISTED) - len(picked))
+    if kind is not None:  # one kind: every company, largest first, up to the cap
+        big = sorted((e for e in events if id(e) not in picked), key=rank)[:room]
+        picked |= {id(e) for e in big}
+    else:
+        big = sorted((e for e in events if id(e) not in picked and rank(e) < TOP_RANK), key=rank)[:room]
+        picked |= {id(e) for e in big}
     listed = [e for e in events if id(e) in picked]
     rest: dict[str, list[cal.CalEvent]] = defaultdict(list)
     for e in events:
         if id(e) not in picked:
             rest[e.kind_label].append(e)
     others = []
-    for kind, rows in rest.items():
+    for label, rows in rest.items():
         names = []
         for e in sorted(rows, key=rank):
             name = e.title.split("（")[0] if "（" in e.title else e.title
@@ -185,13 +241,18 @@ def market_calendar(ctx: ToolContext, args: dict[str, Any]) -> Any:
                 names.append(name)
             if len(names) >= OTHER_EXAMPLES:
                 break
-        others.append({"kind": kind, "count": len(rows), "examples": names})
+        others.append({"kind": label, "count": len(rows), "examples": names})
+    amounts = _dividends(ctx, start, end) if any(e.kind == "ex_dividend" for e in listed) else {}
     out: dict[str, Any] = {
         "from": start.isoformat(), "to": end.isoformat(), "next_tw_trading_day": nxt.isoformat(),
-        "events": [_event_out(e, mine.get(e.symbol or "")) for e in listed],
+        "events": [_event_out(e, mine.get(e.symbol or ""), amounts) for e in listed],
         "others": others,
-        "rules": ("列出的是：你持有或在觀察清單裡的（yours）、全市場的事件（結算日、總經數據、美股財報與休市），"
-                  f"以及市值前 {TOP_RANK} 名的公司；其他公司只算件數，examples 是其中市值較大的幾家"),
+        "rules": ((f"只查{cal.KIND_LABELS[kind]}：全部列出（最多 {CALENDAR_MAX_ONE_KIND} 筆，你的先列，其他依市值）"
+                   if kind else
+                   "列出的是：你持有或在觀察清單裡的（yours）、全市場的事件（結算日、總經數據、美股財報與休市），"
+                   f"以及市值前 {TOP_RANK} 名的公司；其他公司只算件數，examples 是其中市值較大的幾家。"
+                   "問某一種事件（法說會、除權息…）時用 kind 再查一次就會全部列出")
+                  + "；除權息的 amount 是官方公告的每股股利"),
     }
     if not events:
         notes.append(f"{_md(start)}" + (f"–{_md(end)}" if end != start else "") + " 沒有已排定的事件")
@@ -202,9 +263,7 @@ def market_calendar(ctx: ToolContext, args: dict[str, Any]) -> Any:
 
 # -- get_market_overview -----------------------------------------------------------------------------------------
 def _quote_row(q: mc.Quote) -> dict[str, Any]:
-    pct = q.pct
-    return {"code": q.code, "name": q.name, "close": float(q.close),
-            "change_pct": round(float(pct), 4) if pct is not None else None}
+    return {"code": q.code, "name": q.name, "close": float(q.close), "change": pct(q.pct)}
 
 
 def _breadth(day: mc.Day | None) -> dict[str, Any] | None:
@@ -223,7 +282,7 @@ def _limits(days: list[mc.Day | None], side: int) -> list[dict[str, Any]]:
 
 def _mover(row: dict[str, Any]) -> dict[str, Any]:
     vol = row.get("volume")
-    return {"code": row["code"], "name": row["name"], "close": row["close"], "change_pct": row["change_pct"],
+    return {"code": row["code"], "name": row["name"], "close": row["close"], "change": pct(row["change_pct"]),
             "volume_lots": round(vol / 1000) if vol else None}
 
 
@@ -236,21 +295,22 @@ def market_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
     movers = snap.get("movers")
     sectors = (snap.get("sectors") or {}).get("items") or []
     out: dict[str, Any] = {
-        "indices": [{"name": i["name"], "close": i["value"], "change_pct": i["change_pct"], "date": i["date"]}
+        "indices": [{"name": i["name"], "close": i["value"], "change": pct(i["change_pct"]), "date": i["date"]}
                     for i in snap.get("indices") or [] if i.get("key") in ("taiex", "tpex", "tx", "usdtwd")],
         "breadth": {k: v for k, v in (("上市", _breadth(twse)), ("上櫃", _breadth(tpex))) if v},
         "sectors_date": (snap.get("sectors") or {}).get("date"),
-        "sectors_best": [{"name": s["name"], "change_pct": s["change_pct"]} for s in sectors[:SECTORS_N]],
-        "sectors_worst": [{"name": s["name"], "change_pct": s["change_pct"]} for s in sectors[::-1][:SECTORS_N]],
+        "sectors_best": [{"name": s["name"], "change": pct(s["change_pct"])} for s in sectors[:SECTORS_N]],
+        "sectors_worst": [{"name": s["name"], "change": pct(s["change_pct"])} for s in sectors[::-1][:SECTORS_N]],
         "rankings_date": movers["date"] if movers else None,
         "gainers": [_mover(r) for r in (movers or {}).get("gainers", [])[:MOVERS_N]],
         "losers": [_mover(r) for r in (movers or {}).get("losers", [])[:MOVERS_N]],
         "most_traded": [_mover(r) for r in (movers or {}).get("volume", [])[:MOVERS_N]],
-        "limit_up": _limits([twse, tpex], 1),
-        "limit_down": _limits([twse, tpex], -1),
-        "units": ("change_pct 是分數（0.0123＝1.23%），漲跌從當天的參考價算；volume_lots 是成交張數；"
-                  "類股是上市的類股指數；"
-                  "排行與漲跌停只算普通股（上市與上櫃一起），漲跌停依成交值大到小"),
+        "limit_up_top_by_value": _limits([twse, tpex], 1),
+        "limit_down_top_by_value": _limits([twse, tpex], -1),
+        "units": ("change 是漲跌幅（已經是百分比，照寫），從當天的參考價算；volume_lots 是成交張數；"
+                  "類股是上市的類股指數；排行只算普通股（上市與上櫃一起）。"
+                  f"limit_up_top_by_value／limit_down_top_by_value 只是漲停／跌停股裡成交值最大的 {LIMIT_N} 檔，"
+                  "漲停、跌停的家數看 breadth 的 limit_up、limit_down"),
     }
     if not movers and not out["indices"]:
         out["notes"] = ["目前沒有最近一個交易日的收盤資料"]
@@ -325,13 +385,56 @@ def watchlist(ctx: ToolContext, args: dict[str, Any]) -> Any:
         q = quotes.get(s)
         if q is not None and q.price is not None:
             out = quote_out(q)
-            row.update({"close": out["price"], "change_pct": out["change_pct"],
+            row.update({"close": out["price"], "change": pct(out["change_pct"]),
                         "date": out["trade_date"] or (out["as_of"] or "")[:10] or None, "is_demo": out["is_demo"]})
         else:
             row["has_quote"] = False
         items.append(row)
     return {"count": len(items), "items": items,
-            "units": "close 是最近的官方收盤（美股是美元）；change_pct 是分數（0.0123＝1.23%）"}
+            "units": "close 是最近的官方收盤（美股是美元）；change 是那天的漲跌幅（已經是百分比，照寫）"}
+
+
+# -- get_performance ---------------------------------------------------------------------------------------------
+PERFORMANCE_RANGES = ("MTD", "1M", "3M", "6M", "YTD", "1Y", "ALL")
+RANGE_WORDS = {"MTD": "這個月", "1M": "近 1 個月", "3M": "近 3 個月", "6M": "近 6 個月", "YTD": "今年以來",
+               "1Y": "近 1 年", "ALL": "開始記帳以來"}
+
+
+def performance(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """The ledger's return over a period (``services.portfolio.performance``, the 績效 page's numbers): the
+    time-weighted return against the user's benchmark, and the amounts the app shows — 賺的 is the change of
+    ``market_value − net_invested`` (dividends apart), with the dividends and the realized gains of the window."""
+    from forliosa.services import portfolio as svc
+
+    range_ = str(args.get("range") or "YTD").strip().upper() or "YTD"
+    if range_ not in PERFORMANCE_RANGES:
+        raise ToolError(f"range 只能是 {'、'.join(PERFORMANCE_RANGES)}")
+    perf = svc.performance(ctx.db, ctx.user, ctx.md, range_, None, None)
+    series = perf.get("series") or []
+    if not series:
+        return {"range": RANGE_WORDS[range_], "status": "none", "notes": perf.get("notes") or ["帳本還沒有交易"]}
+    first, last = series[0], series[-1]
+
+    def gain(p: dict[str, Any]) -> float:
+        return float(p["market_value"] or 0) - float(p["net_invested"] or 0)
+
+    dividends = sum(float(m["amount"] or 0) for m in perf.get("dividends_by_month") or [])
+    realized = sum(float(y["amount"] or 0) for y in perf.get("realized_by_year") or [])
+    bench = perf.get("benchmark") or {}
+    return {
+        "range": RANGE_WORDS[range_], "from": first["t"], "to": last["t"],
+        "return": pct(perf.get("twr")), "benchmark": bench.get("name"), "benchmark_return": pct(bench.get("twr")),
+        "max_drawdown": pct(perf.get("max_drawdown")),
+        "gain_twd": round(gain(last) - gain(first)),
+        "dividends_twd": round(dividends), "realized_twd": round(realized),
+        "market_value_twd": {"from": first["market_value"], "to": last["market_value"]},
+        "units": ("return 是這段期間的時間加權報酬率（不受加碼、減碼影響），benchmark_return 是同期的基準；"
+                  "gain_twd 是這段期間賺的（市值減本金的變化，含還沒賣的漲跌與已實現損益，不含股利），"
+                  "dividends_twd 是期間入帳的股利，realized_twd 是期間賣出的已實現損益（已經算在 gain_twd 裡）；"
+                  "金額是新台幣"),
+        "notes": perf.get("notes") or [],
+        "is_demo": perf.get("is_demo", False),
+    }
 
 
 # -- suggest_follow_ups ------------------------------------------------------------------------------------------
@@ -357,6 +460,6 @@ def clean_follow_ups(raw: Any) -> list[str]:
 def suggest_follow_ups(ctx: ToolContext, args: dict[str, Any]) -> Any:
     questions = clean_follow_ups(args.get("questions"))
     if not questions:
-        raise ToolError("questions 要是 2–3 個簡短的問題（每個 4–40 字，不問該不該買賣）")
+        raise ToolError("questions 要是 3–5 個簡短的問題（每個 4–40 字，不問該不該買賣）")
     ctx.follow_ups[:] = questions
     return "已顯示在回答下方。不要再寫任何文字。"

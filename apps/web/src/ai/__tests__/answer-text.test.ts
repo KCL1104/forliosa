@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cleanAnswer, DISCLAIMER, groundingReason, markNeedle, parseGrounding, splitUngrounded, stripDisclaimer, tidyAnswer } from "@/ai/answer-text"
+import { cleanAnswer, DISCLAIMER, dropAiHabits, groundingReason, markNeedle, parseGrounding, splitUngrounded, stripDisclaimer, tidyAnswer } from "@/ai/answer-text"
 import { applyChatEvent } from "@/ai/remote"
 import type { Message } from "@/ai/types"
 
@@ -131,5 +131,58 @@ describe("tidyAnswer：模型固定的小毛病交給程式整理", () => {
 
   it("「無來源」的段落：整理過、拿掉格式記號之後，和畫面上的字對得上", () => {
     expect(markNeedle("- **除息**：006208 已公告 115 年 11 月 17 日除息（公開資訊觀測站）。", { year })).toBe("除息：006208 已公告 11/17 除息。")
+  })
+})
+
+describe("dropAiHabits：模型談自己的固定寫法（2026-11-26 常見問題實測）", () => {
+  it("開頭交代要做什麼的一行拿掉；只有這一行時不動", () => {
+    expect(dropAiHabits("我先查兩檔的基本資料、估值與財報。\n\n兩檔各有優勢。")).toBe("兩檔各有優勢。")
+    expect(dropAiHabits("我先查一下。")).toBe("我先查一下。")
+    expect(dropAiHabits("台積電 11/26 收 2,145 元。")).toBe("台積電 11/26 收 2,145 元。")
+  })
+
+  it("說自己不替使用者決定：整句拿掉；接「，但…」只拿掉前半，後面的事實留著", () => {
+    expect(dropAiHabits("我不能替你判斷現在該不該買。以下是台積電的資料。")).toBe("以下是台積電的資料。")
+    expect(dropAiHabits("我不能替你決定要不要停損，但目前的數字是：你持有鴻海 5,000 股。")).toBe("目前的數字是：你持有鴻海 5,000 股。")
+    expect(dropAiHabits("這沒有標準答案，要看你的投資期間。我不替你判斷好不好，但可以把幾個面向講清楚。")).toBe("這沒有標準答案，要看你的投資期間。")
+    expect(dropAiHabits("我不能判斷現在適不適合進場，這要看你自己的資金。我可以提供的是目前的市場與你持股的事實。")).toBe("這要看你自己的資金。")
+    expect(dropAiHabits("我不替你選一檔。這三檔的差別在配息。")).toBe("這三檔的差別在配息。")
+    // 不是在說自己的不動
+    expect(dropAiHabits("券商不能替你決定，法人也是。")).toBe("券商不能替你決定，法人也是。")
+  })
+
+  it("結尾的提議與交代資料的句子：寫完才拿；有數字的句子不動", () => {
+    const answer = "集中度偏高。\n\n- 台積電佔 36%。\n\n如果你想看某一檔的走勢，告訴我股票代號就可以查。"
+    expect(dropAiHabits(answer)).toBe("集中度偏高。\n\n- 台積電佔 36%。")
+    expect(dropAiHabits(answer, { streaming: true })).toBe(answer)
+    expect(dropAiHabits("外資連 9 天賣超。\n\n以上是媒體整理的外資買賣超統計，不是 Forliosa 的逐檔數據。")).toBe("外資連 9 天賣超。")
+    expect(dropAiHabits("台股漲 2.5%。\n\n收盤數字以官方資料為準。")).toBe("台股漲 2.5%。")
+    expect(dropAiHabits("最高到 4,410 元。這些是較早的消息，之後的調整以最新消息為準。")).toBe("最高到 4,410 元。")
+    expect(dropAiHabits("你可以到帳本看殖利率，我可以幫你整理。")).toBe("")
+    expect(dropAiHabits("如果想比較，可以再問我 3 個問題。")).toBe("如果想比較，可以再問我 3 個問題。")
+    expect(dropAiHabits("目前沒有下一次除息日期的資料。")).toBe("目前沒有下一次除息日期的資料。")
+  })
+
+  it("第二輪實測：寫成文字的接著問、<br>、「…，我先查…」的開場、「以上…資料」的結尾", () => {
+    expect(dropAiHabits('算不出來。\n\nsuggest_follow_ups({"questions": ["a？"]})')).toBe("算不出來。")
+    expect(dropAiHabits("算不出來。\n\nsuggest_follow_ups({\"ques", { streaming: true })).toBe("算不出來。\n\n")
+    expect(dropAiHabits("- 11/27 除權。\n\n<br>\n\n- 12/1 除息。")).toBe("- 11/27 除權。\n\n- 12/1 除息。")
+    expect(dropAiHabits("判斷高股息 ETF 通常看殖利率，我先查幾檔常見的標的。\n\n選哪一檔，通常看選股邏輯。")).toBe("選哪一檔，通常看選股邏輯。")
+    expect(dropAiHabits("- 神達 11/27 除權。\n\n以上日期與金額為官方公告資料。")).toBe("- 神達 11/27 除權。")
+    // 日期只寫在這一句：留著
+    expect(dropAiHabits("電子零組件最強。\n\n以上是 11/26 收盤數據。")).toBe("電子零組件最強。\n\n以上是 11/26 收盤數據。")
+    expect(dropAiHabits("| 收盤（11/26） | 2,145 元 |\n\n以上是收盤後的官方資料，本益比為 11/26 的數字。")).toBe("| 收盤（11/26） | 2,145 元 |")
+  })
+
+  it("第三輪實測：句中的「我再找…」與結尾的「這裡不替你決定」", () => {
+    expect(dropAiHabits("三檔的收盤價已查到，但費用目前沒有，我再找公開資料。這三檔差在選股方式。\n\n| a | b |")).toBe("這三檔差在選股方式。\n\n| a | b |")
+    expect(dropAiHabits("- 美銀 11/17 重申 3,260 元。\n\n以上是目前能查到的資料。買或不買取決於你的持股比例，這裡不替你決定。")).toBe("- 美銀 11/17 重申 3,260 元。")
+    expect(dropAiHabits("台股漲 2.5%。\n\n以上原因來自盤中報導，收盤後的完整原因目前沒有更多報導可引用。")).toBe("台股漲 2.5%。")
+  })
+
+  it("第四輪實測：對著沒說過的話認錯", () => {
+    expect(
+      dropAiHabits("你說的沒錯，我把 11/26 的走勢寫錯了。鴻海 11/26 收 216.5 元，漲 4.8%。下面的內容請以這個為準。\n\n- 11/25 一度跌停。"),
+    ).toBe("鴻海 11/26 收 216.5 元，漲 4.8%。\n\n- 11/25 一度跌停。")
   })
 })

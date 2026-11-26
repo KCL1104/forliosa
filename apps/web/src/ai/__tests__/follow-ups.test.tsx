@@ -32,7 +32,7 @@ describe("follow_ups 事件與對話紀錄", () => {
     expect(m.followUps).toEqual(["台達電配多少股利？", "台積電法說會說了什麼？"])
     expect(applyChatEvent(start, { event: "follow_ups", data: { questions: [] } })).toBe(start)
     expect(followUpsOf("台達電？")).toEqual([])
-    expect(followUpsOf(["一", "二", "三", "四"])).toEqual(["一", "二", "三"])
+    expect(followUpsOf(["一", "二", "三", "四", "五", "六"])).toEqual(["一", "二", "三", "四", "五"])
   })
 
   it("重新打開對話時帶回來；舊的紀錄沒有這個欄位也沒關係", () => {
@@ -80,6 +80,31 @@ describe("回答下方的接著問", () => {
     // 免責在接著問的下面（一段對話一次）
     const disclaimer = screen.getByText(/AI 只替你整理資訊/)
     expect(lists[0]!.compareDocumentPosition(disclaimer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // 每一行前面一個淡墨的 ↳（不讀給螢幕閱讀器）
+    expect(lists[0]!.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(2)
+  })
+
+  it("緊接在回答下面、出處上面", () => {
+    withQuery(
+      <Conversation
+        thread={thread([
+          { id: "u1", role: "user", text: "台積電最近怎麼了？", at },
+          {
+            id: "a1",
+            role: "ai",
+            model: true,
+            text: "台積電 11/26 收 2,145 元。",
+            citations: [{ url: "https://www.cna.com.tw/news/1", title: "台積電法說會", cited_text: "x" }],
+            followUps: ["台積電法說會說了什麼？", "台積電的本益比和過去五年比如何？", "台積電下次除息是什麼時候？"],
+            at,
+          },
+        ])}
+        runner={runner}
+      />,
+    )
+    const list = screen.getByRole("list", { name: "接著問" })
+    const source = screen.getByRole("link", { name: /台積電法說會/ })
+    expect(list.compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it("還在寫、或出錯的回答不顯示", () => {
