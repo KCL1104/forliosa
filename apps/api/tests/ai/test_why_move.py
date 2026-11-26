@@ -164,8 +164,10 @@ def test_overview_puts_the_taiex_and_the_sector_index_beside_the_stock(ctx, monk
 
     assert res["english_name"] == "TSMC"  # the foreign-news search
     m = res["market_context"]
-    assert m["taiex"] == {"name": "發行量加權股價指數", "date": "2026-11-13", "close": 43675.12, "change_pct": -0.0135}
+    assert m["taiex"] == {"name": "發行量加權股價指數", "date": "2026-11-13", "close": 43675.12, "change_pct": -0.0135,
+                          "pct_text": "−1.35%"}
     assert m["industry_index"]["name"] == "半導體類指數" and m["industry_index"]["change_pct"] == 0.0123
+    assert m["industry_index"]["pct_text"] == "+1.23%"
     # 2330 fell 4.76 %, the TAIEX 1.35 %: 3.41 percentage points more
     assert m["vs_taiex_pct_points"] == pytest.approx(-3.41, abs=0.01)
     assert "百分點" in m["note"] and "不是即時" in m["note"]

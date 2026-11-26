@@ -404,6 +404,11 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
                   "status", "progress", "board_date", "cash_sources", "is_demo") for d in divs]
     quote = _pick(instr.quote_out(q), "price", "prev_close", "reference_price", "change", "change_pct",
                   "volume", "as_of", "trade_date", "is_realtime", "is_demo") if q is not None else None
+    if quote is not None and quote.get("change_pct") is not None:
+        from forliosa.ai.market_tools import pct
+
+        # QA 2026-11-26: the TAIEX's 0.025 was written 「漲 0.03%」 beside this stock's move; both come written out
+        quote["pct_text"] = pct(quote["change_pct"])
     english = english_names(ctx.db, info)
     market = _market_context(ctx, info, quote)
     note = _intraday_note(info, q, now, _market_close(ctx, info, now))
@@ -427,8 +432,9 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
 # 「台達電今天為啥跌這麼多?」 (2026-11-16) got market-wide reasons only: nothing told the model how far the stock
 # moved against the market. get_stock_overview now carries the latest official index closes beside the stock's,
 # the rule-based anomalies (``why_reasons``) and, while today's close is not out, a note saying so.
-MARKET_CONTEXT_NOTE = ("官方收盤（收盤後公布，不是即時）；change_pct 為分數（0.0123＝1.23%）；vs_taiex_pct_points＝"
-                       "這一檔的漲跌幅減加權指數的漲跌幅（百分點，只在兩者是同一天時才有）")
+MARKET_CONTEXT_NOTE = ("官方收盤（收盤後公布，不是即時）；pct_text 是寫好的漲跌幅，回答照抄它（change_pct 是同一個"
+                       "數字的分數，0.025＝2.5%，不要自己換算）；vs_taiex_pct_points＝這一檔的漲跌幅減加權指數的漲跌幅"
+                       "（百分點，只在兩者是同一天時才有）")
 
 
 def _industry_index_name(industry: str | None) -> str | None:
@@ -449,8 +455,11 @@ def _index_close(ctx: ToolContext, name: str) -> dict[str, Any] | None:
     found = mo._index_item("", name, mo._index_rows(ctx.db, ctx.md, name), "")
     if found is None:
         return None
+    from forliosa.ai.market_tools import pct
+
     item = found[0]
-    return {"name": name, "date": item["date"], "close": item["value"], "change_pct": item["change_pct"]}
+    return {"name": name, "date": item["date"], "close": item["value"], "change_pct": item["change_pct"],
+            "pct_text": pct(item["change_pct"])}
 
 
 def _market_context(ctx: ToolContext, info: InstrumentInfo, quote: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1301,6 +1310,12 @@ def get_watchlist(ctx: ToolContext, args: dict[str, Any]) -> Any:
     return market_tools.watchlist(ctx, args)
 
 
+def get_performance(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.ai import market_tools
+
+    return market_tools.performance(ctx, args)
+
+
 def suggest_follow_ups(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.ai import market_tools
 
@@ -1534,12 +1549,17 @@ TOOLS: list[ToolSpec] = sorted([
              "of the user's own holdings and watchlist come first, marked yours (持有/觀察); market-wide rows and the "
              "100 largest companies by market cap are listed; the rest are counted by kind in others, with a few of "
              "the largest names. date_from and date_to are YYYY-MM-DD, \"\" for the next Taiwan trading day; at most "
-             "14 days. Call this for 明天/這週/下週 questions (what is scheduled, 看點, 要注意什麼), together with "
-             "get_market_overview.",
+             "14 days. kind narrows to one kind and then lists every company of it (largest first, up to 80): use it "
+             "when the question is about one kind (這週有哪些法說會、最近哪些股票除息). Ex-dividend rows carry amount "
+             "(the official cash dividend per share, or 金額還沒公告). Call this for 明天/這週/下週 questions (what "
+             "is scheduled, 看點, 要注意什麼), together with get_market_overview.",
              {"date_from": {"type": "string", "description": "YYYY-MM-DD, or \"\" for the next Taiwan trading day"},
-              "date_to": {"type": "string", "description": "YYYY-MM-DD, or \"\" for the same day as date_from"}},
-             ("date_from", "date_to"), get_market_calendar, lambda a: "查看行事曆", blank_ok=("date_from", "date_to"),
-             strict=False),
+              "date_to": {"type": "string", "description": "YYYY-MM-DD, or \"\" for the same day as date_from"},
+              "kind": {"type": "string", "enum": ["", "除權息", "法說會", "股東會", "處置股", "注意股", "結算日",
+                                                  "總經數據", "美股財報", "美股休市"],
+                       "description": "One kind of event, or \"\" for every kind"}},
+             ("date_from", "date_to"), get_market_calendar,
+             lambda a: f"查看{a.get('kind') or ''}行事曆", blank_ok=("date_from", "date_to"), strict=False),
     ToolSpec("get_market_overview",
              "The latest Taiwan session of the whole market from official closes (the market page): TAIEX and the "
              "OTC index, advancers/decliners and limit up/down counts per exchange, the best and worst sectors, the "
@@ -1558,6 +1578,14 @@ TOOLS: list[ToolSpec] = sorted([
              {"kind": {"type": "string", "enum": ["latest", "premarket", "close", "weekly"]}},
              ("kind",), get_market_report, lambda a: _REPORT_LABELS.get(a.get("kind") or "", "查看市場報告"),
              strict=False),
+    ToolSpec("get_performance",
+             "The user's own return over a period, the 績效 page's numbers: the time-weighted return against their "
+             "benchmark, the max drawdown, and the amounts (TWD): how much they made in the period (the change of "
+             "market value minus capital, dividends apart), the dividends received and the realized gains in it. "
+             "range: MTD (this month), 1M, 3M, 6M, YTD (this year), 1Y, ALL. Call this for 今年賺多少、這個月績效、"
+             "報酬率多少、有沒有贏大盤.",
+             {"range": {"type": "string", "enum": ["MTD", "1M", "3M", "6M", "YTD", "1Y", "ALL"]}},
+             ("range",), get_performance, lambda a: "查看績效", strict=False),
     ToolSpec("get_watchlist",
              "The user's own watchlist (觀察清單): each symbol with its name, latest official close, change and its "
              "date. Call this when the user asks about their watchlist, or with get_holdings for what to look at "

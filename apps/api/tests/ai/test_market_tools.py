@@ -94,6 +94,19 @@ def test_follow_ups_beside_other_tools_continue_the_turn(client, pool, fake):
     assert [r["tool_use_id"] for r in results] == ["toolu_1", "toolu_f"]  # in the model's order
 
 
+def test_follow_ups_written_as_text_become_follow_ups(client, pool, fake):
+    # QA 2026-11-26: the model wrote the call into its answer instead of calling the tool
+    fake.reply(text('目前算不出今年以來的報酬。\n\nsuggest_follow_ups({"questions": ["我今年領了多少股利？", '
+                    '"台積電目前的走勢如何？"]})'))
+    status, events = chat(client, "我今年賺多少？")
+    assert status == 200
+    follow = [d for n, d in events if n == "follow_ups"]
+    assert follow == [{"questions": ["我今年領了多少股利？", "台積電目前的走勢如何？"]}]
+    detail = client.get(f"{API}/ai/threads/{events[-1][1]['thread_id']}").json()
+    assert detail["messages"][-1]["text"].strip() == "目前算不出今年以來的報酬。"
+    assert detail["messages"][-1]["follow_ups"] == ["我今年領了多少股利？", "台積電目前的走勢如何？"]
+
+
 def test_invalid_follow_ups_are_an_error_the_model_sees(ctx):
     out = execute(ctx, "suggest_follow_ups", {"questions": ["要不要買？"]})
     assert out.is_error and "2–3" in out.content
@@ -118,10 +131,37 @@ def test_calendar_lists_yours_first_and_counts_the_rest(client, ctx, engine):
     yours = {e["code"]: e["yours"] for e in res["events"] if e.get("yours")}
     assert yours == {"2330": "持有", "2454": "觀察"}
     assert res["events"][0]["kind"] == "除權息"
-    listed = {e.get("code") for e in res["events"]}
-    others = {o["kind"]: o for o in res["others"]}
-    assert "1234" in listed or others["除權息"]["count"] == 1
+    # 1234 has no close (no market cap): counted under others with its name, never listed as one of the largest
+    assert "1234" not in {e.get("code") for e in res["events"]}
+    assert res["others"] == [{"kind": "除權息", "count": 1, "examples": ["1234"]}]
     assert "市值前 100 名" in res["rules"]
+
+
+def test_calendar_of_one_kind_lists_every_company_with_the_amount(client, ctx, engine):
+    day = next_tw_trading_day(today_taipei() + timedelta(days=1))
+    with Session(engine) as db:
+        db.add_all([MarketEvent(key="k-1", symbol="1234.TW", date=day, type="ex_dividend", title="除息", detail="",
+                                data={"cash": "4.00000000", "stock_ratio": "0.05"}, source="twse-openapi"),
+                     MarketEvent(key="k-2", symbol="00878.TW", date=day, type="ex_dividend", title="除息", detail="",
+                                 data={"cash": None, "stock_ratio": None}, source="twse-openapi"),
+                     MarketEvent(key="k-3", symbol="2330.TW", date=day, type="shareholder_meeting", title="股東會",
+                                 detail="", data={}, source="twse-openapi")])
+        db.commit()
+    out, res = run(ctx, "get_market_calendar", date_from="", date_to="", kind="除息")
+    assert not out.is_error and res["rules"].startswith("只查除權息")
+    rows = {e["code"]: e for e in res["events"]}
+    assert set(rows) == {"1234", "00878"} and res["others"] == []  # every company, no shareholder meeting
+    assert rows["1234"]["amount"] == "每股現金 4 元、每千股配 50 股"
+    assert rows["00878"]["amount"] == "金額還沒公告"
+    out = execute(ctx, "get_market_calendar", {"date_from": "", "date_to": "", "kind": "月營收"})
+    assert out.is_error and "法說會" in out.content
+
+
+def test_performance_of_a_period(client, ctx):
+    out, res = run(ctx, "get_performance", range="YTD")
+    assert not out.is_error and res["range"] == "今年以來"
+    out = execute(ctx, "get_performance", {"range": "2Y"})
+    assert out.is_error and "YTD" in out.content
 
 
 def test_calendar_checks_its_dates(ctx):
@@ -137,8 +177,14 @@ def test_calendar_checks_its_dates(ctx):
 def test_overview_has_the_rule_lists(ctx):
     out, res = run(ctx, "get_market_overview")
     assert not out.is_error
-    assert {"indices", "breadth", "sectors_best", "sectors_worst", "gainers", "losers", "most_traded", "limit_up",
-            "limit_down", "units"} <= set(res)
+    assert {"indices", "breadth", "sectors_best", "sectors_worst", "gainers", "losers", "most_traded",
+            "limit_up_top_by_value", "limit_down_top_by_value", "units"} <= set(res)
+
+
+def test_percentages_are_written_out():
+    # QA 2026-11-26: a fraction (0.025) came back as 「漲 0.03%」; the tools give the percentage as text
+    assert market_tools.pct(0.0251) == "+2.51%" and market_tools.pct(-0.012) == "−1.20%"
+    assert market_tools.pct(0) == "0.00%" and market_tools.pct(None) is None
 
 
 def test_watchlist(client, ctx):
@@ -190,6 +236,7 @@ def test_report_news_become_citable_results(ctx, monkeypatch):
 def test_the_prompt_organises_instead_of_refusing():
     assert "## 明天看點與市場整理" in CHAT_SYSTEM and "不拒絕" in CHAT_SYSTEM
     assert "kind compare，range 3M" in CHAT_SYSTEM
+    assert "## 該不該買賣、哪一檔好、現在能不能進場" in CHAT_SYSTEM and "不寫「我不能替你判斷」" in CHAT_SYSTEM
     assert "## 接著問" in CHAT_SYSTEM and "suggest_follow_ups" in CHAT_SYSTEM
-    for name in ("get_market_calendar", "get_market_overview", "get_market_report", "get_watchlist"):
+    for name in ("get_market_calendar", "get_market_overview", "get_market_report", "get_watchlist", "get_performance"):
         assert name in CHAT_SYSTEM and name in TOOLS_BY_NAME

@@ -60,6 +60,7 @@ Events (``event: <name>`` / ``data: <json>``):
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import re
@@ -827,6 +828,10 @@ class _HeadingFilter:
         return "".join(out)
 
 
+# suggest_follow_ups written as text on a line of its own (``ChatTurn._written_follow_ups``)
+_WRITTEN_FOLLOW_UPS = re.compile(r"\n?[ \t]*`?suggest_follow_ups\s*\(\s*(\{.*?\})\s*\)`?[ \t]*(?=\n|$)", re.S)
+
+
 def _run_here(ctx: ToolContext, name: str, args: Any) -> tuple[ToolOutcome, float]:
     t = _clock()
     return execute(ctx, name, args), _clock() - t
@@ -1293,6 +1298,7 @@ class ChatTurn:
             self.stored = store.api_history(db, thread)
             self._route()
             ok = yield from self._loop(thread, new, state, ctx)
+            yield from self._written_follow_ups(state)
             flagged = grounding.check(state.display.text, state.segments) if ok and state.used_web else []
             if state.held_from is not None:
                 flagged = yield from self._edit(thread, state, flagged, edit=ok and state.display.error is None
@@ -1619,6 +1625,27 @@ class ChatTurn:
                 result["is_error"] = True
             results.append(result)
         return results
+
+    @staticmethod
+    def _written_follow_ups(state: TurnState) -> Iterator[Event]:
+        """suggest_follow_ups written into the answer as text (QA 2026-11-26, 1 of 24: the last line read
+        「suggest_follow_ups({"questions": [...]})」): that line comes out of the answer (the stored text and, while it
+        is held for the editor, what is shown), and its questions become the follow-ups when there are none yet."""
+        m = _WRITTEN_FOLLOW_UPS.search(state.display.text)
+        if m is None or (state.held_from is not None and m.start() < state.held_from):
+            return
+        state.display.text = (state.display.text[:m.start()] + state.display.text[m.end():]).rstrip() + "\n"
+        if state.display.follow_ups:
+            return
+        from forliosa.ai.market_tools import clean_follow_ups
+
+        try:
+            questions = clean_follow_ups(json.loads(m.group(1)).get("questions"))
+        except (ValueError, AttributeError):
+            questions = []
+        if questions:
+            state.display.follow_ups = questions
+            yield "follow_ups", {"questions": questions}
 
     @staticmethod
     def _follow_ups(asks: list[Any], state: TurnState, ctx: ToolContext) -> dict[str, dict[str, Any]]:
