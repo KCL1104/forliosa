@@ -26,6 +26,8 @@
 | 錯誤 | `error.details`（只有 `validation_error` 有） | 逐欄錯誤：`[{"field": "quantity", "message": "..."}]` |
 | `GET /portfolio/performance` | `range=1D`、`range=5D` | 短區間，以交易日計（見下方「績效計算的解讀」） |
 | `benchmark`（績效參數與 `Preferences.benchmark`） | `^TAIEXTR`、`^TPEXTR` | 證交所「發行量加權股價報酬指數」、櫃買中心「櫃買報酬指數」（含息），見下方 |
+| `POST /ai/chat` 的事件 | `follow_ups`（2026-11-26） | `{"questions": [...]}`：模型最後給的 2–3 個接著問（`suggest_follow_ups`，伺服器過濾過）；只有這個工具時這一輪直接結束，不再呼叫模型（存下的歷史保留它的 `tool_use` 與 `tool_result`，下一題的 user 訊息接在後面，API 會合併連續的 user 訊息）。不送 `tool` 進度 |
+| `ThreadMessage` | `follow_ups: string[]`（2026-11-26） | 同上，存在 AI 那一則的 `meta.follow_ups`；舊的紀錄是空陣列 |
 
 ## 欄位語意的解讀
 

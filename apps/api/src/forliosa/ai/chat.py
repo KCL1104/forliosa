@@ -83,6 +83,7 @@ from forliosa.ai.pricing import CallUsage
 from forliosa.ai.prompts import DISCLAIMER, EDITOR_SYSTEM, OFF_TOPIC_REPLY, chat_system, page_context
 from forliosa.ai.tools import (
     CHAT_BLOCKED_DOMAINS,
+    FOLLOW_UPS_TOOL,
     ToolContext,
     ToolOutcome,
     block_search,
@@ -1554,8 +1555,19 @@ class ChatTurn:
                 yield "error", state.display.error
                 return not tool_uses  # a cut-off tool call cannot stay in the history
             if final.stop_reason == "tool_use" and tool_uses:
-                results = yield from self._run_tools(tool_uses, state, ctx)
-                new.append({"role": "user", "content": results})
+                asks = [tu for tu in tool_uses if tu.name == FOLLOW_UPS_TOOL]
+                rest = [tu for tu in tool_uses if tu.name != FOLLOW_UPS_TOOL]
+                answered = self._follow_ups(asks, state, ctx)
+                if state.display.follow_ups and asks:
+                    yield "follow_ups", {"questions": state.display.follow_ups}
+                results = (yield from self._run_tools(rest, state, ctx)) if rest else []
+                by_id = {r["tool_use_id"]: r for r in results} | answered
+                new.append({"role": "user", "content": [by_id[tu.id] for tu in tool_uses]})
+                if not rest and state.display.text.strip():
+                    # only the follow-up questions, after the answer: the turn is complete without another call (the
+                    # stored history keeps the tool_use and its result; the next question's user turn follows it)
+                    state.display.stop_reason = "end_turn"
+                    return True
                 continue
             return True  # end_turn / stop_sequence
         raise ChatFailure("too_many_steps")
@@ -1607,6 +1619,23 @@ class ChatTurn:
                 result["is_error"] = True
             results.append(result)
         return results
+
+    @staticmethod
+    def _follow_ups(asks: list[Any], state: TurnState, ctx: ToolContext) -> dict[str, dict[str, Any]]:
+        """suggest_follow_ups: kept on the turn (the last valid call wins), no progress line; its tool results."""
+        out: dict[str, dict[str, Any]] = {}
+        for tu in asks:
+            outcome = execute(ctx, tu.name, tu.input)
+            result: dict[str, Any] = {"type": "tool_result", "tool_use_id": tu.id, "content": outcome.content}
+            if outcome.is_error:
+                result["is_error"] = True
+            elif outcome.follow_ups:
+                state.display.follow_ups = list(outcome.follow_ups)
+            out[tu.id] = result
+            asked = tu.input.get("questions") if isinstance(tu.input, dict) else None
+            log.info("AI follow-ups: kept %d of %d", len(outcome.follow_ups or []),
+                     len(asked) if isinstance(asked, list) else 0)
+        return out
 
     def _tool_sessions(self) -> Callable[[], Session] | None:
         """Sessions for tools that run side by side: on the engine of the turn's session, so they see the same

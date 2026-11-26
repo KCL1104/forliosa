@@ -111,6 +111,10 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
               ) : null,
             )}
             {!m.streaming && m.citations && m.citations.length > 0 && <Footnotes items={m.citations} />}
+            {/* 接著問：只跟著最新一則寫完、沒有出錯的回答；點了就問（和規則版回答的追問同一種文字連結） */}
+            {i === latestAnswer && !m.streaming && !m.error && m.followUps && m.followUps.length > 0 && (
+              <FollowUps questions={m.followUps} runner={runner} className="mt-3" />
+            )}
             {i === latestAnswer && !m.streaming && <Disclaimer kind="ai" text={m.disclaimer ?? fallbackDisclaimer} className="mt-3" />}
           </div>
         ),
@@ -284,6 +288,21 @@ function Footnotes({ items }: { items: Citation[] }) {
   )
 }
 
+/** 回答後的追問：墨色文字連結（同常用動作），一題一行，點了就問；畫面不寫「接著問」這類說明字樣 */
+function FollowUps({ questions, runner, className }: { questions: string[]; runner: Runner; className: string }) {
+  return (
+    <ul aria-label="接著問" className={cn("flex flex-col text-md", className)}>
+      {questions.map((q) => (
+        <li key={q}>
+          <button type="button" onClick={() => void runner.submit(q)} className={textLink}>
+            {q}
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function AnswerView({ answer, runner, size, onNavigate }: { answer: Answer; runner: Runner; size: "panel" | "screen"; onNavigate?: () => void }) {
   return (
     <div className="flex flex-col">
@@ -311,17 +330,7 @@ function AnswerView({ answer, runner, size, onNavigate }: { answer: Answer; runn
           ))}
         </div>
       )}
-      {answer.followUps && answer.followUps.length > 0 && (
-        <ul aria-label="接著問" className="mt-2 flex flex-col text-md">
-          {answer.followUps.map((f) => (
-            <li key={f}>
-              <button type="button" onClick={() => void runner.submit(f)} className={textLink}>
-                {f}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {answer.followUps && answer.followUps.length > 0 && <FollowUps questions={answer.followUps} runner={runner} className="mt-2" />}
       {/* 數字都是收盤價：和帳本同一種寫法（「11/12 收盤」），不寫「13:30」這種像盤中的時刻 */}
       {answer.asOf && closeDay(answer.asOf) && <p className="num mt-2 text-sm text-ink-2">{formatDateShort(closeDay(answer.asOf)!, false)} 收盤</p>}
     </div>

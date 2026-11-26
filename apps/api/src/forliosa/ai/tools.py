@@ -56,6 +56,7 @@ from forliosa.timeutil import (
 log = logging.getLogger(__name__)
 
 MAX_RESULT_CHARS = 14_000
+FOLLOW_UPS_TOOL = "suggest_follow_ups"
 TXN_TYPES_FOR_DRAFT = ["buy", "sell", "cash_dividend", "stock_dividend", "deposit", "withdrawal", "fee", "tax",
                        "interest"]
 TXN_TYPE_LABELS = {"buy": "買進", "sell": "賣出", "cash_dividend": "現金股利", "stock_dividend": "股票股利",
@@ -121,6 +122,8 @@ class ToolContext:
     # tw_news_search's use this turn (``forliosa.ai.tw_news.TwNewsTurn``: requests, the per-turn cap, results by
     # arguments); None when the tool is not offered. One object shared by the tools that run side by side.
     tw_news: Any = None
+    # suggest_follow_ups: the questions shown under this turn's answer (the last call wins)
+    follow_ups: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -145,6 +148,7 @@ class ToolOutcome:
     outlets: dict[str, str] = field(default_factory=dict)  # url -> outlet of the citable items (出處 shows the outlet)
     redact: dict[str, str] = field(default_factory=dict)  # url -> title line of the private items (tw_news_search)
     private_texts: list[str] = field(default_factory=list)  # their texts: this turn's paste check only, never stored
+    follow_ups: list[str] | None = None  # suggest_follow_ups: the questions it kept
 
 
 def citable_content(result: Citable) -> list[dict[str, Any]]:
@@ -1272,6 +1276,40 @@ def draft_card(draft: AiDraft, account: BrokerAccount | None) -> dict[str, Any]:
 
 
 # -- registry --------------------------------------------------------------------------------------------
+# -- market-wide tools and the follow-up questions (forliosa.ai.market_tools; 產品負責人 2026-11-26) ----------------
+def get_market_calendar(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.ai import market_tools
+
+    return market_tools.market_calendar(ctx, args)
+
+
+def get_market_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.ai import market_tools
+
+    return market_tools.market_overview(ctx, args)
+
+
+def get_market_report(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.ai import market_tools
+
+    return market_tools.market_report(ctx, args)
+
+
+def get_watchlist(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.ai import market_tools
+
+    return market_tools.watchlist(ctx, args)
+
+
+def suggest_follow_ups(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.ai import market_tools
+
+    return market_tools.suggest_follow_ups(ctx, args)
+
+
+_REPORT_LABELS = {"premarket": "查看盤前重點", "close": "查看盤後重點", "weekly": "查看市場週報"}
+
+
 _SYMBOL = {"type": "string", "description": "Stock code, symbol or name, e.g. 2330, 2330.TW, 0050, 台積電, AAPL"}
 _ACCOUNT = {"type": "string", "description": "Optional broker account id (from get_portfolio_summary.accounts); "
                                              "omit for all accounts"}
@@ -1488,6 +1526,55 @@ TOOLS: list[ToolSpec] = sorted([
                                                     "dividend", "market"]},
               "days": {"type": "integer", "description": "Only for intent news: days back, 1-30; 0 for the default"}},
              ("symbol", "intent", "days"), tw_news_search, _tw_news_label, blank_ok=("days",), strict=False),
+    # Past the 20 strict tools a request may carry: not strict, the handlers check their own arguments
+    ToolSpec("get_market_calendar",
+             "Market-wide scheduled events of a date range (Taipei dates): ex-dividend dates, investor conferences "
+             "(法說會), shareholder meetings, disposition (處置) periods, TAIEX futures/options settlement days, macro "
+             "releases (US and Taiwan), US earnings of a hand-kept list of large companies and NYSE closures. Events "
+             "of the user's own holdings and watchlist come first, marked yours (持有/觀察); market-wide rows and the "
+             "100 largest companies by market cap are listed; the rest are counted by kind in others, with a few of "
+             "the largest names. date_from and date_to are YYYY-MM-DD, \"\" for the next Taiwan trading day; at most "
+             "14 days. Call this for 明天/這週/下週 questions (what is scheduled, 看點, 要注意什麼), together with "
+             "get_market_overview.",
+             {"date_from": {"type": "string", "description": "YYYY-MM-DD, or \"\" for the next Taiwan trading day"},
+              "date_to": {"type": "string", "description": "YYYY-MM-DD, or \"\" for the same day as date_from"}},
+             ("date_from", "date_to"), get_market_calendar, lambda a: "查看行事曆", blank_ok=("date_from", "date_to"),
+             strict=False),
+    ToolSpec("get_market_overview",
+             "The latest Taiwan session of the whole market from official closes (the market page): TAIEX and the "
+             "OTC index, advancers/decliners and limit up/down counts per exchange, the best and worst sectors, the "
+             "10 biggest gainers, losers and most traded common stocks, and the stocks closing at the limit up or "
+             "down (largest value first). Every list is a stated rule, not a pick. Call this for how the market did, "
+             "which sectors or stocks moved most, and for 明天/這週 questions (with get_market_calendar).",
+             {}, (), get_market_overview, lambda a: "查看市場概況", strict=False),
+    ToolSpec("get_market_report",
+             "The newest published Forliosa market report (shared by everyone; kind: latest, premarket = 盤前重點 "
+             "07:30, close = 盤後重點 16:00, weekly = 市場週報 Sunday). Each news article the report cites comes back "
+             "as a search result holding the report's own sentences that cite it (its first words name the edition, "
+             "for example 「11/26（四）盤後重點」): cite the one a sentence relies on and write it in your own words. "
+             "Check the edition's date: an older edition is background, not today's news. A report without news "
+             "comes back as its sentences (official data only). Call this for what the market is watching, the "
+             "themes of the day or week, and 明天/這週 questions.",
+             {"kind": {"type": "string", "enum": ["latest", "premarket", "close", "weekly"]}},
+             ("kind",), get_market_report, lambda a: _REPORT_LABELS.get(a.get("kind") or "", "查看市場報告"),
+             strict=False),
+    ToolSpec("get_watchlist",
+             "The user's own watchlist (觀察清單): each symbol with its name, latest official close, change and its "
+             "date. Call this when the user asks about their watchlist, or with get_holdings for what to look at "
+             "among their own stocks.",
+             {}, (), get_watchlist, lambda a: "查看觀察清單", strict=False),
+    ToolSpec(FOLLOW_UPS_TOOL,
+             "Show 2-3 short follow-up questions under your answer, which the user can tap to ask next. Call it once, "
+             "as the very last thing, after your answer is written, alone (no other tool in the same step); write "
+             "nothing after it. Each question is in Traditional Chinese, 4-40 characters, written as the user would "
+             "ask it, about the stocks, events or themes of your answer, answerable with your tools (news, why a "
+             "stock moved, financials, valuation, technicals, ratings, the calendar, the user's own holdings); never "
+             "a question asking you to decide a trade (該不該買、可以加碼嗎), to predict a price, or one already "
+             "answered.",
+             {"questions": {"type": "array", "items": {"type": "string"},
+                            "description": "2-3 questions, e.g. [\"台積電法說會通常會公布什麼？\", "
+                                           "\"台達電這次配多少股利？\"]"}},
+             ("questions",), suggest_follow_ups, lambda a: "準備接著問的問題", strict=False),
     ToolSpec("get_position",
              "The user's own position in one stock: shares, average cost, cost basis, market value, unrealized and "
              "realized P&L, dividends received, today's change, the next dividend estimate and recent trades. Call "
@@ -1722,4 +1809,6 @@ def execute(ctx: ToolContext, name: str, args: Any) -> ToolOutcome:
         return ToolOutcome(citable_content(result), draft=draft, chart=chart, outlets=outlets,
                            redact={it["url"]: it["safe_text"] for it in private},
                            private_texts=[it["text"] for it in private])
+    if name == FOLLOW_UPS_TOOL:  # a plain sentence for the model; the questions go to the screen
+        return ToolOutcome(str(result), follow_ups=list(ctx.follow_ups))
     return ToolOutcome(dump(result), draft=draft, chart=chart)

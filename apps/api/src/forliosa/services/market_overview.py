@@ -315,6 +315,13 @@ def _us(db: Session, md: MarketData, now: datetime | None = None) -> dict[str, A
 
 
 # -- the response -----------------------------------------------------------------------------------------------
+def snapshot(db: Session, md: MarketData) -> dict[str, Any]:
+    """The page's indices, sectors and rankings only (the chat's ``get_market_overview``): no AI summary is started,
+    no announcement or US block is read."""
+    indices, _, taiex_day = _indices(db, md)
+    return {"indices": indices, "sectors": _sectors(db, md, taiex_day), "movers": _movers(db, md)}
+
+
 def overview(db: Session, md: MarketData, now: datetime | None = None) -> dict[str, Any]:
     from forliosa.ai import market_summary
 

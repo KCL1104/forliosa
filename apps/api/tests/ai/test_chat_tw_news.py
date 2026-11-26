@@ -27,6 +27,7 @@ from forliosa.news import langsearch as ls
 from forliosa.services import stock as stock_svc
 from tests.ai.conftest import API, chat
 from tests.ai.fake_anthropic import text, thinking, tool_use
+from tests.ai.test_tools import NOT_STRICT
 
 NOW = datetime(2026, 11, 17, 10, 40, tzinfo=UTC)  # 18:40 Taipei
 KEY = "sk-ls-chat-77c2e1"
@@ -387,7 +388,7 @@ def test_switched_off_everything_is_as_before(client, pool, fake, monkeypatch):
     chat(client, "台積電的目標價？", page=PAGE)
     first = fake.requests[0]["body"]
     assert first["system"][0]["text"] == CHAT_SYSTEM and "tw_news_search" not in {t["name"] for t in first["tools"]}
-    assert all(t.get("strict") is True for t in first["tools"] if "input_schema" in t)
+    assert all(t.get("strict") is True for t in first["tools"] if "input_schema" in t and t["name"] not in NOT_STRICT)
     note = json.loads(tool_results(fake.requests[1]["body"])[0]["content"])["note"]
     assert note == tools_mod._ANALYST_NOTES["none"] and posted == []
 

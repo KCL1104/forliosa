@@ -16,6 +16,9 @@ from forliosa.models import AiDraft, Transaction, User
 from tests.ai.conftest import API, buy, chat, make_account
 from tests.ai.fake_anthropic import text, tool_use
 
+NOT_STRICT = {"get_market_calendar", "get_market_overview", "get_market_report", "get_watchlist",
+              "suggest_follow_ups"}
+
 
 def user_by_email(db: Session, email: str) -> User:
     return db.scalar(select(User).where(User.email == email))
@@ -45,10 +48,16 @@ def run(ctx, name, **args):
 
 def test_schemas_are_strict_and_within_limits():
     s = get_settings()
-    defs = client_tool_definitions(s)
+    every = client_tool_definitions(s)
+    # past the 20 strict tools a request may carry: the market-wide tools and suggest_follow_ups check their own
+    # arguments (2026-11-26)
+    assert {d["name"] for d in every if not d.get("strict")} == NOT_STRICT
+    defs = [d for d in every if d.get("strict")]
     assert len(defs) <= 20  # strict tools per request
     optional = sum(len(d["input_schema"]["properties"]) - len(d["input_schema"]["required"]) for d in defs)
     assert optional <= 24  # optional parameters across all strict schemas
+    for d in every:
+        assert d["input_schema"]["additionalProperties"] is False
     for d in defs:
         schema = d["input_schema"]
         assert d["strict"] is True and schema["additionalProperties"] is False
@@ -56,13 +65,13 @@ def test_schemas_are_strict_and_within_limits():
         assert "user_id" not in schema["properties"]
         for p in schema["properties"].values():
             assert not {"minimum", "maximum", "minLength", "maxLength", "anyOf"} & set(p)
-    assert [d["name"] for d in defs] == sorted(d["name"] for d in defs)  # deterministic order for caching
+    assert [d["name"] for d in every] == sorted(d["name"] for d in every)  # deterministic order for caching
     names = {t.name for t in TOOLS}
     assert names == {"get_portfolio_summary", "get_holdings", "get_transactions", "get_upcoming",
                      "get_stock_overview", "get_stock_history", "get_valuation", "get_chips", "get_financials",
                      "get_events", "get_news", "get_position", "search_instruments", "draft_transaction",
                      "get_derivatives_overview", "get_technicals", "get_related_stocks", "draw_chart",
-                     "get_analyst_views", "search_news", "tw_news_search"}
+                     "get_analyst_views", "search_news", "tw_news_search", *NOT_STRICT}
     assert "tw_news_search" not in {d["name"] for d in defs}  # AI_LANGSEARCH_ENABLED is off by default
     deriv = next(d for d in defs if d["name"] == "get_derivatives_overview")
     assert deriv["input_schema"] == {"type": "object", "properties": {}, "required": [], "additionalProperties": False}

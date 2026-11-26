@@ -141,11 +141,13 @@ class TurnDisplay:
     grounding: list[dict[str, Any]] = field(default_factory=list)
     error: dict[str, Any] | None = None
     stop_reason: str | None = None
+    follow_ups: list[str] = field(default_factory=list)  # suggest_follow_ups: shown under the answer
 
     def meta(self) -> dict[str, Any]:
         return {"display": True, "citations": self.citations, "drafts": self.draft_ids, "charts": self.charts,
                 "tools": [{"name": t["name"], "label": t["label"]} for t in self.tools],
-                "grounding": self.grounding, "error": self.error, "stop_reason": self.stop_reason}
+                "grounding": self.grounding, "error": self.error, "stop_reason": self.stop_reason,
+                "follow_ups": self.follow_ups}
 
 
 def save_turn(db: Session, thread: AiThread, user: User, turn_id: str, messages: list[dict[str, Any]], *,
@@ -247,7 +249,7 @@ def thread_detail(db: Session, user: User, thread_id: str) -> dict[str, Any]:
                      for d in meta.get("drafts", []) if d in drafts]
             messages.append({"id": str(r.id), "turn_id": r.turn_id, "role": "ai", "text": r.text,
                              "citations": meta.get("citations", []), "drafts": cards,
-                             "charts": meta.get("charts", []),
+                             "charts": meta.get("charts", []), "follow_ups": meta.get("follow_ups", []),
                              "tools": meta.get("tools", []), "grounding": meta.get("grounding", []),
                              "error": meta.get("error"), "at": iso_taipei(r.created_at)})
     return {"id": t.id, "title": t.title, "model": t.model, "created_at": iso_taipei(t.created_at),

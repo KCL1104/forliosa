@@ -102,6 +102,8 @@ export interface Message {
   charts?: AiChart[]
   /** 回答引用的網路來源（必須顯示） */
   citations?: Citation[]
+  /** 模型給的接著問（`suggest_follow_ups`，2–3 題）：最新一則回答寫完後顯示在下方，點了就問 */
+  followUps?: string[]
   /** 查資料的步驟（串流中顯示成一行進度） */
   tools?: ToolStep[]
   /** 還在串流 */
