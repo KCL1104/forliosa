@@ -143,24 +143,31 @@ def test_up_to_five_follow_ups():
     assert market_tools.clean_follow_ups(asked) == asked[:5]
 
 
-def test_a_look_ahead_conversation_runs_on_the_look_ahead_model(client, pool, fake):
+def test_a_members_look_ahead_conversation_runs_on_the_look_ahead_model(client, pool, fake, engine):
+    # 產品負責人 2026-11-26, choice B: members' look-ahead conversations on Sonnet, everyone else on the chat model
+    from forliosa import plans
     from forliosa.ai.prompts import is_lookahead
 
     assert is_lookahead("明天可以關注哪些個股？") and is_lookahead("下週有什麼看點")
     assert not is_lookahead("最近有哪些股票要除息？") and not is_lookahead("台積電現在可以買嗎？")
     fake.reply(text("11/27 的重點在法說會。"))
+    chat(client, "明天可以關注哪些個股？")
+    assert fake.requests[0]["body"]["model"] == "claude-haiku-5-5"  # a free account
+    with Session(engine) as db:
+        plans.grant(db, "demo@forliosa.local", None, None)
+    fake.reply(text("11/27 的重點在法說會。"))
     status, events = chat(client, "明天可以關注哪些個股？")
-    assert status == 200 and fake.requests[0]["body"]["model"] == "claude-sonnet-5-5"
+    assert status == 200 and fake.requests[1]["body"]["model"] == "claude-sonnet-5-5"
     thread_id = events[-1][1]["thread_id"]
     assert events[-1][1]["model"] == "claude-sonnet-5-5"
     # the conversation keeps its model, whatever is asked next
     fake.reply(text("台積電 11/26 收 2,145 元。"))
     chat(client, "台積電呢？", thread_id=thread_id)
-    assert fake.requests[1]["body"]["model"] == "claude-sonnet-5-5"
-    # any other first question: the chat model
+    assert fake.requests[2]["body"]["model"] == "claude-sonnet-5-5"
+    # a member's other first questions: the chat model
     fake.reply(text("你持有台積電。"))
     chat(client, "我有哪些持股？")
-    assert fake.requests[2]["body"]["model"] == "claude-haiku-5-5"
+    assert fake.requests[3]["body"]["model"] == "claude-haiku-5-5"
 
 
 def test_invalid_follow_ups_are_an_error_the_model_sees(ctx):

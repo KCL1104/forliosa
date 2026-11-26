@@ -947,11 +947,12 @@ class ChatTurn:
         return text
 
     def _first_model(self, message: str) -> str:
-        """A new conversation's model: ``AI_MODEL_LOOKAHEAD`` when it starts with a look-ahead question (not in
-        省錢模式, which keeps the cheaper chat model), else the chat model. The thread keeps it for every turn."""
+        """A new conversation's model: ``AI_MODEL_LOOKAHEAD`` when a member's conversation starts with a look-ahead
+        question (產品負責人 2026-11-26, choice B: about 20 times the chat model's cost a question, so members only;
+        never in 省錢模式), else the chat model. The thread keeps it for every turn."""
         chat_model = store.model_for("chat", self.settings)
         ahead = (self.settings.ai_model_lookahead or "").strip()
-        if ahead and not self.economy and is_lookahead(message):
+        if ahead and not self.economy and is_lookahead(message) and plans.is_member(self.user):
             return ahead
         return chat_model
 
