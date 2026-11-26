@@ -137,6 +137,8 @@ class ThreadMessage(BaseModel):
     citations: list[ChatCitation] = []
     drafts: list[DraftCard] = []
     charts: list[ChartCard] = []
+    follow_ups: list[str] = Field(default=[],
+                                  description="回答下方的接著問（`suggest_follow_ups`，2–3 題；沒有就是空的）")
     tools: list[ToolStep] = []
     grounding: list[GroundingItem] = []
     error: ChatError | None = None

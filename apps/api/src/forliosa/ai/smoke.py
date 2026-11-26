@@ -287,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
                 elif name == "grounding":
                     for item in data["items"]:
                         print(f"\n  ⚠ 無來源：{item['text']}", flush=True)
+                elif name == "follow_ups":
+                    print("\n  ？接著問：" + "｜".join(data["questions"]), flush=True)
                 elif name == "error":
                     failed = failed or data["code"] not in ("truncated",)
                     print(f"\n  ✗ {data['code']}：{data['message']}", flush=True)

@@ -286,7 +286,7 @@ def test_the_page_context_says_where_each_markets_close_is():
     line = closes_line(closes, now)
     assert line == "上市 11/16 的收盤價已進來；上櫃 11/16 的收盤價還沒公布，預計今晚 11:45 前更新"
     ctx = page_context(now, "/", None, None, False, closes=closes)
-    assert f"- 台股：已收盤\n- 台股收盤價：{line}\n- 美股：" in ctx
+    assert f"- 台股：已收盤；下一個交易日 11/17（週二）\n- 台股收盤價：{line}\n- 美股：" in ctx
     # interim (no ETFs in it): the official file's window is still given (forliosa.closes.tw_closes)
     interim = [{**closes[1], "stored": True, "interim": True, "expected_from": "2026-11-16T23:15:00+08:00",
                 "expected_to": "2026-11-16T23:45:00+08:00"}]

@@ -135,6 +135,8 @@ export type ChatEvent =
   | { event: "citation"; data: Citation }
   | { event: "draft"; data: ServerDraft }
   | { event: "chart"; data: AiChart }
+  /** 接著問（`suggest_follow_ups`，2026-11-26）：同一輪有新的就取代舊的 */
+  | { event: "follow_ups"; data: { questions: string[] } }
   | { event: "error"; data: ChatErrorInfo }
   /** 沒有附來源的段落（後端尚未定稿：容錯接受 `{items: [{text, reason, start?, end?}]}`） */
   | { event: "grounding"; data: unknown }
@@ -169,6 +171,8 @@ interface ThreadMessage {
   drafts: ServerDraft[]
   /** 選填：舊版後端沒有 */
   charts?: AiChart[]
+  /** 選填：2026-11-26 以前的後端沒有 */
+  follow_ups?: string[]
   tools: ToolStep[]
   error: ChatErrorInfo | null
   /** 選填：後端開始保存時才有 */
@@ -354,6 +358,12 @@ export function isChart(c: unknown): c is AiChart {
   )
 }
 
+/** 接著問：只收非空的字串，最多 3 題（後端改版、事件壞掉時不讓對話壞掉） */
+export function followUpsOf(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((q): q is string => typeof q === "string" && q.trim().length > 0).map((q) => q.trim()).slice(0, 3)
+}
+
 /** 套用一個串流事件到正在寫的 AI 訊息（純函式，方便測試） */
 export function applyChatEvent(m: Message, e: ChatEvent): Message {
   switch (e.event) {
@@ -378,6 +388,10 @@ export function applyChatEvent(m: Message, e: ChatEvent): Message {
       return m.draftIds?.includes(e.data.id) ? m : { ...m, draftIds: [...(m.draftIds ?? []), e.data.id] }
     case "chart":
       return !isChart(e.data) || m.charts?.some((c) => c.id === e.data.id) ? m : { ...m, charts: [...(m.charts ?? []), e.data] }
+    case "follow_ups": {
+      const questions = followUpsOf(e.data?.questions)
+      return questions.length ? { ...m, followUps: questions } : m
+    }
     case "error":
       // 拒答：這一輪已經串流出來的字不算數，只留下說明
       return e.data.code === "refusal" ? { ...m, text: "", error: e.data } : { ...m, error: e.data }
@@ -409,6 +423,7 @@ export function threadFromServer(t: ThreadDetail): { thread: Thread; drafts: Dra
       error: m.error ?? undefined,
       draftIds: m.drafts.map((d) => d.id),
       ...(m.charts?.some(isChart) ? { charts: m.charts.filter(isChart) } : {}),
+      ...(followUpsOf(m.follow_ups).length ? { followUps: followUpsOf(m.follow_ups) } : {}),
       ...(m.disclaimer ? { disclaimer: m.disclaimer } : {}),
       ...(m.grounding ? { ungrounded: parseGrounding(m.grounding) } : {}),
       at: m.at,

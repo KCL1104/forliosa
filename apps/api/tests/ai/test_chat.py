@@ -21,6 +21,7 @@ from tests.ai.fake_anthropic import (
     tool_use,
     web_search_result,
 )
+from tests.ai.test_tools import NOT_STRICT
 from tests.api.m5 import join, make_group, me_id
 
 EVENT_KEYS = {
@@ -85,7 +86,10 @@ def test_tool_loop_streams_events_and_builds_cached_request(client, pool, fake):
     tool_names = [t["name"] for t in first["tools"]]
     assert tool_names[-2:] == ["web_search", "web_fetch"]
     client_tools = [t for t in first["tools"] if "input_schema" in t]
-    assert all(t["strict"] is True and t["input_schema"]["additionalProperties"] is False for t in client_tools)
+    assert all(t["input_schema"]["additionalProperties"] is False for t in client_tools)
+    # at most 20 strict tools per request; the market-wide tools and suggest_follow_ups are past them (not strict)
+    assert sum(1 for t in client_tools if t.get("strict")) <= 20
+    assert {t["name"] for t in client_tools if not t.get("strict")} == NOT_STRICT
     assert not any("user_id" in t["input_schema"]["properties"] for t in client_tools)
     search = next(t for t in first["tools"] if t["name"] == "web_search")
     assert search["type"] == "web_search_20260318" and search["user_location"]["country"] == "TW"

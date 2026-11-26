@@ -1,0 +1,195 @@
+"""The chat's market-wide tools and its follow-up questions (產品負責人 2026-11-26: 「明天可以關注哪些個股？」 was
+refused; the answer should organise the scheduled events, the day's rankings and the reports' market focus, draw a
+comparison chart of the stocks it names and offer 2–3 follow-up questions)."""
+
+from __future__ import annotations
+
+import json
+from datetime import timedelta
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from forliosa.ai import market_tools
+from forliosa.ai.prompts import CHAT_SYSTEM
+from forliosa.ai.tools import TOOLS_BY_NAME, ToolContext, execute
+from forliosa.marketdata.service import get_market_data
+from forliosa.models import MarketEvent, User
+from forliosa.timeutil import next_tw_trading_day, today_taipei
+from tests.ai.conftest import API, buy, chat, make_account
+from tests.ai.fake_anthropic import text, tool_use
+
+
+@pytest.fixture()
+def ctx(client, engine):
+    make_account(client)  # the demo user exists and has an account
+    db = Session(engine)
+    me = db.scalar(select(User).where(User.email == "demo@forliosa.local"))
+    yield ToolContext(db=db, user=me, md=get_market_data())
+    db.close()
+
+
+def run(ctx, name, **args):
+    out = execute(ctx, name, args)
+    return out, (json.loads(out.content) if not out.is_error and out.content[:1] in "{[" else out.content)
+
+
+# -- suggest_follow_ups ------------------------------------------------------------------------------------------
+def test_follow_ups_are_cleaned():
+    clean = market_tools.clean_follow_ups
+    assert clean(["台積電法說會說了什麼？", " 台積電法說會說了什麼？ ", "該不該買台積電？", "台積電明天會漲到多少？",
+                  "看 https://x.tw", "嗎", "「台達電這次配多少股利？」", "聯發科的本益比？"]) == \
+        ["台積電法說會說了什麼？", "台達電這次配多少股利？", "聯發科的本益比？"]
+    assert clean("台積電？") == [] and clean([1, None]) == []
+
+
+def test_a_turn_ending_with_follow_ups_makes_no_further_call(client, pool, fake):
+    fake.reply(text("11/27 的重點在台達電除息。"),
+               tool_use("toolu_f", "suggest_follow_ups",
+                        {"questions": ["台達電這次配多少股利？", "要不要買台達電？", "台達電最近有什麼新聞？"]}),
+               stop_reason="tool_use")
+    status, events = chat(client, "明天可以關注哪些個股？")
+    assert status == 200
+    assert len(fake.requests) == 1  # the answer was complete: no call just to end the turn
+    follow = [d for n, d in events if n == "follow_ups"]
+    assert follow == [{"questions": ["台達電這次配多少股利？", "台達電最近有什麼新聞？"]}]
+    assert not any(n == "tool" for n, _ in events)  # no progress line for it
+    done = events[-1]
+    assert done[0] == "done" and done[1]["stop_reason"] == "end_turn"
+    thread_id = done[1]["thread_id"]
+    detail = client.get(f"{API}/ai/threads/{thread_id}").json()
+    assert detail["messages"][-1]["follow_ups"] == ["台達電這次配多少股利？", "台達電最近有什麼新聞？"]
+
+    # the next question replays the tool_use with its result, then the new question
+    fake.reply(text("每股配 5 元。"))
+    status, events = chat(client, "台達電這次配多少股利？", thread_id=thread_id)
+    assert status == 200
+    messages = fake.requests[1]["body"]["messages"]
+    i = next(i for i, m in enumerate(messages) if m["role"] == "assistant")
+    assert any(b.get("type") == "tool_use" and b["name"] == "suggest_follow_ups" for b in messages[i]["content"])
+    result = messages[i + 1]
+    assert result["role"] == "user" and result["content"][0]["type"] == "tool_result"
+    assert result["content"][0]["tool_use_id"] == "toolu_f"
+    assert messages[i + 2]["role"] == "user" and messages[i + 2]["content"][0]["text"] == "台達電這次配多少股利？"
+    # a turn without them keeps none
+    detail = client.get(f"{API}/ai/threads/{thread_id}").json()
+    assert detail["messages"][-1]["follow_ups"] == []
+
+
+def test_follow_ups_beside_other_tools_continue_the_turn(client, pool, fake):
+    acc = make_account(client)
+    buy(client, acc, "2330", 1000, 600)
+    fake.reply(text("我查一下。"), tool_use("toolu_1", "get_holdings", {}),
+               tool_use("toolu_f", "suggest_follow_ups", {"questions": ["台積電最近有什麼新聞？", "台積電的本益比？"]}),
+               stop_reason="tool_use")
+    fake.reply(text("你持有台積電 1 張。"))
+    status, events = chat(client, "我有哪些持股？")
+    assert status == 200 and len(fake.requests) == 2
+    follow = [d for n, d in events if n == "follow_ups"]
+    assert follow == [{"questions": ["台積電最近有什麼新聞？", "台積電的本益比？"]}]
+    assert [(d["name"], d["status"]) for n, d in events if n == "tool"] == [("get_holdings", "running"),
+                                                                            ("get_holdings", "done")]
+    results = fake.requests[1]["body"]["messages"][-1]["content"]
+    assert [r["tool_use_id"] for r in results] == ["toolu_1", "toolu_f"]  # in the model's order
+
+
+def test_invalid_follow_ups_are_an_error_the_model_sees(ctx):
+    out = execute(ctx, "suggest_follow_ups", {"questions": ["要不要買？"]})
+    assert out.is_error and "2–3" in out.content
+    out = execute(ctx, "suggest_follow_ups", {"questions": ["台積電的本益比？", "台積電的殖利率？"]})
+    assert not out.is_error and out.follow_ups == ["台積電的本益比？", "台積電的殖利率？"]
+
+
+# -- get_market_calendar -----------------------------------------------------------------------------------------
+def test_calendar_lists_yours_first_and_counts_the_rest(client, ctx, engine):
+    acc = make_account(client, "第二個")
+    buy(client, acc, "2330", 1000, 600)
+    assert client.post(f"{API}/watchlist", json={"symbol": "2454.TW"}).status_code in (200, 201)
+    day = next_tw_trading_day(today_taipei() + timedelta(days=1))
+    with Session(engine) as db:
+        db.add_all([MarketEvent(key=f"t-{s}", symbol=s, date=day, type="ex_dividend", title="除息", detail="",
+                                data={}, source="twse-openapi")
+                    for s in ("2330.TW", "2454.TW", "1234.TW")])
+        db.commit()
+    out, res = run(ctx, "get_market_calendar", date_from="", date_to="")
+    assert not out.is_error
+    assert res["from"] == res["to"] == res["next_tw_trading_day"] == day.isoformat()
+    yours = {e["code"]: e["yours"] for e in res["events"] if e.get("yours")}
+    assert yours == {"2330": "持有", "2454": "觀察"}
+    assert res["events"][0]["kind"] == "除權息"
+    listed = {e.get("code") for e in res["events"]}
+    others = {o["kind"]: o for o in res["others"]}
+    assert "1234" in listed or others["除權息"]["count"] == 1
+    assert "市值前 100 名" in res["rules"]
+
+
+def test_calendar_checks_its_dates(ctx):
+    out = execute(ctx, "get_market_calendar", {"date_from": "11/27", "date_to": ""})
+    assert out.is_error and "YYYY-MM-DD" in out.content
+    start = today_taipei()
+    out, res = run(ctx, "get_market_calendar", date_from=(start + timedelta(days=30)).isoformat(),
+                   date_to=start.isoformat())
+    assert res["from"] == start.isoformat() and any("最多查 14 天" in n for n in res["notes"])
+
+
+# -- get_market_overview / get_watchlist / get_market_report ------------------------------------------------------
+def test_overview_has_the_rule_lists(ctx):
+    out, res = run(ctx, "get_market_overview")
+    assert not out.is_error
+    assert {"indices", "breadth", "sectors_best", "sectors_worst", "gainers", "losers", "most_traded", "limit_up",
+            "limit_down", "units"} <= set(res)
+
+
+def test_watchlist(client, ctx):
+    _out, res = run(ctx, "get_watchlist")
+    assert res == {"count": 0, "items": [], "note": "觀察清單是空的"}
+    assert client.post(f"{API}/watchlist", json={"symbol": "2454.TW"}).status_code in (200, 201)
+    _out, res = run(ctx, "get_watchlist")
+    assert res["count"] == 1 and res["items"][0]["symbol"] == "2454.TW"
+
+
+def test_report_off_or_missing(ctx):
+    out, res = run(ctx, "get_market_report", kind="latest")
+    assert res["status"] == "none"
+    out = execute(ctx, "get_market_report", {"kind": "monthly"})
+    assert out.is_error
+
+
+def test_report_news_become_citable_results(ctx, monkeypatch):
+    from forliosa.reports import service as rs
+
+    payload = {
+        "kind_label": "盤後重點", "edition_label": "11/26（四）", "published_at": "2026-11-26T16:00:00+08:00",
+        "title": "加權指數跌 1.2%",
+        "highlights": [{"sentences": [{"text": "加權指數跌 1.2%。", "cites": [1]},
+                                      {"text": "市場關注美國 11/27 公布的物價數據。", "cites": [2]}]}],
+        "sections": [{"key": "focus", "title": "市場焦點", "blocks": [
+            {"type": "items", "items": [{"title": "被動元件", "paragraphs": [
+                {"sentences": [{"text": "國巨等被動元件股跌停。", "cites": [2, 3]}]}]}]}]}],
+        "footnotes": [{"n": 1, "kind": "data", "label": "證交所 11/26", "outlet": None, "url": None},
+                      {"n": 2, "kind": "web", "label": "台股收黑 外資賣超", "outlet": "中央社",
+                       "url": "https://www.cna.com.tw/news/1", "date_label": "11/26 14:05"},
+                      {"n": 3, "kind": "web", "label": "被動元件重挫", "outlet": "經濟日報",
+                       "url": "https://money.udn.com/2", "date_label": "11/26 13:50"}],
+    }
+    monkeypatch.setattr(rs, "enabled", lambda settings=None: True)
+    monkeypatch.setattr(rs, "latest", lambda db, user, kind: payload)
+    out = execute(ctx, "get_market_report", {"kind": "latest"})
+    assert not out.is_error and isinstance(out.content, list)
+    by_url = {b["source"]: b for b in out.content}
+    assert set(by_url) == {"https://www.cna.com.tw/news/1", "https://money.udn.com/2"}
+    cna = by_url["https://www.cna.com.tw/news/1"]["content"][0]["text"]
+    assert cna.startswith("11/26（四）盤後重點（引用中央社，11/26 14:05）：")
+    assert "市場關注美國 11/27 公布的物價數據。" in cna and "被動元件：國巨等被動元件股跌停。" in cna
+    assert "加權指數跌 1.2%" not in cna  # a data sentence is not credited to the article
+    assert out.outlets == {"https://www.cna.com.tw/news/1": "中央社", "https://money.udn.com/2": "經濟日報"}
+
+
+# -- the prompt --------------------------------------------------------------------------------------------------
+def test_the_prompt_organises_instead_of_refusing():
+    assert "## 明天看點與市場整理" in CHAT_SYSTEM and "不拒絕" in CHAT_SYSTEM
+    assert "kind compare，range 3M" in CHAT_SYSTEM
+    assert "## 接著問" in CHAT_SYSTEM and "suggest_follow_ups" in CHAT_SYSTEM
+    for name in ("get_market_calendar", "get_market_overview", "get_market_report", "get_watchlist"):
+        assert name in CHAT_SYSTEM and name in TOOLS_BY_NAME
