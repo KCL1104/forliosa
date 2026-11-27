@@ -27,6 +27,11 @@ def p(*sents: dict[str, Any]) -> dict[str, Any]:
     return {"sentences": list(sents)}
 
 
+def row(slot: str, *sents: dict[str, Any]) -> dict[str, Any]:
+    """A row of the brief (the premarket's and the close's highlights, 2026-11-27): a paragraph with its field."""
+    return {"slot": slot, "para": {"sentences": list(sents)}}
+
+
 NO_CHART = {"code": "none", "period": "none", "set": "none", "caption": {"sentences": []}}
 
 INST_X = {"id": "X001", "topic": "TWSE_INST", "key": "TWSE_INST.foreign", "subject": "外資",
@@ -49,11 +54,12 @@ def close_output(pk: dict[str, Any]) -> dict[str, Any]:
     f = lambda m, sub=None: fid(pk, m, sub, None if m.startswith("sector_conc") else "today")  # noqa: E731
     return {
         "title": "加權指數跌 6.03%，收 41,040.08 點",
+        # the brief's rows: 貢獻 on a fact, 籌碼 on a report (位置 and 量 are the server's)
         "highlights": [
-            p(s("加權指數收 41,040.08 點，跌 2,635.04 點（▼6.03%）。", f("index_close"), f("index_change"),
-                f("index_pct"))),
-            p(s("上市普通股上漲 6 家、下跌 6 家。", f("adv_up"), f("adv_down"))),
-            p(s("台積電（2330）點數貢獻約 −1,616 點（估算）。", f("stock_contrib", "台積電"))),
+            row("drivers", s("台積電（2330）點數貢獻約 −1,616 點（估算）。", f("stock_contrib", "台積電"))),
+            # only with the gathered reports (``with_web``): a pack without them has no X001 to cite
+            *([row("chips", s("〔中央社〕報導，外資賣超 1,234.5 億元。", "X001"))]
+              if any(x.get("id") == "X001" for x in pk.get("web") or []) else []),
         ],
         "what_happened": [
             p(s("加權指數收 41,040.08 點。", f("index_close"))),
@@ -76,10 +82,10 @@ def premarket_output(pk: dict[str, Any]) -> dict[str, Any]:
     us = lambda sub: fid(pk, "us_pct", sub, "overnight")  # noqa: E731
     return {
         "title": "SMH 美股 11/16 跌 2.58%，台積電 ADR 跌 1.00%",
+        # the brief's rows: 隔夜 and 排定 (位置 and 籌碼 are the server's)
         "highlights": [
-            p(s("SMH 美股 11/16 跌 2.58%。", us("SMH"))),
-            p(s("已排定：鴻海（2317）11/17（二）法說會。", cid(pk, "鴻海"))),
-            p(s("外資台指期淨空 96,787 口。", fid(pk, "futures_oi_net"))),
+            row("overnight", s("SMH 美股 11/16 跌 2.58%。", us("SMH"))),
+            row("scheduled", s("鴻海（2317）11/17（二）法說會。", cid(pk, "鴻海"))),
         ],
         "overnight": [
             p(s("SPY 美股 11/16 漲 0.50%。", us("SPY"))),

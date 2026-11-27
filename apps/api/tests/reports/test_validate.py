@@ -211,8 +211,11 @@ def test_counts_lengths_and_unknown_sectors_are_soft(close_pack):
 
 def test_repeating_the_strip_is_counted(close_pack):
     out = close_output(close_pack)
+    f = lambda m: fid(close_pack, m, None, "today")  # noqa: E731
+    out["what_happened"][0] = p(s("加權指數收 41,040.08 點，跌 2,635.04 點（▼6.03%）。", f("index_close"),
+                                  f("index_change"), f("index_pct")))
     probs = validate.validate(out, close_pack, "close")
-    assert any(x.code == "repeats_strip" for x in probs)  # the first highlight cites three strip numbers
+    assert any(x.code == "repeats_strip" for x in probs)  # a paragraph that cites three strip numbers
 
 
 def test_drop_sections_and_what_is_left(close_pack):

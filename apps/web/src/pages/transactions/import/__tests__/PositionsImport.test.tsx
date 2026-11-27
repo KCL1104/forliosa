@@ -368,7 +368,9 @@ describe("匯入庫存：估計的買入日（資產組成原型）", () => {
 
   it("估計只是建議：日期照整批（匯入那天），日期下面「估計 2023/5/8」＋「套用」；按了才改成那天、送 estimated；估不到的是「估計 —」", async () => {
     desktop = true
-    const commit = vi.spyOn(api, "commitPositions")
+    // 這個測試只看送出去的內容，所以寫入停著不回來。原本讓它真的寫（mock 重播整本帳本），測試結束時還在跑；
+    // 跑完會呼叫全域的 closeImport()，把下一個測試剛打開的匯入視窗關掉——慢的 CI 機器上，下一個測試就等不到上傳欄位
+    const commit = vi.spyOn(api, "commitPositions").mockImplementation(() => new Promise(() => {}))
     const user = userEvent.setup()
     const dialog = await readShot(user)
     const batch = within(dialog).getByLabelText("買進日期")

@@ -392,7 +392,15 @@ def correction(db: Session, user: User, report_id: str, note: str, drop_sections
         if "title" in heads:
             payload["title"], payload["title_origin"] = assemble.data_title(r.kind, pk), "rules"
         if "highlights" in heads:
-            payload["highlights"], payload["highlights_origin"] = assemble.data_highlights(r.kind, pk), "rules"
+            # an edition with the brief keeps its fields: the writer's rows go, the server's own stay or stand in. The
+            # weekly, an edition published before the brief (its pack has none of the brief's facts) and one whose pack
+            # gives the server no row at all get the plain rule-made points instead
+            rows = assemble.brief_rows(r.kind, pk) if payload.get("brief") else []
+            if "brief" in payload:
+                payload["brief"] = rows or None
+            payload["highlights"] = [row["paragraph"] for row in rows] if rows \
+                else assemble.data_highlights(r.kind, pk, brief=False)
+            payload["highlights_origin"] = "rules"
         assemble.number_footnotes(payload, pk)
     assemble.refresh_ai_lines(payload)
     # ``note`` is the note alone: the page writes 「已更正（11/18 09:10）：…」 from ``at``

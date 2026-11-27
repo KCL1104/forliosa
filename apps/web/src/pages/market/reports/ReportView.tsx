@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from "react"
+import { ChartCard } from "@/ai/ChartCard"
 import type { MarketReport, ReportValidation } from "@/api/types"
 import { DemoTag } from "@/components/section"
 import { useIsDesktop } from "@/hooks/use-media-query"
@@ -11,7 +12,8 @@ import { ReportSources } from "./ReportSources"
 
 /**
  * 一份市場報告（讀的頁面；市場頁的「報告」分頁與 `/market/reports/<id>` 都用它；`admin`／`prefix` 是已拿掉的盲測比較頁留下的，之後再清）。由上到下（memo §2.0）：
- * 免責的一句與資料截至 → 名稱、一句話、3 個重點 → 數字欄 → 各段（資料／AI 依資料與報導整理；手機上可以收合）
+ * 免責的一句與資料截至 → 名稱、一句話、重點（有欄位名稱的幾列，舊的版本是 3 個重點）→ 趨勢圖（加權指數與均線，2026-11-27）
+ * → 數字欄 → 各段（資料／AI 依資料與報導整理；手機上可以收合）
  * → 行事曆 → 來源 → 完整的免責聲明與「由 Anthropic 的 Claude 模型撰寫」。
  * 整頁沒有卡片、陰影、圖示；紅綠只在漲跌的數字與橫條；字的閱讀寬度 46rem（類股的長圖可以到主欄寬）。
  * `admin`：管理員檢視——每句後面多一段 refs、被拿掉的段照樣顯示並寫原因、上面多一行規則驗證的摘要。
@@ -27,7 +29,15 @@ export function ReportView({ report, admin = false, prefix = "" }: { report: Mar
     <ReportContext.Provider value={ctx}>
       <article data-report-root={prefix} data-report-id={report.id} className="@container flex flex-col gap-10">
         <div className="flex flex-col gap-6">
-          <ReportHeader report={report} />
+          <div className="flex flex-col">
+            <ReportHeader report={report} />
+            {/* 趨勢圖接在重點下面：上面是重點最後一列的格線、下面是數字欄的第一條格線，圖自己不再畫上下的線 */}
+            {report.trend && (
+              <div data-report-trend="" className="max-w-[46rem] [&>figure]:mt-0 [&>figure]:border-y-0 [&>figure]:pt-4 [&>figure]:pb-0">
+                <ChartCard chart={report.trend} />
+              </div>
+            )}
+          </div>
           {admin && report.validation && <ValidationSummary v={report.validation} />}
           <ReportNumbers items={report.numbers} />
           {(report.notes.length > 0 || report.is_demo) && (

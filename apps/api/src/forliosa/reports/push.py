@@ -63,6 +63,7 @@ from forliosa.models import (
     MarketReportVersion,
     NotificationOutbox,
 )
+from forliosa.reports import assemble
 from forliosa.reports import settings as rs
 from forliosa.reports.schedule import KIND_LABELS, md, md_wd, span
 from forliosa.services import notifications, pushers
@@ -175,9 +176,12 @@ def _t(text: Any, kind: str) -> str:
 
 
 def highlight_lines(payload: dict[str, Any], kind: str) -> list[str]:
-    """The highlights as push lines: the sentences joined, a cited report marked 「（出處見全文）」."""
+    """The highlights as push lines: the sentences joined, a cited report marked 「（出處見全文）」. The brief's rows
+    (2026-11-27) carry their field's name (「位置：收在 5 日線…」: without it the row has no subject)."""
     out = []
-    for p in payload.get("highlights") or []:
+    brief = payload.get("brief") or []
+    rows = [(f"{r['label']}：", r["paragraph"]) for r in brief] or [("", p) for p in payload.get("highlights") or []]
+    for head, p in rows:
         parts = []
         for s in p.get("sentences") or []:
             text = str(s.get("text") or "").strip()
@@ -187,7 +191,7 @@ def highlight_lines(payload: dict[str, Any], kind: str) -> list[str]:
                 text += SOURCE_NOTE
             parts.append(text)
         if parts:
-            out.append(_t("".join(parts), kind))
+            out.append(_t(head + "".join(parts), kind))
     return out
 
 
@@ -211,6 +215,10 @@ def text(report: MarketReport, payload: dict[str, Any], kind: str, settings: Set
     when = f"{span(report.period_start, report.period_end)} 回顧" if report.kind == "weekly" \
         else md_wd(report.edition_date)
     first = f"【{label} {when}】" + (LINE_AI if payload.get("has_ai") else LINE_DATA)
+    # the close's own number first: the brief's rows (為什麼, 貢獻, 位置…) leave it to the page's number strip
+    head = assemble.headline(payload)
+    if head:
+        first = f"{first}\n{_t(head, kind)}"
     highlights = highlight_lines(payload, kind)
     extra: list[str] = []
     if report.kind == "weekly" and report.next_start and report.next_end:

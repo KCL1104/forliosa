@@ -250,10 +250,13 @@ def test_items_and_highlights(close_pack):
     # an item's name takes its item
     d = validate.drop(out, [validate.Problem("tonight[0].event", "compliance:direction", "x")], "close", close_pack)
     assert d.output["tonight"] == [] and "tonight" in d.sections
-    # highlights fail only below their minimum (3 for the close)
-    d = validate.drop(out, [validate.Problem("highlights[2].sentences[0]", "compliance:direction", "x")], "close",
-                      close_pack)
-    assert d.highlights_bad and not d.sections
+    # the brief's rows (2026-11-27): a row that fails goes alone; the highlights fail only when no row is left
+    d = validate.drop(out, [validate.Problem("highlights[1].para.sentences[0]", "compliance:direction", "x")],
+                      "close", close_pack)
+    assert [r["slot"] for r in d.output["highlights"]] == ["drivers"] and not d.highlights_bad and not d.sections
+    d = validate.drop(out, [validate.Problem(f"highlights[{i}].para.sentences[0]", "compliance:direction", "x")
+                            for i in (0, 1)], "close", close_pack)
+    assert d.output["highlights"] == [] and d.highlights_bad and not d.sections
 
 
 def test_the_market_turning_words_are_filtered_and_forbidden(close_pack):

@@ -197,8 +197,10 @@ def test_corrections(on, client, other_client, monkeypatch):
     assert r.status_code == 200
     body = other_client.get(f"{API}/market/reports/{rid}").json()
     assert body["edition"] == "correction" and body["corrections"][0]["note"].endswith("櫃買指數的漲跌幅寫錯")
-    wh = next(s for s in body["sections"] if s["key"] == "what_happened")
-    assert wh["origin"] == "data" and all(b["type"] != "text" for b in wh["blocks"])
+    # the section had only its text (2026-11-27: the TAIEX chart is the trend chart under the brief): members no
+    # longer see it at all, and the chart is still there
+    assert "what_happened" not in [s["key"] for s in body["sections"]] and body["trend"]["id"] == "G1"
+    assert [r["label"] for r in body["brief"]]  # the brief's rows come through the API
     assert other_client.get(f"{API}/market/reports").json()["items"][0]["corrected"] is True
     assert client.post(f"{API}/admin/market-reports/{rid}/corrections", json={"note": ""}).status_code == 422
     typo = client.post(f"{API}/admin/market-reports/{rid}/corrections", json={"note": "x", "drop_sections": ["typo"]})

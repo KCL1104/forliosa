@@ -167,6 +167,36 @@ describe("line 與新的單位", () => {
     expect(valueLabel(index, 26802.468, null)).toBe("26,802.47")
   })
 
+  it("指數與它的均線：主線墨色有線尾的圓點，均線是赭、藍筆的細線沒有圓點；圖例寫出每條線，沒有線尾的標籤", () => {
+    const five = ["2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10", "2026-11-11"]
+    const withAverages: AiChart = {
+      ...index,
+      series: [
+        { name: "加權指數", symbol: null, points: five.map((t, i) => ({ t, v: 26700 + i * 51.234 })) },
+        { name: "5 日線", symbol: null, role: "average", points: five.slice(1).map((t, i) => ({ t, v: 26720 + i * 40 })) },
+        { name: "10 日線", symbol: null, role: "average", points: five.slice(2).map((t) => ({ t, v: 26700 })) },
+      ],
+    }
+    render(<ChartCard chart={withAverages} />)
+    const fig = screen.getByText("加權指數收盤").closest("figure")!
+    for (const name of ["加權指數", "5 日線", "10 日線"]) expect(within(fig).getByText(name)).toBeInTheDocument()
+    const groups = [...fig.querySelectorAll("svg[role='img'] g")].filter((g) => g.querySelector(":scope > path[stroke-width]"))
+    const averages = groups.filter((g) => g.getAttribute("data-series") === "average")
+    const main = groups.filter((g) => g.getAttribute("data-series") !== "average")
+    expect(averages.map((g) => g.querySelector("path")!.getAttribute("stroke"))).toEqual(["var(--chart-ochre)", "var(--chart-blue)"])
+    for (const g of averages) {
+      expect(g.querySelector("path")!.getAttribute("stroke-width")).toBe("1.5")
+      expect(g.querySelector("circle")).toBeNull()
+    }
+    expect(main).toHaveLength(1)
+    expect(main[0]!.querySelector("path")!.getAttribute("stroke")).toBe("var(--chart-mine)")
+    expect(main[0]!.querySelector("circle")).not.toBeNull()
+    // 主線最後畫（蓋在均線上面）
+    expect(groups.indexOf(main[0]!)).toBe(groups.length - 1)
+    // 沒有線尾的「我的」標籤（那是比較圖的）
+    expect(within(fig).queryByText("我的")).toBeNull()
+  })
+
   it("點數、家數、口數、億元的讀數與刻度", () => {
     const c = (unit: AiChart["unit"]) => base({ unit })
     expect(valueLabel(c("points"), -1070.4, null)).toBe("−1,070 點")

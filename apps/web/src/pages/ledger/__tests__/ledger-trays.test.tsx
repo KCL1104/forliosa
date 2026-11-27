@@ -49,6 +49,10 @@ describe("帳本的托盤", { timeout: 20_000 }, () => {
     await screen.findByRole("list", { name: "觀察清單" }, T)
     await screen.findByRole("region", { name: "分享卡" }, T)
     await screen.findByRole("region", { name: "本週事項" }, T)
+    // 總資產走勢要等績效的資料、今日損益要等持倉的收盤價：這兩盤和上面三盤是不同的查詢，機器忙的時候會晚一點出來
+    //（CI 上曾經在它們出來以前就比順序）。等到了才比；一直不出來照樣會失敗
+    await screen.findByRole("region", { name: "總資產走勢" }, T)
+    await screen.findByRole("region", { name: "今日損益" }, T)
     expect(trayNames()).toEqual(["總資產", "持倉", "總資產走勢", "今日損益", "分享卡", "觀察清單", "本週事項"])
     // 產品負責人 2026-11-21：托盤只留一種底色——不再照順序輪流
     expect([...document.querySelectorAll<HTMLElement>("section.tray")].every((s) => !s.hasAttribute("data-tint"))).toBe(true)

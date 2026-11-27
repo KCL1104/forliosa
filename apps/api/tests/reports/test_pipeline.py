@@ -286,8 +286,8 @@ def test_a_section_whose_every_sentence_fails_is_dropped(env):
     dropped = next(sec for sec in pay["sections"] if sec["key"] == "what_happened")
     assert dropped["dropped"] == {"reasons": ["forbidden_word", "outlook_pattern"]}
     public = assemble.public(pay)
-    kept = next(sec for sec in public["sections"] if sec["key"] == "what_happened")
-    assert kept["origin"] == "data" and all(b["type"] != "text" for b in kept["blocks"])  # G1 only
+    # the section had only its text (the TAIEX chart is under the brief now): members do not see it at all
+    assert "what_happened" not in [sec["key"] for sec in public["sections"]] and public["trend"]["id"] == "G1"
     assert "明天" not in str(public)
 
 
@@ -461,11 +461,53 @@ def test_correction_and_copy_are_independent(env):
         u = User(id="usr_admin", email="admin@x.tw", display_name="管理員")
         db.add(u)
         db.commit()
-        out = service.correction(db, u, r.id, "加權指數的漲跌點數寫錯", ["what_happened"])
+        # (「今天發生什麼」 is not in a data edition any more: its only block, the TAIEX chart, is under the brief)
+        out = service.correction(db, u, r.id, "加權指數的漲跌點數寫錯", ["sectors"])
     assert out["edition"] == "correction" and out["corrections"][0]["note"] == "加權指數的漲跌點數寫錯"
     vs = versions(env, r.id)
     assert vs[-1].edition == "correction" and vs[-1].correction_note == "加權指數的漲跌點數寫錯"
     assert copy.deepcopy(vs[0].payload).get("corrections") == []
+
+
+def test_correcting_the_highlights_puts_the_rule_made_ones_back(env):
+    """A correction that takes the writer's highlights: an edition with the brief gets the server's rows; one published
+    before the brief (2026-11-27) gets the three points its own data edition had — its pack has none of the brief's
+    facts, and the brief's rows from it would be next to nothing."""
+    from forliosa.models import User
+    from forliosa.reports import service
+
+    fake = env["fake"]
+    tick(env, ts(MON, 14, 11))
+    script_gather(fake)
+    tick(env, ts(MON, 15, 41))
+    fake.reply(json_text(close_output(with_web(pk_close(env))))).reply(json_text({"issues": []}))
+    tick(env, ts(MON, 15, 51))
+    r = report(env)
+    with Session(env["engine"]) as db:
+        db.add(User(id="usr_admin", email="admin@x.tw", display_name="管理員"))
+        db.commit()
+        u = db.get(User, "usr_admin")
+        ai_id = r.current_version_id
+        cur = db.get(MarketReportVersion, ai_id)
+        assert cur.edition == "ai" and cur.payload["highlights_origin"] == "ai"
+        assert "ai" in [row["origin"] for row in cur.payload["brief"]]
+        before_brief = copy.deepcopy(cur.payload)
+        out = service.correction(db, u, r.id, "籌碼那一列寫錯", ["highlights"])
+        assert out["highlights_origin"] == "rules" and {row["origin"] for row in out["brief"]} == {"rules"}
+        assert [row["key"] for row in out["brief"]] == ["drivers", "volume"]
+        assert out["highlights"] == [row["paragraph"] for row in out["brief"]]
+        # the same AI edition as it was stored before the brief existed: three plain points, no brief, no trend
+        before_brief.pop("brief")
+        before_brief.pop("trend", None)
+        db.get(MarketReportVersion, ai_id).payload = before_brief
+        db.get(MarketReport, r.id).current_version_id = ai_id
+        db.commit()
+        out = service.correction(db, u, r.id, "重點寫錯", ["highlights"])
+    assert not out.get("brief") and out["highlights_origin"] == "rules"
+    texts = ["".join(x["text"] for x in p["sentences"]) for p in out["highlights"]]
+    assert texts[0] == "加權指數收 41,040.08 點，▼2,635.04 點（▼6.03%）" and len(texts) == 3
+    assert texts[1].startswith("上漲 ") and texts[2].startswith("點數貢獻最大：")
+    assert all(x["cites"] for p in out["highlights"] for x in p["sentences"])  # numbered against this version's notes
 
 
 def test_promoted_blind_test_close_gets_its_tables_rebuilt_once(env, monkeypatch, capsys):

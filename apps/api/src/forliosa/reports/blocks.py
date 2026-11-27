@@ -145,14 +145,32 @@ def pp_text(change: Any) -> str:
     return f"{'+' if q > 0 else '−'}{abs(q):.1f}"
 
 
-def g1_index_line(points: list[tuple[date, Decimal]], *, sources: Iterable[str], title: str) -> dict[str, Any] | None:
-    """G1: the TAIEX closes (oldest first)."""
+def g1_index_line(points: list[tuple[date, Decimal]], *, sources: Iterable[str], title: str,
+                  averages: Iterable[tuple[int, list[tuple[date, Decimal]]]] = ()) -> dict[str, Any] | None:
+    """G1: the TAIEX closes (oldest first). ``averages`` (2026-11-27, the trend chart under the brief): ``(n, points)``
+    of each n-session average of those closes — drawn as thin lines beside the index (``role: "average"``), named
+    「5 日線」「10 日線」; an average with fewer than two points is left out. They are averages of past closes, never
+    drawn or named as a support or a resistance."""
     if len(points) < 2:
         return None
-    return chart("G1", "line", title, "index", "date",
-                 series=[{"name": "加權指數", "symbol": None,
-                          "points": [{"t": d.isoformat(), "v": round(float(c), 2)} for d, c in points]}],
-                 since=f"{md(points[0][0])} 起", sources=sources)
+    series: list[dict[str, Any]] = [{"name": "加權指數", "symbol": None,
+                                     "points": [{"t": d.isoformat(), "v": round(float(c), 2)} for d, c in points]}]
+    drawn = []
+    for n, pts in averages:
+        if len(pts) < 2:
+            continue
+        drawn.append(n)
+        series.append({"name": average_name(n), "symbol": None, "role": "average",
+                       "points": [{"t": d.isoformat(), "v": round(float(c), 2)} for d, c in pts]})
+    names, spans = "、".join(average_name(n) for n in drawn), "、".join(str(n) for n in drawn)
+    notes = [f"{names}：最近 {spans} 個交易日收盤的平均。"] if drawn else []
+    return chart("G1", "line", title, "index", "date", series=series, since=f"{md(points[0][0])} 起",
+                 sources=sources, notes=notes)
+
+
+def average_name(n: int) -> str:
+    """「5 日線」: the name of the n-session average, on the chart and in the facts (the same words)."""
+    return f"{n} 日線"
 
 
 def g2_sector_bars(rows: list[dict[str, Any]], *, title: str, sources: Iterable[str],

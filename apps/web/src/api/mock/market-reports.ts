@@ -11,6 +11,7 @@ import {
   type NyseHolidayInput,
   type Paged,
   type ReportBlock,
+  type ReportBriefRow,
   type ReportCalendar,
   type ReportCalendarRow,
   type ReportEdition,
@@ -134,7 +135,8 @@ const S = (text: string, ...refs: string[]): ReportSentence => ({ text, cites: [
 const P = (...sentences: ReportSentence[]): ReportParagraph => ({ sentences })
 
 function paragraphsOf(r: MarketReport): ReportParagraph[] {
-  const out: ReportParagraph[] = [...r.highlights]
+  // 有欄位名稱的重點取代 3 個重點：頁面放的是 `brief`，從它開始編號（`highlights` 在 `assemble` 最後換成同一批段落）
+  const out: ReportParagraph[] = r.brief?.length ? r.brief.map((row) => row.paragraph) : [...r.highlights]
   for (const s of r.sections) {
     for (const b of s.blocks) {
       if (b.type === "text") out.push(...b.paragraphs)
@@ -178,7 +180,27 @@ function assemble(r: MarketReport, reg: Reg): MarketReport {
     }
   }
   const web = footnotes.filter((f) => f.kind === "web" && f.url && f.outlet).map((f) => ({ n: f.n, outlet: f.outlet!, title: f.label, url: f.url!, published_label: f.date_label ?? "" }))
-  return { ...r, footnotes, sources: { ...r.sources, web } }
+  // 和伺服器一樣：有欄位時 `highlights` 就是那幾列的段落、同一組註腳號碼（推播、AI 對話、舊的前端讀它）
+  const highlights = r.brief?.length ? r.brief.map((row) => row.paragraph) : r.highlights
+  return { ...r, highlights, footnotes, sources: { ...r.sources, web } }
+}
+
+/** 把另一個版本的幾列搬進這個版本：註腳號碼換成這個版本的（同一個註腳沿用號碼，沒有的接在後面） */
+function adoptRows(rows: ReportBriefRow[], from: ReportFootnote[], into: ReportFootnote[]): { rows: ReportBriefRow[]; footnotes: ReportFootnote[] } {
+  const footnotes = [...into]
+  const same = (a: ReportFootnote, b: ReportFootnote) => a.kind === b.kind && a.label === b.label && a.url === b.url && a.date_label === b.date_label
+  const numberOf = (n: number): number | null => {
+    const f = from.find((x) => x.n === n)
+    if (!f) return null
+    let hit = footnotes.find((x) => same(x, f))
+    if (!hit) {
+      hit = { ...f, n: footnotes.length + 1 }
+      footnotes.push(hit)
+    }
+    return hit.n
+  }
+  const renumber = (s: ReportSentence): ReportSentence => ({ ...s, cites: [...new Set(s.cites.map(numberOf).filter((n): n is number => n !== null))].sort((a, b) => a - b) })
+  return { rows: rows.map((row) => ({ ...row, paragraph: { sentences: row.paragraph.sentences.map(renumber) } })), footnotes }
 }
 
 /** 一般使用者看到的樣子：沒有 refs、沒有被拿掉的段、沒有 validation */
@@ -195,6 +217,7 @@ export function publicView(r: MarketReport): MarketReport {
   const out: MarketReport = {
     ...r,
     highlights: r.highlights.map(strip),
+    ...(r.brief ? { brief: r.brief.map((row) => ({ ...row, paragraph: strip(row.paragraph) })) } : {}),
     sections: r.sections.filter((s) => !s.dropped).map((s) => ({ ...s, blocks: s.blocks.map(block) })),
   }
   delete out.validation
@@ -208,6 +231,8 @@ const chart = (c: Partial<AiChart> & Pick<AiChart, "id" | "kind" | "title" | "un
 const section = (key: string, title: string, origin: "data" | "ai", blocks: ReportBlock[], collapsed_mobile = false): ReportSection => ({
   key, title, origin, origin_label: ORIGIN[origin], collapsed_mobile, blocks,
 })
+/** 沒有東西的段不出現 */
+const optional = (s: ReportSection): ReportSection[] => (s.blocks.length ? [s] : [])
 const table = (t: Partial<ReportTable> & Pick<ReportTable, "id" | "title" | "columns" | "rows">): ReportTable => ({
   rule: null, fold_after: null, empty_text: null, note: null, source_labels: [], ...t,
 })
@@ -340,15 +365,98 @@ function usDay(d: string): UsDay {
   }
 }
 
+/**
+ * 加權指數的收盤（舊到新，最後一天是 `day(d).taiex`）：從那一天往回，用每天的漲跌幅一天一天接起來。
+ * `day()` 各天的點位互不相干，直接連起來是亂跳的線；這樣接出來的是一條連續的走勢，均線才有意義。
+ */
+function taiexCloses(d: string, n = 60): { t: string; v: number }[] {
+  const days = tradingDays(d, n)
+  const out: { t: string; v: number }[] = []
+  let close = day(d).taiex
+  for (let i = days.length - 1; i >= 0; i--) {
+    out.unshift({ t: days[i]!, v: Number(close.toFixed(2)) })
+    close /= 1 + day(days[i]!).taiexPct
+  }
+  return out
+}
+/** n 日均線：第 n 天起才有（存檔不夠長就沒有那一條） */
+function movingAverage(points: { t: string; v: number }[], n: number): { t: string; v: number }[] {
+  return points.slice(n - 1).map((p, i) => ({ t: p.t, v: Number((points.slice(i, i + n).reduce((a, q) => a + q.v, 0) / n).toFixed(2)) }))
+}
 /** G1：加權指數收盤（存檔起） */
 function g1(d: string, title: string): AiChart {
-  const days = tradingDays(d, 60)
+  const closes = taiexCloses(d)
   return chart({
-    id: "G1", kind: "line", title, unit: "index", x: "date", since: `${md(days[0]!)} 起`,
-    series: [{ name: "加權指數", symbol: null, points: days.map((t) => ({ t, v: day(t).taiex })) }],
+    id: "G1", kind: "line", title, unit: "index", x: "date", since: `${md(closes[0]!.t)} 起`,
+    series: [{ name: "加權指數", symbol: null, points: closes }],
     sources: [LIC.index],
   })
 }
+/** 趨勢圖（重點下面，2026-11-27）：G1 加上 5 日線、10 日線；只用存檔裡的收盤，不夠長的均線不畫；存檔不到兩天就沒有圖 */
+const AVERAGES = [5, 10]
+function trendChart(d: string): AiChart | null {
+  if (tradingDays(d, 60).length < 2) return null
+  const base = g1(d, "加權指數收盤")
+  const closes = base.series[0]!.points
+  return {
+    ...base,
+    series: [
+      ...base.series,
+      ...AVERAGES.filter((n) => closes.length >= n).map((n) => ({ name: `${n} 日線`, symbol: null, points: movingAverage(closes, n), role: "average" as const })),
+    ],
+    notes: ["5 日線、10 日線：最近 5、10 個交易日收盤的平均。"],
+    sources: [LIC.index, RULES],
+  }
+}
+/**
+ * 「位置」那一列（規則算的）：連幾日漲或跌（2 日以上才寫）、收盤在 5 日線與 10 日線的上面還是下面、近 10 個交易日的漲跌。
+ * 只講已經發生的事；存檔不夠長的那一項不寫，都寫不出來就沒有這一列（null）。
+ */
+function positionText(d: string, opts: { range?: boolean } = {}): string | null {
+  const closes = taiexCloses(d).map((p) => p.v)
+  const days = tradingDays(d, 60)
+  if (closes.length === 0) return null
+  const last = closes[closes.length - 1]!
+  const mean = (n: number) => (closes.length >= n ? closes.slice(-n).reduce((a, v) => a + v, 0) / n : null)
+  const side = (avg: number) => (last >= avg ? "之上" : "之下")
+  const up = day(d).taiexPct >= 0
+  let streak = 0
+  for (let i = days.length - 1; i >= 0 && day(days[i]!).taiexPct >= 0 === up; i--) streak++
+  const [ma5, ma10] = [mean(5), mean(10)]
+  const parts: string[] = []
+  if (streak >= 2) parts.push(`連 ${streak} 日${up ? "上漲" : "下跌"}`)
+  if (ma5 !== null && ma10 !== null) parts.push(side(ma5) === side(ma10) ? `收在 5 日線與 10 日線${side(ma5)}` : `收在 5 日線${side(ma5)}、10 日線${side(ma10)}`)
+  else if (ma5 !== null) parts.push(`收在 5 日線${side(ma5)}`)
+  if (opts.range !== false && closes.length > 10) parts.push(`近 10 個交易日 ${pct(last / closes[closes.length - 11]! - 1)}`)
+  return parts.length ? `${parts.join("，")}。` : null
+}
+/**
+ * 「量」那一列（規則算的，寫法和伺服器一樣）：上市成交金額、和前一日比、是 5 日均量的幾成。
+ * 下午自己加總的數字（估算）和前幾天的完整檔略有差異：差距不到 3% 只寫「和前一日相近」，比例前面加「約」。
+ */
+function volumeText(d: string, estimate: boolean): string {
+  const x = day(d)
+  const days = tradingDays(d, 5)
+  const before = day(prevTrading(d)).turnover
+  const diff = x.turnover - before
+  const near = diff === 0 || (estimate && Math.abs(diff) < before * 0.03)
+  const vs = near ? "和前一日相近" : `比前一日${diff > 0 ? "多" : "少"} ${fmt(diff, 0)} 億元`
+  const share = days.length === 5 ? `，${estimate ? "約" : ""}是 5 日均量的 ${Math.round((x.turnover / (days.reduce((a, t) => a + day(t).turnover, 0) / 5)) * 100)}%` : ""
+  return `${estimate ? "上市約" : "上市"} ${fmt(x.turnover, 0)} 億元${estimate ? "（估算）" : ""}，${vs}${share}。`
+}
+/** 「貢獻」那一列：點數貢獻（估算）最大的一類，和方向相反裡最大的一類（漲跌家數在數字欄，這裡不重複） */
+function driversText(d: string): string {
+  const x = day(d)
+  const rows = SECTOR_NAMES.map((name) => ({ name, pts: (x.taiex - x.taiexChg) * sectorW(name) * x.sectors.find((s) => s.name === name)!.pct })).sort((a, b) => b.pts - a.pts)
+  const [lead, other] = x.taiexChg >= 0 ? [rows[0]!, rows[rows.length - 1]!] : [rows[rows.length - 1]!, rows[0]!]
+  // 一檔佔大半的類股連同它的集中度一起寫（和 AI 寫的字同一條規則）：「半導體類約 +83 點（估算；主要由台積電構成，約 77%）」
+  const part = (r: { name: string; pts: number }) => {
+    const top = CONCENTRATED[r.name]?.replace(/（(約 \d+%)）$/, "，$1")
+    return `${r.name}類約 ${points(r.pts)}（${top ? `估算；${top}` : "估算"}）`
+  }
+  return `${part(lead)}、${part(other)}。`
+}
+const briefRow = (key: string, label: string, origin: "ai" | "rules", ...sentences: ReportSentence[]): ReportBriefRow => ({ key, label, origin, paragraph: P(...sentences) })
 /** G3：市值前 10 的點數貢獻（估算）＋其餘合計，官方漲跌點數在下面一行 */
 function g3(x: Day, title: string): AiChart {
   const top = x.top10.reduce((a, s) => a + s.contrib, 0)
@@ -879,6 +987,8 @@ function premarket(b: Build): MarketReport {
   reg.set("F009", { kind: "data", group: `pc:${prev}`, label: `期交所〈選擇權 P/C 比〉${md(prev)}` })
   reg.set("F010", { kind: "data", group: `tpex:${prev}`, label: `櫃買中心〈櫃買指數〉${md(prev)}` })
   reg.set("F011", { kind: "data", group: `price:${prev}`, label: `證交所〈上市個股日成交資訊〉${md(prev)}（Forliosa 依市值排序）` })
+  reg.set("F012", { kind: "data", group: `index:${prev}`, label: `證交所〈每日收盤行情－大盤統計〉${md(prev)}` })
+  reg.set("F013", { kind: "data", group: `averages:${prev}`, label: `Forliosa 規則計算（加權指數的 5 日線、10 日線）${md(prev)}` })
   reg.set("C001", { kind: "calendar", label: `聯發科法說會 ${mdw(D)} 14:00`, url: null, date_label: md(D) })
   reg.set("C002", { kind: "calendar", label: `中華電除息 ${mdw(D)}`, url: null, date_label: md(D) })
   reg.set("C005", { kind: "calendar", label: `美國勞工統計局〈消費者物價指數〉${mdw(nextTrading(D))} 公布`, url: "https://www.bls.gov/cpi/", date_label: md(nextTrading(D)) })
@@ -944,6 +1054,19 @@ function premarket(b: Build): MarketReport {
         P(S(`${mdw(D)}：市值前 100 中 1 家除息、${n100} 家法說會`, "C001", "C002")),
         P(S(`外資台指期淨未平倉（${md(prev)}）：${signed(x.oi, 0, " 口")}，較前一日 ${signed(x.oiChg, 0, " 口")}`, "F007", "F008")),
       ]
+  // 重點（2026-11-27）：隔夜、為什麼、排定是 AI 依資料與報導寫的；位置與籌碼是規則算的。資料版只有規則算的幾列
+  const where = positionText(prev, { range: false })
+  const brief: ReportBriefRow[] = [
+    ai
+      ? briefRow("overnight", "隔夜", "ai", S(`${usLabel} SPY ${pct(spy.pct)}、SMH ${pct(smh.pct)}，台積電 ADR ${pct(tsm.pct)}。`, "F001", "F004", "F005"))
+      : briefRow("overnight", "隔夜", "rules", S(`${usLabel} SPY ${pct(spy.pct)}、ONEQ ${pct(oneq.pct)}、SMH ${pct(smh.pct)}，台積電 ADR ${pct(tsm.pct)}。`, "F001", "F003", "F004", "F005")),
+    ...(ai ? [briefRow("why", "為什麼", "ai", S(`〔示範通訊社〕報導，${usLabel} 記憶體類股受財測影響走弱。`, "X001"))] : []),
+    ai
+      ? briefRow("scheduled", "排定", "ai", S(`聯發科（2454）14:00 法說會、中華電（2412）除息；${mdw(nextTrading(D))} 美國 10 月消費者物價指數。`, "C001", "C002", "C005"))
+      : briefRow("scheduled", "排定", "rules", S(`市值前 100 中 1 家除息、${n100} 家法說會。`, "C001", "C002")),
+    briefRow("position", "位置", "rules", S(`加權指數 ${md(prev)} 收 ${fmt(x.taiex)} 點（${pct(x.taiexPct)}）${where ? `，${where.replace(/^收在/, "在")}` : "。"}`, "F012", ...(where ? ["F013"] : []))),
+    briefRow("chips", "籌碼", "rules", S(`外資台指期淨未平倉 ${signed(x.oi, 0, " 口")}，較前一日 ${signed(x.oiChg, 0, " 口")}。`, "F007", "F008")),
+  ]
   const sections: ReportSection[] = [
     section("overnight", "隔夜要聞", ai ? "ai" : "data", [
       ...(ai
@@ -968,7 +1091,8 @@ function premarket(b: Build): MarketReport {
           ],
         }])]
       : []),
-    section("yesterday", `昨日台股全貌（${md(prev)}）`, "data", yesterday),
+    // 手機上收著（2026-11-27）：這幾張圖前一天的盤後重點已經給過，盤前先讀隔夜與今天
+    section("yesterday", `昨日台股全貌（${md(prev)}）`, "data", yesterday, true),
     // 昨日籌碼（晚間公布）：AI 的 evening_notes → G7 → T7 → G16 → T10（增加｜減少）；手機預設收合
     section("chips", "昨日籌碼（晚間公布）", ai ? "ai" : "data", [
       ...(ai
@@ -999,6 +1123,7 @@ function premarket(b: Build): MarketReport {
       edition_label: mdw(D), period: { start: D, end: D }, next_period: null,
       as_of: at(D, "06:55"), as_of_label: `資料截至 ${md(D)} 06:55`,
       title, title_origin: ai ? "ai" : "rules", highlights, highlights_origin: ai ? "ai" : "rules",
+      brief, trend: trendChart(prev),
       numbers, sections, calendar,
       sources: { data: [LIC.us, LIC.index, LIC.price, LIC.tpex, LIC.taifex, LIC.fx, LIC.margin, LIC.filings], web: [], disagreements: [], manual: [MANUAL_LINE] },
       notes: [],
@@ -1020,6 +1145,7 @@ function close(b: Build): MarketReport {
   reg.set("F040", { kind: "data", group: `index:${D}`, label: `證交所〈每日收盤行情－大盤統計〉${md(D)}` })
   reg.set("F041", { kind: "data", group: `profile:${D}`, label: "公司基本資料（已發行股數）× 收盤價，Forliosa 計算" })
   reg.set("F042", { kind: "data", group: `contrib:${D}`, label: `Forliosa 規則計算（各類股點數貢獻）${md(D)}` })
+  reg.set("F043", { kind: "data", group: `averages:${D}`, label: `Forliosa 規則計算（加權指數的 5 日線、10 日線；上市成交金額的 5 日平均）${md(D)}` })
   reg.set("C001", { kind: "calendar", label: `美國勞工統計局〈消費者物價指數〉${mdw(nextTrading(D))} 公布`, url: "https://www.bls.gov/cpi/", date_label: md(nextTrading(D)) })
   reg.set("N001", { kind: "filing", label: `台積電重大訊息：董事會決議股利分派（${md(D)} 14:32）`, url: null, date_label: md(D) })
   reg.set("X001", { kind: "web", outlet: "示範通訊社", title: "台股收盤：權值股走勢分歧（示範報導）", url: "https://example.com/demo-news/tw-close", date_label: `${md(D)} 13:52` })
@@ -1049,11 +1175,23 @@ function close(b: Build): MarketReport {
     { key: "turnover", label: "上市成交金額", value: `${fmt(x.turnover, 0)} 億元`, change: null, tone: null, date_label: md(D), estimate: !b.tables, note: null },
   ]
   const indexLine = b.indexMissing ? `上市市值估算 ${pct(x.taiexPct)}` : `加權指數 ${pct(x.taiexPct)}，收 ${fmt(x.taiex)} 點`
+  // AI 的標題先講這一天不一樣的地方（2026-11-27：漲跌的點數裡誰佔了多少），不重抄數字欄；官方指數沒進來時照舊寫漲跌家數
   const title = ai
     ? f === 1
       ? `加權指數${rise(x.taiexChg)} ${fmt(x.taiexChg)} 點，${top.name}點數貢獻約 ${signed(top.contrib)} 點`
-      : `加權指數 ${pct(x.taiexPct)}，上市 ${x.down} 家下跌、${x.up} 家上漲`
+      : b.indexMissing
+        ? `加權指數 ${pct(x.taiexPct)}，上市 ${x.down} 家下跌、${x.up} 家上漲`
+        : `加權指數${rise(x.taiexChg)} ${fmt(x.taiexChg)} 點，其中半導體類約 ${signed(semiPts, 0)} 點（估算）`
     : `盤後重點 ${mdw(D)}：${indexLine}`
+  // 重點（2026-11-27）：為什麼、籌碼是 AI 依報導寫的；貢獻在 AI 版由 AI 寫、資料版照規則；位置與量是規則算的
+  const where = b.indexMissing ? null : positionText(D)
+  const brief: ReportBriefRow[] = [
+    ...(ai ? [briefRow("why", "為什麼", "ai", S(`〔示範通訊社〕報導，電子股${rise(semi.pct)}、傳產股走勢不一。`, "X001"))] : []),
+    briefRow("drivers", "貢獻", ai ? "ai" : "rules", S(driversText(D), "F042")),
+    ...(where ? [briefRow("position", "位置", "rules", S(where, "F001", "F043"))] : []),
+    briefRow("volume", "量", "rules", S(volumeText(D, !b.tables), "F007", "F043")),
+    ...(ai ? [briefRow("chips", "籌碼", "ai", S(`〔示範日報〕報導，上市三大法人合計${inst >= 0 ? "買超" : "賣超"} ${fmt(inst)} 億元。`, "X002"))] : []),
+  ]
   const highlights = ai
     ? [
         b.indexMissing
@@ -1074,7 +1212,7 @@ function close(b: Build): MarketReport {
     ),
   )
   const sections: ReportSection[] = [
-    section("what_happened", "今天發生什麼", ai ? "ai" : "data", [
+    ...optional(section("what_happened", "今天發生什麼", ai ? "ai" : "data", [
       ...(ai
         ? [{
             type: "text" as const,
@@ -1090,10 +1228,9 @@ function close(b: Build): MarketReport {
             ],
           }]
         : []),
-      b.indexMissing
-        ? { type: "note" as const, text: "官方加權指數尚未取得，數字欄的上市市值變化是 Forliosa 估算。" }
-        : { type: "chart" as const, chart: g1(D, "加權指數收盤"), caption: null, chart_of_day: false },
-    ]),
+      // 加權指數的圖在重點下面（趨勢圖），這裡不再放一次
+      ...(b.indexMissing ? [{ type: "note" as const, text: "官方加權指數尚未取得，數字欄的上市市值變化是 Forliosa 估算。" }] : []),
+    ])),
     // 類股（v2）：AI 2–4 句 → G17 → G15 → G2 v2 → G8（數字欄已有市場寬度，G2 不寫 reference）
     section("sectors", "類股", ai ? "ai" : "data", [
       ...(ai
@@ -1167,6 +1304,7 @@ function close(b: Build): MarketReport {
       edition_label: mdw(D), period: { start: D, end: D }, next_period: null,
       as_of: at(D, b.tables ? "23:45" : "15:40"), as_of_label: `資料截至 ${md(D)} ${b.tables ? "23:45" : "15:40"}`,
       title, title_origin: ai ? "ai" : "rules", highlights, highlights_origin: ai ? "ai" : "rules",
+      brief, trend: b.indexMissing ? null : trendChart(D),
       numbers, sections,
       calendar: {
         title: `${md(nextTrading(D))} 行事曆`,
@@ -1561,14 +1699,21 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
       const drop = body.drop_sections ?? []
       const unknown = drop.filter((k) => k !== "title" && k !== "highlights" && !c.sections.some((s) => s.key === k))
       if (unknown.length) throw field("drop_sections", `沒有這個段落：${unknown.join("、")}。`)
-      // 標題與重點換回規則寫的（第一版就是只有資料的版本）
+      // 標題與重點換回規則寫的（第一版就是只有資料的版本）。重點有欄位時和伺服器一樣：整組換成規則版的列
+      // （位置、量，以及貢獻／隔夜／排定的規則版），不是只把 AI 的列拿掉
       const rules = r.versions[0]!
+      const heads = drop.includes("highlights") && c.highlights_origin === "ai"
+      const adopted = heads && rules.brief?.length ? adoptRows(rules.brief, rules.footnotes, c.footnotes) : null
       const next: MarketReport = {
         ...c, version: r.versions.length + 1, edition: "correction", published_at: nowAt,
         corrections: [...c.corrections, { at: nowAt, note }],
         sections: c.sections.map((s) => (drop.includes(s.key) && s.origin === "ai" ? { ...s, dropped: { reasons: ["更正"] } } : s)),
         ...(drop.includes("title") && c.title_origin === "ai" ? { title: rules.title, title_origin: "rules" as const } : {}),
-        ...(drop.includes("highlights") && c.highlights_origin === "ai" ? { highlights: rules.highlights, highlights_origin: "rules" as const } : {}),
+        ...(heads
+          ? adopted
+            ? { brief: adopted.rows, highlights: adopted.rows.map((row) => row.paragraph), footnotes: adopted.footnotes, highlights_origin: "rules" as const }
+            : { highlights: rules.highlights, highlights_origin: "rules" as const, brief: null }
+          : {}),
       }
       r.versions.push(next)
       r.current = r.versions.length - 1

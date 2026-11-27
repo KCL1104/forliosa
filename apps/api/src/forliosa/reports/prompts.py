@@ -14,7 +14,23 @@ import copy
 import json
 from typing import Any
 
-PROMPT_VERSION = "mr-2026-11-18a"
+PROMPT_VERSION = "mr-2026-11-27a"
+
+# The brief (owner 2026-11-27: 「有點不知道重點」): the premarket's and the close's highlights are rows of a printed
+# form — a field name on the left, one short paragraph on the right, the same fields in the same place every day.
+# ``BRIEF_ORDER`` is the page's order; ``BRIEF_SLOTS`` are the rows the writer writes (``highlights[i].slot``), the
+# others are the server's own (assemble.data_brief: 位置 and 量 are computed, never written by a model).
+BRIEF_ORDER: dict[str, tuple[str, ...]] = {
+    "premarket": ("overnight", "why", "scheduled", "position", "chips"),
+    "close": ("why", "drivers", "position", "volume", "chips"),
+}
+BRIEF_SLOTS: dict[str, tuple[str, ...]] = {
+    "premarket": ("overnight", "why", "scheduled"),
+    "close": ("why", "drivers", "chips"),
+}
+BRIEF_LABELS = {"overnight": "隔夜", "why": "為什麼", "scheduled": "排定", "drivers": "貢獻", "position": "位置",
+                "volume": "量", "chips": "籌碼"}
+BRIEF_ROW_MAX = 90  # characters of one row (the page shows two or three lines of it on a phone)
 
 # When no stock item gives a reason, the page says so once for the whole section (owner 2026-11-17), not in every item
 STOCKS_NOT_FOUND = "個股的漲跌原因未找到報導。"
@@ -164,6 +180,8 @@ WRITER_SYSTEM = f"""\
 3. 「這件事和○○類股的關係是…」，refs 放 X、C，或依產業別的 F。
 有「將、預計、預期、預估、可能、恐、展望、估計、後續、接下來、未來」的句子，都必須是這三種之一，而且不能有「走高、走低、\
 反彈、回檔、震盪、樂觀、悲觀」這類方向或看法的字。
+盤前重點 highlights 的「排定」那一列是例外：欄位名稱已經寫了排定，句子只列事件與時間，不用寫「已排定：」，也不寫上面\
+那些字。
 
 # 每一句都有出處
 - 輸出以「句」為單位：每句是 {{"text": "…", "refs": ["F001", "X003"]}}。refs 列出這一句用到的所有編號，不能空。
@@ -191,6 +209,7 @@ WRITER_SYSTEM = f"""\
 
 # 不重複
 - 數字欄（numbers）已經列出的數字，段落裡不要整串重抄；一段最多提兩個。
+- 盤前重點與盤後重點的 highlights 是一列一格的欄位，每一列只寫那個欄位的事；後面的段落不要把重點的句子原樣再寫一次。
 - 市場週報的重點、這一週（summary）、市場關注的主題、可能讓關注點改變的事：同一個 C 或 X 在每一段最多用一次（一件事只\
 放在一點重點、一個主題、一項風險裡）。
 - 盤前重點的標題與重點先講隔夜與今天，不重講前一個交易日上市的漲跌（already_reported 是上一份盤後重點寫過的）。
@@ -211,10 +230,21 @@ WRITER_SYSTEM = f"""\
 
 SPEC: dict[str, dict[str, Any]] = {
     "premarket": {
-        "highlights": "3 點",
+        "highlights": "最多 3 列（隔夜、為什麼、排定）",
         "length": "AI 寫的部分合計 1,200–1,800 字；標題 20–36 字",
-        "sections": """- title：標題，20–36 字，只寫事實，先講隔夜與今天。
-- highlights：3 點，每點一段（1–2 句）。不能用前一個交易日上市的數字（group=prev_session 的 F）。
+        "sections": """- title：標題，20–36 字，只寫事實，先講隔夜與今天最特別的一件事：先看「這一天不一樣的地方」\
+與報導（X）裡的大事，\
+挑一到兩件寫；不要只把數字欄的幾個漲跌幅排在一起。
+- highlights：重點，是頁面上一列一格的欄位（左邊印好欄位名稱，右邊是你寫的一段）。每一列是 \
+{"slot": 欄位, "para": 一段}，照下面的順序，每個 slot 最多一列；沒有東西可寫的 slot 不要給。
+  - overnight（隔夜）：美股 ETF 與台積電 ADR 的漲跌（F，寫美股日期），挑和台股最有關的兩三個數字。
+  - why（為什麼）：報導寫的隔夜原因（X）。沒有報導就不給這一列。
+  - scheduled（排定）：這一天已排定、最要緊的一到三件事，每一句都要引用行事曆（C）或寫明時間的報導（X）。直接寫事件\
+與時間，\
+不用寫「已排定：」；不是這份報告日期當天的事要寫日期。
+  每一列 1 句、最多 2 句，60 字以內。不能用前一個交易日上市的數字（group=prev_session 的 F）。美股的半導體寫 SMH 或報導\
+裡的公司名稱，不寫「半導體類股」「半導體股」（那是台股的類股名稱，寫了就要在同一列帶台股半導體類的集中度）。「位置」「籌碼」\
+兩列由伺服器寫（前一個交易日收在哪條均線的上面或下面、期貨法人部位），你不用寫，也不要重複。
 - overnight：隔夜要聞 3–5 段，每段 1–3 句：美股 ETF 與台積電 ADR（F，寫美股日期）、半導體、總經與 Fed、和台股相關的海\
 外公司（X）。
 - evening_notes：「昨日籌碼（晚間公布）」0–3 段，只寫前一晚才到的資料（上櫃漲跌家數、上櫃法人估算金額、期貨三大法人台\
@@ -230,12 +260,24 @@ group=prev_session），寫成「約 −494 點（估算）」。
 - chart_of_day：從可用選單挑一張今日圖，caption 寫 2–3 句；不需要就 code 填 "none"。""",
     },
     "close": {
-        "highlights": "3 點",
+        "highlights": "最多 3 列（為什麼、貢獻、籌碼）",
         "length": "AI 寫的部分合計 1,500–2,500 字；標題 20–36 字",
-        "sections": """- title：標題，20–36 字，只寫事實。
-- highlights：3 點，每點一段（1–2 句）。
+        "sections": """- title：標題，20–36 字，只寫事實，先講這一天最特別的一件事：先看「這一天不一樣的地方」\
+與報導（X）裡的大事，挑一\
+到兩件寫（例如漲跌的點數裡哪一類佔了多少、櫃買指數和加權指數的差距、成交金額是 5 日均量的幾成）；不要只寫指數漲跌幅與漲\
+跌家數，數字欄已經有。
+- highlights：重點，是頁面上一列一格的欄位（左邊印好欄位名稱，右邊是你寫的一段）。每一列是 \
+{"slot": 欄位, "para": 一段}，照下面的順序，每個 slot 最多一列；沒有東西可寫的 slot 不要給。
+  - why（為什麼）：報導寫的大盤漲跌原因（X 或 W）。沒有報導就不給這一列。
+  - drivers（貢獻）：誰帶動或拖累指數，至少引用一筆 F：類股或權值股的點數貢獻（寫成「約 −494 點（估算）」）、臺灣50 \
+和中型\
+100、櫃買指數和加權指數的差距，挑最能說明這一天的一到兩組數字。
+  - chips（籌碼）：上市三大法人的買賣超，只能引用報導（X）；沒有報導就不給這一列。
+  每一列 1 句、最多 2 句，60 字以內。提到半導體類時，同一列要引用它的集中度（「主要由台積電構成，約 77%」那一筆 F）。\
+「位置」「量」兩列由伺服器寫（收在 5 日線、10 日線的上面或下面、成交金額和前一日與 5 日均量的比較），\
+你不用寫，也不要重複。
 - what_happened：今天發生什麼，2–4 段、合計 300–500 字。原因一定要有 X 或 W；沒有報導就不寫原因。可以寫背離：漲跌家數\
-和指數方向、0050 和加權指數的差距。
+和指數方向、0050 和加權指數的差距。加權指數與 5 日線、10 日線的圖在重點下面，這一段不用描述走勢。
 - sectors：類股 1–2 段，只談 rules 指定的類股（漲跌幅前 3、後 3，點數貢獻最大與最小的 3 類，半導體）。點數貢獻引用 \
 metric=sector_contrib_est 的 F，寫成「約 −494 點（估算）」；圖上其他類股的數字不要逐一重抄。
 - stocks：權值股與個股，最多 10 項，每項一檔：symbol（stocks 名單的 symbol）、para 的第一句以「名稱（代號）」開頭。寫\
@@ -281,8 +323,8 @@ OUTPUT_KEYS = {
 
 # Count limits (min, max) checked by the server (validator §10.2 item 18)
 COUNTS: dict[str, dict[str, tuple[int, int]]] = {
-    "premarket": {"highlights": (3, 3), "overnight": (3, 5), "evening_notes": (0, 3), "watch": (2, 4)},
-    "close": {"highlights": (3, 3), "what_happened": (2, 4), "sectors": (1, 2), "stocks": (0, 10), "chips": (1, 2),
+    "premarket": {"highlights": (1, 3), "overnight": (3, 5), "evening_notes": (0, 3), "watch": (2, 4)},
+    "close": {"highlights": (1, 3), "what_happened": (2, 4), "sectors": (1, 2), "stocks": (0, 10), "chips": (1, 2),
               "tonight": (0, 3)},
     "weekly": {"highlights": (3, 5), "market_week": (1, 4), "sectors_week": (1, 2), "stocks_week": (0, 10),
                "chips_week": (1, 2), "global_week": (1, 4), "last_week_review": (0, 10), "themes": (3, 5),
@@ -326,6 +368,12 @@ def _paras() -> dict[str, Any]:
     return _arr(_ref("para"))
 
 
+def _rows(kind: str) -> dict[str, Any]:
+    """The brief's rows: the field it fills (``slot``, one of the writer's fields of ``kind``) and its paragraph —
+    the shape of an item or a stock, so the paragraph is still spelled out once (``$defs``)."""
+    return _arr(_obj({"slot": {"type": "string", "enum": list(BRIEF_SLOTS[kind])}, "para": _ref("para")}))
+
+
 def _root(props: dict[str, Any], *defs: str) -> dict[str, Any]:
     out = _obj(props)
     out["$defs"] = {k: copy.deepcopy(_DEFS[k]) for k in ("sent", "para", *defs)}
@@ -336,10 +384,10 @@ def schema(kind: str, chart_codes: list[str]) -> dict[str, Any]:
     """The writer's output schema of ``kind`` (counts are checked by the server, not the schema)."""
     title = {"type": "string"}
     if kind == "premarket":
-        return _root({"title": title, "highlights": _paras(), "overnight": _paras(), "evening_notes": _paras(),
+        return _root({"title": title, "highlights": _rows(kind), "overnight": _paras(), "evening_notes": _paras(),
                       "watch": _arr(_ref("item")), "chart_of_day": _chart(chart_codes)}, "item")
     if kind == "close":
-        return _root({"title": title, "highlights": _paras(), "what_happened": _paras(), "sectors": _paras(),
+        return _root({"title": title, "highlights": _rows(kind), "what_happened": _paras(), "sectors": _paras(),
                       "stocks": _arr(_ref("stock")), "chips": _paras(), "tonight": _arr(_ref("item")),
                       "chart_of_day": _chart(chart_codes)}, "item", "stock")
     review = _obj({"ref": {"type": "string"}, "para": _ref("para")})
@@ -357,7 +405,8 @@ def available_charts(pack: dict[str, Any]) -> list[str]:
 
 PACK_FOR_WRITER = ("kind", "kind_label", "edition_date", "edition_label", "period", "next_period", "cutoff",
                    "publish_target", "dates", "facts", "calendar", "filings", "research", "web", "stocks", "sectors",
-                   "missing", "strip", "already_reported", "rules", "charts_menu", "fixed_charts", "disagreements")
+                   "missing", "strip", "already_reported", "unusual", "rules", "charts_menu", "fixed_charts",
+                   "disagreements")
 
 
 def pack_json(pack: dict[str, Any]) -> str:
@@ -367,15 +416,27 @@ def pack_json(pack: dict[str, Any]) -> str:
 
 # Short names of the server's charts (the writer only needs to know what the page shows next to its text)
 CHART_NAMES = {
-    "G1": "加權指數收盤", "G2": "上市類股漲跌（加權指數虛線、期間切換）", "G2_otc": "上櫃類股漲跌（估算）",
+    "G1": "加權指數收盤", "G2": "上市類股漲跌（加權指數虛線、期間切換）",
+    "G2_otc": "上櫃類股漲跌（估算）",
     "G3": "市值前 10 點數貢獻（估算）", "G5": "權值股一個月比較", "G6": "美股 ETF 與台積電 ADR",
     "G7": "外資台指期淨未平倉", "G8": "類股成交金額比重", "G15": "規模與風格指數",
     "G16": "上櫃三大法人依產業別（估算）", "G17": "各類股點數貢獻（估算）",
 }
 
 
-def chart_list(codes: list[str]) -> str:
-    return "、".join(f"{c} {CHART_NAMES[c]}" if c in CHART_NAMES else c for c in codes)
+def trend_chart_name(pack: dict[str, Any]) -> str:
+    """G1 as this report draws it: the premarket's and the close's is the trend chart under the brief, with the
+    averages the pack has (none while the archive is short: the writer must not read 「5 日線」 into it); the weekly's
+    is the plain line of its own section."""
+    if pack.get("kind") not in BRIEF_ORDER:
+        return CHART_NAMES["G1"]
+    names = list(dict.fromkeys(str(f.get("subject")) for f in pack.get("facts") or [] if f.get("metric") == "index_ma"))
+    return CHART_NAMES["G1"] + ("與 " + "、".join(names) if names else "") + "（在重點下面）"
+
+
+def chart_list(codes: list[str], pack: dict[str, Any] | None = None) -> str:
+    names = {**CHART_NAMES, **({"G1": trend_chart_name(pack)} if pack is not None else {})}
+    return "、".join(f"{c} {names[c]}" if c in names else c for c in codes)
 
 
 def kind_instructions(kind: str, pack: dict[str, Any]) -> str:
@@ -392,12 +453,13 @@ def kind_instructions(kind: str, pack: dict[str, Any]) -> str:
         f"# 長度：{spec['length']}；重點 {spec['highlights']}。",
         "",
         "# 今日圖",
-        f"伺服器已經放好固定圖（{chart_list(list(pack.get('fixed_charts') or []))}），你不用處理；圖上的數字由伺服器"
-        "畫，段落不要逐一重抄，要寫數字就引用 F。可以從下面可用的選單另外挑 1 張；不需要就填 none：",
+        f"伺服器已經放好固定圖（{chart_list(list(pack.get('fixed_charts') or []), pack)}），你不用處理；"
+        "圖上的數字由伺服器畫，段落不要逐一重抄，要寫數字就引用 F。可以從下面可用的選單另外挑 1 張；不需要就填 none：",
         json.dumps(menu, ensure_ascii=False) if menu else "（這份沒有可選的圖：code 填 none）",
         "",
         "# 數字欄已經列出（段落不要整串重抄）",
         "、".join(strip) if strip else "（無）",
+        *unusual_lines(pack),
         "",
         "# 資料包的規則",
         *("- " + r for r in pack.get("rules") or []),
@@ -411,6 +473,17 @@ def kind_instructions(kind: str, pack: dict[str, Any]) -> str:
         lines += ["", "這份沒有已驗證的報導（X）：不要寫任何報導或原因。個股項目不寫原因，也不寫「未找到報導」"
                   "（伺服器會在個股段寫一句「個股的漲跌原因未找到報導。」），其他段落不寫原因。"]
     return "\n".join(lines)
+
+
+def unusual_lines(pack: dict[str, Any]) -> list[str]:
+    """「這一天不一樣的地方」: the server's candidates for the headline and the brief (``pack["unusual"]``, the furthest
+    from an ordinary day first), each with the facts it stands on; nothing when the day has none."""
+    rows = [u for u in pack.get("unusual") or [] if u.get("what")]
+    if not rows:
+        return []
+    return ["", "# 這一天不一樣的地方（伺服器依資料算的，離平常最遠的排前面；標題與重點優先從這裡和報導挑，"
+                "數字照抄、引用後面的編號）",
+            *(f"- {u['what']}（{'、'.join(u.get('refs') or [])}）" for u in rows)]
 
 
 def revise_message(problems: list[dict[str, Any]]) -> str:
@@ -447,6 +520,14 @@ REVISE_HINTS = {
     "risk_not_ahead": "可能讓關注點改變的事只放還沒發生或還沒有結果的事（已排定的會議、數據公布、審議中的政策）；已經"
                       "公布的數字、已經發生的事拿掉，需要的話寫在國際或上週大盤。",
     "chips_off_topic": "籌碼只寫法人與資金流向：匯率移到國際（週報），P/C 比與結算日拿掉。",
+    "slot_invalid": "highlights 的每一列都要有 slot，而且只能是這份報告的欄位（盤前：overnight、why、scheduled；"
+                    "盤後：why、drivers、chips）；位置、量由伺服器寫。",
+    "slot_repeated": "highlights 的每個 slot 最多一列：把同一個欄位的句子併成一列，或刪掉多的那一列。",
+    "slot_needs_report": "why（為什麼）與盤後的 chips（籌碼）一定要引用報導（X；為什麼也可以是 W）；"
+                         "沒有報導就不要給這一列。",
+    "slot_needs_fact": "drivers（貢獻）至少引用一筆 F（點數貢獻、臺灣50、中型100、櫃買指數…）。",
+    "slot_not_event": "scheduled（排定）的每一句都要引用行事曆（C）或寫明時間的報導（X）；"
+                      "沒有就不要給這一列。",
     "estimate_unmarked": "點數貢獻是 Forliosa 的估算，不是官方數字：寫成「約 −494 點（估算）」（數字前面加「約」，或"
                          "同一句寫「估算」）。",
     "compliance:private_life": "只寫和公司經營有關的事實（例如「辭去執行長」）；刪掉感情、婚姻、外遇、健康、家庭這類"

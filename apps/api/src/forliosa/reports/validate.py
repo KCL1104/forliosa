@@ -17,7 +17,10 @@ item is an event of the calendar or a report (``item_not_event``); no sentence a
 (``internal_gap``: the page shows missing data itself); no US local time left without its Taipei time; no private-life
 detail, whoever reported it (``private_life``); the chips hold institutional investors and fund flows only
 (``chips_off_topic``); the weekly uses a calendar row or a report once per section of highlights, this week, themes
-and risks (``repeated_fact``), and its risks are still ahead (``risk_not_ahead``).
+and risks (``repeated_fact``), and its risks are still ahead (``risk_not_ahead``); the premarket's and the close's
+highlights are the brief's rows (2026-11-27): each names its field (``slot_invalid``), once (``slot_repeated``), 為什麼
+and the close's 籌碼 stand on a report (``slot_needs_report``), 貢獻 on a fact (``slot_needs_fact``), every 排定
+sentence on a calendar row or a report (``slot_not_event``) — a row that fails goes alone, the others stay.
 
 :func:`drop` takes out what still fails after the revision: given the pack, one sentence (or one item) at a time,
 the rest checked again; a section goes as a whole only when what is left still fails.
@@ -37,7 +40,16 @@ from typing import Any
 from forliosa.reports.calendars import US_LOCAL_TIME, converted_spans, us_times_to_taipei
 from forliosa.reports.marketcalc import SECTOR_NAMES
 from forliosa.reports.pack import OPTION_METRICS
-from forliosa.reports.prompts import COUNTS, FORBIDDEN_WORDS, LENGTHS, OUTPUT_KEYS, STYLE_WORDS, TIME_WORDS
+from forliosa.reports.prompts import (
+    BRIEF_ROW_MAX,
+    BRIEF_SLOTS,
+    COUNTS,
+    FORBIDDEN_WORDS,
+    LENGTHS,
+    OUTPUT_KEYS,
+    STYLE_WORDS,
+    TIME_WORDS,
+)
 from forliosa.timeutil import TAIPEI
 
 # Index points (美股指數、台指期、夜盤) never appear, in a gathered report or a sentence (§8.5 item 7, §10.2 item 21):
@@ -152,7 +164,7 @@ WEEKDAYS = "一二三四五六日"
 SIGNED_METRICS = frozenset({
     "index_change", "index_pct", "tr_pct", "otc_change", "otc_pct", "sector_pct", "stock_pct", "stock_contrib",
     "us_pct", "futures_oi_change", "week_pct", "week_points", "mcap_change_est", "reference_pct", "otc_inst_total",
-    "otc_inst_foreign", "otc_inst_trust", "otc_inst_dealer", "sector_contrib_est",
+    "otc_inst_foreign", "otc_inst_trust", "otc_inst_dealer", "sector_contrib_est", "index_range_pct", "style_pct",
 })
 # Point contributions are Forliosa's estimates, never official numbers: a sentence citing one writes 「約」 before it or
 # 「估算」 somewhere in it (the prompts ask for 「約 −494 點（估算）」)
@@ -223,7 +235,9 @@ def sentences(output: dict[str, Any], kind: str) -> Iterator[Sentence]:
                     yield from _para_sentences(item.get(sub), f"{base}.{sub}", key, sub)
             else:
                 symbol = str(item.get("symbol") or "") if key in STOCK_KEYS else ""
-                yield from _para_sentences(item.get("para"), f"{base}.para", key, symbol=symbol)
+                # a brief row (the premarket's and the close's highlights): its field rides on its sentences
+                slot = str(item.get("slot") or "") if key == "highlights" else ""
+                yield from _para_sentences(item.get("para"), f"{base}.para", key, slot, symbol)
 
 
 def ai_text_chars(output: dict[str, Any], kind: str) -> int:
@@ -709,7 +723,8 @@ def check_sentence(c: Ctx, s: Sentence, para_refs: set[str]) -> list[Problem]:
         out.append(Problem(s.path, "us_local_time", us))
     if (private := private_life(text)) is not None:
         out.append(Problem(s.path, "private_life", private))
-    if s.key in CHIPS_KEYS and (off := chips_off_topic(c, text, s.refs)) is not None:
+    if (s.key in CHIPS_KEYS or (s.key == "highlights" and s.sub == "chips")) \
+            and (off := chips_off_topic(c, text, s.refs)) is not None:
         out.append(Problem(s.path, "chips_off_topic", off))
     # sectors
     for name in _sector_mentions(text):
@@ -962,7 +977,7 @@ def _check_lengths(output: dict[str, Any], kind: str) -> list[Problem]:
     for s in sentences(output, kind):
         by_para[s.para] = by_para.get(s.para, 0) + len(s.text)
     for p, n in by_para.items():
-        if n > para_max * 1.25:
+        if n > para_max * 1.25 or (kind in BRIEF_SLOTS and p.startswith("highlights[") and n > BRIEF_ROW_MAX):
             out.append(Problem(p, "too_long", str(n), hard=False))
     total = ai_text_chars(output, kind)
     if total > total_max * 1.25:
@@ -1020,6 +1035,43 @@ def _check_items(c: Ctx, output: dict[str, Any], kind: str) -> list[Problem]:
     return out
 
 
+def _check_brief(c: Ctx, output: dict[str, Any], kind: str) -> list[Problem]:
+    """The brief's rows (the premarket's and the close's highlights): each fills one of the writer's fields of the
+    kind, a field once; 為什麼 stands on a report (X / W), the close's 籌碼 on a report too (the listed institutions
+    have no open data), 貢獻 on at least one fact, and every 排定 sentence on a calendar row or a report. Each problem
+    takes its row alone (:data:`ITEM_LEVEL`). A field is taken by the first row that stands on what it needs: a row
+    that goes for its content does not make the next row of its field a repeat (that one would go with it)."""
+    slots = BRIEF_SLOTS.get(kind)
+    if slots is None:
+        return []
+    out: list[Problem] = []
+    seen: set[str] = set()
+    for i, row in enumerate(output.get("highlights") or []):
+        if not isinstance(row, dict):
+            continue
+        path, slot = f"highlights[{i}]", str(row.get("slot") or "")
+        if slot not in slots:
+            out.append(Problem(path, "slot_invalid", slot or "沒有 slot"))
+            continue
+        if slot in seen:
+            out.append(Problem(path, "slot_repeated", slot))
+            continue
+        para = row.get("para") if isinstance(row.get("para"), dict) else {}
+        per = [[str(r) for r in x.get("refs") or []] for x in para.get("sentences") or [] if isinstance(x, dict)]
+        refs = [r for one in per for r in one]
+        if slot == "why" and not any(r[:1] in ("X", "W") and c.ref(r) is not None for r in refs):
+            out.append(Problem(path, "slot_needs_report", "為什麼要引用報導"))
+        elif slot == "chips" and kind == "close" and not any(r in c.web for r in refs):
+            out.append(Problem(path, "slot_needs_report", "上市三大法人只能引用報導"))
+        elif slot == "drivers" and not any(r in c.facts for r in refs):
+            out.append(Problem(path, "slot_needs_fact", "貢獻至少引用一筆 F"))
+        elif slot == "scheduled" and (not per or any(not any(r in c.cal or r in c.web for r in one) for one in per)):
+            out.append(Problem(path, "slot_not_event", "排定的每一句都要引用行事曆（C）或報導（X）"))
+        else:
+            seen.add(slot)
+    return out
+
+
 def validate(output: dict[str, Any], pack: dict[str, Any], kind: str, names: Iterable[str] = ()) -> list[Problem]:
     """Every problem of ``output`` (the writer's JSON) against ``pack``."""
     c = context(pack, kind, names)
@@ -1043,6 +1095,7 @@ def validate(output: dict[str, Any], pack: dict[str, Any], kind: str, names: Ite
     out += _check_lengths(output, kind)
     out += _check_chart(c, output)
     out += _check_items(c, output, kind)
+    out += _check_brief(c, output, kind)
     if kind == "weekly":
         out += _repeated_facts(output)
         out += _risks_not_ahead(c, output)
@@ -1205,7 +1258,9 @@ def tidy(output: dict[str, Any], kind: str, pack: dict[str, Any] | None = None) 
     return out
 
 
-ITEM_LEVEL = {"stock_item_mismatch", "item_not_event", "risk_not_ahead"}  # the item goes, never its section
+# the item goes, never its section (a brief row with the wrong field or without what its field stands on)
+ITEM_LEVEL = {"stock_item_mismatch", "item_not_event", "risk_not_ahead", "slot_invalid", "slot_repeated",
+              "slot_needs_report", "slot_needs_fact", "slot_not_event"}
 _SENT_PATH = re.compile(r"^(?P<key>\w+)(?:\[(?P<i>\d+)\])?(?:\.(?P<sub>para|why|events|relation|caption))?"
                         r"\.sentences\[(?P<j>\d+)\]$")
 _ITEM_PATH = re.compile(r"^(?P<key>\w+)\[(?P<i>\d+)\]")

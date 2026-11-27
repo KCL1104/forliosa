@@ -599,6 +599,56 @@ def index_move(points: list[IndexPoint], end: date, base: date) -> Decimal | Non
     return (last.close - first.close) / first.close
 
 
+def unbroken_run(days: Iterable[date], end: date, closed: Iterable[date] = ()) -> list[date]:
+    """The sessions of ``days`` that end at ``end`` without a missing trading day between them (oldest first): an
+    average or a streak over 「最近 n 個交易日」 only counts sessions that really follow one another. Empty when ``end``
+    itself is not among them. ``closed``: weekdays of the calendar on which the market did not open (a typhoon day —
+    the calendar holds the year's scheduled closures only); they are no session, so they break nothing."""
+    have = set(days)
+    if end not in have:
+        return []
+    shut = set(closed) - have
+    first = min(have)
+    run: list[date] = []
+    for d in reversed(tw_trading_days(first, end)):
+        if d in shut:
+            continue
+        if d not in have:
+            break
+        run.append(d)
+    run.reverse()
+    return run
+
+
+def moving_average(closes: list[tuple[date, Decimal]], n: int) -> list[tuple[date, Decimal]]:
+    """The ``n``-session average of consecutive ``closes`` (oldest first): one point from the ``n``-th close on."""
+    if n < 1:
+        return []
+    out = []
+    total = Decimal(0)
+    for i, (d, c) in enumerate(closes):
+        total += c
+        if i >= n:
+            total -= closes[i - n][1]
+        if i >= n - 1:
+            out.append((d, total / n))
+    return out
+
+
+def streak(closes: list[Decimal]) -> int:
+    """The run of rises (+) or falls (−) that ends at the last of consecutive ``closes``: +3 after three rises in a
+    row, 0 when the last close did not move (or there is nothing to compare it with)."""
+    if len(closes) < 2 or closes[-1] == closes[-2]:
+        return 0
+    up = closes[-1] > closes[-2]
+    n = 0
+    for i in range(len(closes) - 1, 0, -1):
+        if closes[i] == closes[i - 1] or (closes[i] > closes[i - 1]) != up:
+            break
+        n += 1
+    return n if up else -n
+
+
 def sessions_back(end: date, n: int) -> date:
     """The Taiwan session ``n`` sessions before ``end`` (``n`` = 5: the close a week's move starts from)."""
     days = [d for d in tw_trading_days(end - timedelta(days=14 + 2 * n), end) if d <= end]
