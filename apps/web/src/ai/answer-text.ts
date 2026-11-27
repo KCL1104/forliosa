@@ -131,10 +131,18 @@ const TRAIL_FILLER = /以[^。]{0,12}為準|^以上(?:是|為)?[^。]*(?:整理|
 /** 交代資料的結尾句裡的日期，回答別的地方都寫過了才算沒有新資訊 */
 const DATES = /\d{1,2}\/\d{1,2}/g
 
+/** 中日韓的字：回答是繁體中文，整行沒有一個中文字、只有英文句子的第一行是模型寫給自己的備註 */
+const CJK = /[\u3400-\u9fff\uf900-\ufaff]/
+const ENGLISH_NOTE = /[A-Za-z]{2,}[^\n]*\s[A-Za-z]{2,}/
+
 export function dropAiHabits(text: string, { streaming = false }: { streaming?: boolean } = {}): string {
   const lines = text.split("\n")
   const first = lines.findIndex((l) => l.trim())
-  if (first >= 0 && PREAMBLE.test(lines[first]!.trim()) && lines.slice(first + 1).some((l) => l.trim())) lines.splice(first, 1)
+  const rest = first >= 0 ? lines.slice(first + 1) : []
+  // 開頭交代要做什麼的一行；或一行英文的備註（「Per rules, no items means don't write it. Draw chart.」，2026-11-27 實測）——
+  // 後面要有中文的回答才拿，整則只有這一行時不動
+  if (first >= 0 && PREAMBLE.test(lines[first]!.trim()) && rest.some((l) => l.trim())) lines.splice(first, 1)
+  else if (first >= 0 && !CJK.test(lines[first]!) && ENGLISH_NOTE.test(lines[first]!) && rest.some((l) => CJK.test(l))) lines.splice(first, 1)
   let out = lines.join("\n").replace(WRITTEN_CALL, "").replace(/^[ \t]*<br\s*\/?>[ \t]*$/gim, "")
   const narrated = out.replace(OWN_CORRECTION, "$1").replace(NARRATION, "$1")
   out = (narrated.trim() ? narrated : out)

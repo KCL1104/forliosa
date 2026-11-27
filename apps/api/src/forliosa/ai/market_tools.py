@@ -9,6 +9,10 @@ nothing about the whole market. These read what the market page and the market r
   and the market-wide rows are listed; the rest are counted by kind with a few names (largest first).
 * ``get_market_overview`` — the latest session: both indices, advancers and decliners, sector moves, the market page's
   rankings (``services.market_overview.snapshot``) and the stocks at the limit up / down (both exchanges).
+* ``get_market_trend`` (產品負責人 2026-11-27: 「分析趨勢並給予建議」) — the last sessions, not just the latest one: the
+  TAIEX against its averages and over 5 / 10 / 20 sessions, the OTC and size indices, the turnover against its
+  average, and the listed sectors ranked over 5 sessions with their largest stocks. Official archive only; a period
+  the archive does not reach is left out.
 * ``get_market_report`` — the newest published 盤前重點／盤後重點／市場週報: each news page the report cites becomes a
   citable search result holding the report's sentences that cite it, so the answer links the original article.
 * ``get_watchlist`` — the user's watchlist with the latest official close.
@@ -32,9 +36,12 @@ from typing import Any
 from sqlalchemy import select
 
 from forliosa.ai.tools import Citable, ToolContext, ToolError
-from forliosa.models import MarketEvent, WatchlistItem
+from forliosa.marketdata.opendata import TPEX_INDEX
+from forliosa.models import MarketEvent, MarketTurnoverDaily, WatchlistItem
+from forliosa.reports import blocks as B
 from forliosa.reports import calendars as cal
 from forliosa.reports import marketcalc as mc
+from forliosa.reports.timing import usable
 from forliosa.timeutil import TAIPEI, next_tw_trading_day, now_utc
 
 log = logging.getLogger(__name__)
@@ -47,6 +54,11 @@ OTHER_EXAMPLES = 5
 MOVERS_N = 10
 SECTORS_N = 5
 LIMIT_N = 10
+TREND_SESSIONS = (5, 10, 20)  # 「近 5 個交易日」…: each only when the archive holds that many sessions in a row
+TREND_SECTORS_N = 6
+TREND_MEMBER_SECTORS = 4  # the strongest sectors that come with their largest stocks
+TREND_MEMBERS_N = 3
+TREND_TURNOVER_SESSIONS = 5
 REPORT_KINDS = ("latest", "premarket", "close", "weekly")
 REPORT_SENTENCES_MAX = 40
 FOLLOW_UPS_MAX = 5
@@ -314,6 +326,185 @@ def market_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
     }
     if not movers and not out["indices"]:
         out["notes"] = ["目前沒有最近一個交易日的收盤資料"]
+    return out
+
+
+# -- get_market_trend --------------------------------------------------------------------------------------------
+def _gap(move: Any, bench: Any) -> str | None:
+    """The difference of two moves in percentage points: 「+2.41 個百分點」 (never a percentage of a percentage) —
+    of the two as they are shown (two decimals each), so a reader who subtracts them gets the same number."""
+    if move is None or bench is None:
+        return None
+    v = round(round(float(move) * 100, 2) - round(float(bench) * 100, 2), 2)
+    return f"{'+' if v > 0 else '−' if v < 0 else ''}{abs(v):.2f} 個百分點"
+
+
+def _period_label(n: int) -> str:
+    return f"近 {n} 個交易日"
+
+
+def _index_periods(points: dict[date, Any], day: date, bases: dict[int, date]) -> list[dict[str, Any]]:
+    """An index's move from the close of each base session to ``day`` (both closes archived, else no row)."""
+    out = []
+    for n, base in bases.items():
+        first, last = points.get(base), points.get(day)
+        if first and last:
+            out.append({"period": _period_label(n), "from_close_of": base.isoformat(), "change": pct(last / first - 1)})
+    return out
+
+
+def _turnover_trend(ctx: ToolContext, run: list[date], now: datetime) -> dict[str, Any] | None:
+    """The newest official listed turnover (FMTQIK: out the next morning) against the average of the
+    ``TREND_TURNOVER_SESSIONS`` sessions ending that day — only official numbers, only sessions in a row."""
+    rows = {r.date: int(r.trade_value) for r in ctx.db.scalars(select(MarketTurnoverDaily).where(
+        MarketTurnoverDaily.market == "TWSE", MarketTurnoverDaily.date.in_(run[-12:])))
+        if r.trade_value and usable("twse-openapi/turnover", r.date, now)}
+    have = [d for d in run if d in rows]
+    if not have:
+        return None
+    day = have[-1]
+    upto = run[:run.index(day) + 1]
+    out: dict[str, Any] = {"date": day.isoformat(), "value": B.yi_text(rows[day])}
+    window = upto[-TREND_TURNOVER_SESSIONS:]
+    if len(window) == TREND_TURNOVER_SESSIONS and all(d in rows for d in window):
+        avg = sum(rows[d] for d in window) / TREND_TURNOVER_SESSIONS
+        out[f"vs_{TREND_TURNOVER_SESSIONS}_session_average"] = f"{round(rows[day] / avg * 100)}%"
+    if len(upto) >= 2 and upto[-2] in rows:
+        diff = rows[day] - rows[upto[-2]]
+        out["vs_previous_session"] = f"{'多' if diff > 0 else '少'} {B.yi_text(abs(diff))}" if diff else "持平"
+    return out
+
+
+def market_trend(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """Where the market stands over the last sessions (official archive only, never the history backfill): what a
+    「趨勢」 answer can state as facts. Everything is over sessions that follow one another (``mc.unbroken_run``; a day
+    the market did not open is no hole); a period the archive does not reach is left out and named in ``notes``."""
+    now = now_utc()
+    policy = ctx.md.policy
+    today = now.astimezone(TAIPEI).date()
+    closes = mc.taiex_closes(ctx.db, now, today, policy=policy, limit=60)
+    if not closes:
+        return {"status": "none", "note": "目前沒有加權指數的收盤資料"}
+    day = max(closes)
+    run = mc.unbroken_run(closes, day, mc.no_session_days(ctx.db, day, now, policy))
+    series = [(d, closes[d][0]) for d in run]
+    last = series[-1][1]
+    bases = {n: series[-n - 1][0] for n in TREND_SESSIONS if len(series) > n}
+    notes: list[str] = []
+    missing = [n for n in TREND_SESSIONS if n not in bases]
+    if missing:
+        notes.append(f"存檔裡到 {_md(day)} 為止連續的交易日有 {len(series)} 個："
+                     + "、".join(_period_label(n) for n in missing) + "的漲跌還沒有，不要自己推算")
+
+    # -- the TAIEX ----------------------------------------------------------------------------------------------
+    taiex: dict[str, Any] = {"date": day.isoformat(), "close": B.number_text(last)}
+    day_move = last / series[-2][1] - 1 if len(series) >= 2 else None
+    if day_move is not None:
+        taiex["change_1_day"] = pct(day_move)
+    taiex["periods"] = _index_periods(dict(series), day, bases)
+    averages = []
+    for n in TREND_SESSIONS:
+        avg = mc.moving_average(series, n)
+        if avg:
+            averages.append({"name": B.average_name(n), "value": B.number_text(avg[-1][1]),
+                             "close_is": "之上" if last >= avg[-1][1] else "之下"})
+    if averages:
+        taiex["averages"] = averages
+    streak = mc.streak([c for _d, c in series])
+    # a run that reaches the oldest close in a row may have begun before it: its length is not known, so not said
+    if 2 <= abs(streak) < len(series) - 1:
+        taiex["streak"] = f"連 {abs(streak)} 日{'上漲' if streak > 0 else '下跌'}"
+    out: dict[str, Any] = {"as_of": day.isoformat(), "taiex": taiex}
+    if (turnover := _turnover_trend(ctx, run, now)) is not None:
+        out["listed_turnover"] = turnover
+
+    # -- the OTC index and the size indices over the same sessions --------------------------------------------
+    since = (min(bases.values()) if bases else day) - timedelta(days=10)
+    others = []
+    for label, name in (("櫃買指數", TPEX_INDEX),
+                        *((lab, nm) for group, lab, nm in mc.STYLE_INDICES if group == "大小型股")):
+        pts = mc.index_points(ctx.db, name, now, upto=day, since=since, policy=policy)
+        if not pts or pts[-1].day != day:
+            continue
+        row: dict[str, Any] = {"name": label, "change_1_day": pct(pts[-1].pct)}
+        if periods := _index_periods({p.day: p.close for p in pts}, day, bases):
+            row["periods"] = periods
+        others.append(row)
+    if others:
+        out["other_indices"] = others
+
+    # -- the listed sectors, ranked over the shortest period there is -----------------------------------------
+    twse = _latest_day(ctx, "TWSE", now)
+    twse = twse if twse is not None and twse.day == day else None
+    secs = mc.sectors(ctx.db, day, now, twse, policy)
+    views = mc.sector_views(ctx.db, day, now, series, {x.name: x.pct for x in secs}, day_move, policy=policy,
+                            periods=[(str(n), _period_label(n), base) for n, base in bases.items()], since=False) \
+        if secs else []
+    multi = [v for v in views if v.key != "1d"]
+    rank = multi[0] if multi else (views[0] if views else None)
+    if rank is not None:
+        longer = multi[1] if len(multi) > 1 else None
+        ranked = sorted((x for x in secs if x.name in rank.moves), key=lambda x: (-rank.moves[x.name], x.name))
+        top_longer = set(sorted(longer.moves, key=lambda k: -longer.moves[k])[:TREND_SECTORS_N]) if longer else set()
+        bottom_longer = set(sorted(longer.moves, key=lambda k: longer.moves[k])[:TREND_SECTORS_N]) if longer else set()
+
+        def sector_row(x: mc.Sector, also: set[str], flag: str) -> dict[str, Any]:
+            row: dict[str, Any] = {"name": x.name}
+            for v in views:
+                if (m := v.moves.get(x.name)) is not None:
+                    row["change_1_day" if v.key == "1d" else v.label] = pct(m)
+            if (gap := _gap(rank.moves.get(x.name), rank.bench)) is not None:
+                row["vs_taiex"] = gap
+            if longer is not None and x.name in also:
+                row[flag] = True
+            if (note := mc.concentration_text(x)) is not None:
+                row["note"] = note
+            return row
+
+        strongest = ranked[:TREND_SECTORS_N]
+        weakest = [x for x in ranked[::-1][:TREND_SECTORS_N] if x not in strongest]
+        also = (f"also_strong_{longer.label}", f"also_weak_{longer.label}") if longer else ("", "")
+        sectors: dict[str, Any] = {
+            "ranked_by": "1 日" if rank.key == "1d" else rank.label,
+            "taiex_same_period": pct(rank.bench),
+            "strongest": [sector_row(x, top_longer, also[0]) for x in strongest],
+            "weakest": [sector_row(x, bottom_longer, also[1]) for x in weakest],
+        }
+        # the largest stocks of the strongest sectors: a stated rule (market cap), never a pick
+        if twse is not None:
+            picked: dict[str, list[mc.Quote]] = {}
+            for x in strongest[:TREND_MEMBER_SECTORS]:
+                codes = mc.SECTOR_CODES.get(x.name) or []
+                members = sorted((q for q in twse.commons() if q.industry_code in codes and q.mcap is not None),
+                                 key=lambda q: (-q.mcap, q.symbol))[:TREND_MEMBERS_N]
+                if members:
+                    picked[x.name] = members
+            symbols = [q.symbol for qs in picked.values() for q in qs]
+            moves = mc.chained_returns(ctx.db, symbols, day, now, {str(n): b for n, b in bases.items()}, policy)
+            for row in sectors["strongest"]:
+                members = picked.get(row["name"])
+                if not members:
+                    continue
+                row["largest_stocks"] = []
+                for q in members:
+                    item: dict[str, Any] = {"name": mc.clean_name(q.name), "symbol": q.symbol,
+                                            "change_1_day": pct(q.pct)}
+                    for n in bases:
+                        if (m := moves.get(q.symbol, {}).get(str(n))) is not None:
+                            item[_period_label(n)] = pct(m)
+                    row["largest_stocks"].append(item)
+        out["sectors"] = sectors
+    else:
+        notes.append("目前沒有類股指數的收盤資料")
+    out["units"] = (
+        "全部來自官方收盤的存檔，只算連續的交易日。change 與各期間的漲跌已經是百分比，照寫；"
+        "averages 是最近 n 個交易日收盤的平均，close_is 是收盤在它之上或之下（只是位置，不是支撐或壓力）；"
+        "vs_taiex 是類股和加權指數同一期間漲跌的差（百分點）；類股照 ranked_by 的期間排，"
+        f"strongest／weakest 各 {TREND_SECTORS_N} 個；largest_stocks 是那個類股裡市值最大的 {TREND_MEMBERS_N} 檔"
+        "（照市值列出，不是挑選）；note 寫「主要由某一檔構成」的類股，提到它時要一起寫；"
+        "listed_turnover 是官方的上市成交金額（隔天清晨才有，看它的 date）")
+    if notes:
+        out["notes"] = notes
     return out
 
 

@@ -151,6 +151,14 @@ describe("dropAiHabits：模型談自己的固定寫法（2026-11-26 常見問�
     expect(dropAiHabits("券商不能替你決定，法人也是。")).toBe("券商不能替你決定，法人也是。")
   })
 
+  it("回答前面一行寫給自己的英文備註拿掉；本來就是英文開頭的資料不動", () => {
+    expect(dropAiHabits("Per rules, no items means don't write it. Draw chart.\n\n11/27 加權指數收在 5 日線之上。")).toBe("11/27 加權指數收在 5 日線之上。")
+    // 有中文字的第一行、只有一行、後面沒有中文的回答：都不動
+    expect(dropAiHabits("NVDA 11/26 收 180.25 美元。\n\n- 本益比 45 倍。")).toBe("NVDA 11/26 收 180.25 美元。\n\n- 本益比 45 倍。")
+    expect(dropAiHabits("Draw chart first.")).toBe("Draw chart first.")
+    expect(dropAiHabits("TSM\n\n台積電 ADR 11/26 收 297 美元。")).toBe("TSM\n\n台積電 ADR 11/26 收 297 美元。")
+  })
+
   it("說自己不知道漲跌、也不替你挑（產品負責人 2026-11-27）：拿掉，後面的結論留著當第一句", () => {
     // 負責人截圖的那一則回答的第一句
     const seen = "下週要買什麼，漲跌沒辦法事先知道，我也不替你挑。下面是 11/30 到 12/4 已排定的事和市場焦點。重點是 11/30 台積電法說會。"

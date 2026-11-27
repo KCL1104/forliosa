@@ -96,6 +96,44 @@ def test_follow_ups_before_the_answer_ask_for_the_answer(client, pool, fake):
     assert follow == [{"questions": ["智邦上次法說會說了什麼？", "健策為什麼被處置？"]}]
 
 
+def test_a_note_beside_the_lookups_is_not_the_answer(client, pool, fake):
+    # live test 2026-11-27 (Sonnet, the look-ahead answer): a line to itself next to draw_chart, then
+    # suggest_follow_ups alone — the line was the whole answer. It is taken off and the answer asked for.
+    from forliosa.ai.chat import FOLLOW_UPS_NOTE
+
+    fake.reply(text("Per rules, no items means don't write it. Draw chart."),
+               tool_use("toolu_o", "get_market_overview", {}), stop_reason="tool_use")
+    fake.reply(tool_use("toolu_f", "suggest_follow_ups",
+                        {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？"]}), stop_reason="tool_use")
+    answer = "11/27 加權指數收在 5 日線之上；可以關注近 5 個交易日比大盤強的電腦及週邊設備，11/30 另有智邦法說會。"
+    fake.reply(text(answer), tool_use("toolu_g", "suggest_follow_ups",
+                                      {"questions": ["智邦上次法說會說了什麼？", "健策為什麼被處置？"]}),
+               stop_reason="tool_use")
+    status, events = chat(client, "下禮拜可以買什麼？")
+    assert status == 200 and len(fake.requests) == 3
+    result = fake.requests[2]["body"]["messages"][-1]["content"][0]
+    assert result["content"] == FOLLOW_UPS_NOTE and result["is_error"] is True
+    # the note leaves the screen before the answer is written
+    names = [n for n, _d in events]
+    reset = names.index("text_reset")
+    assert events[reset][1] == {"text": ""} and "".join(d["delta"] for n, d in events[reset:] if n == "text") == answer
+    detail = client.get(f"{API}/ai/threads/{events[-1][1]['thread_id']}").json()
+    assert detail["messages"][-1]["text"] == answer
+    assert detail["messages"][-1]["follow_ups"] == ["智邦上次法說會說了什麼？", "健策為什麼被處置？"]
+
+
+def test_an_answer_written_beside_a_tool_keeps_its_follow_ups(client, pool, fake):
+    # the answer may come in the same step as draw_chart and the questions alone in the next: long enough to be one
+    answer = ("11/27 加權指數收在 5 日線之上，近 5 個交易日漲 3.2%；可以關注近兩週都比大盤強的電腦及週邊設備，"
+              "11/30 另有智邦法說會。")
+    asked = {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？"]}
+    fake.reply(text(answer), tool_use("toolu_o", "get_market_overview", {}), stop_reason="tool_use")
+    fake.reply(tool_use("toolu_f", "suggest_follow_ups", asked), stop_reason="tool_use")
+    status, events = chat(client, "下禮拜可以買什麼？")
+    assert status == 200 and len(fake.requests) == 2 and "text_reset" not in [n for n, _d in events]
+    assert [d for n, d in events if n == "follow_ups"] == [asked]
+
+
 def test_follow_ups_asked_only_before_the_answer_are_used_after_it(client, pool, fake):
     asked = {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？", "要不要買智邦？"]}
     fake.reply(tool_use("toolu_f", "suggest_follow_ups", asked), stop_reason="tool_use")
@@ -326,3 +364,32 @@ def test_the_prompt_says_what_it_found_and_leaves_the_users_positions_out_unless
         assert "使用者持有的優先，其次是" not in prompt and "只問這一檔能不能買、好不好時不寫" in prompt
         assert "才寫他持股的集中度" in prompt
     assert "「漲跌沒辦法事先知道」「我也不替你挑」" in EDITOR_SYSTEM
+
+
+def test_the_prompt_reads_the_trend_and_names_directions_worth_watching():
+    """Owner 2026-11-27: 「改為分析趨勢並給予建議」, then 「可以推薦可關注方向 類股等，也可以若是個股也可以引用機構
+    目標價 評級等」 — the answer states the trend from ``get_market_trend``, names up to three directions or sectors
+    with the facts they stand on, and may quote named institutions' ratings and targets for the stocks it names. Still
+    no forecast of its own, no target of its own, no order to buy or sell."""
+    from forliosa.ai.prompts import CHAT_SYSTEM_TW, EDITOR_SYSTEM
+
+    assert "get_market_trend" in TOOLS_BY_NAME
+    for prompt in (CHAT_SYSTEM, CHAT_SYSTEM_TW):
+        assert "這些一次一起查：get_market_trend、get_market_calendar" in prompt
+        assert "照下面「明天看點與市場整理」寫現在的趨勢（get_market_trend）" in prompt  # 現在能不能進場
+        assert "可以關注的方向（產品負責人 2026-11-27）：直接寫「可以關注」哪幾個方向或類股，最多 3 個" in prompt
+        assert "依據只能是查得到的事實" in prompt and "只有單日漲跌、沒有其他依據的" in prompt
+        assert "依序是「現在的趨勢」「可以關注的方向」" in prompt
+        assert "整份回答最多挑 3 檔呼叫 get_analyst_views" in prompt and "不另外搜尋，也不說沒有" in prompt
+        # the words that were banned on 2026-11-26 are no longer: naming a direction is the point now
+        assert "「值得關注」「建議留意」「可以留意」這類推薦的字" not in prompt
+        # what stays out: its own forecast, rating, target, orders and price levels
+        assert "你自己對漲跌的預測" in prompt and "你自己的評等、目標價與合理價" in prompt
+        assert "買賣或加減碼的指令與價位" in prompt and "「可以關注」是請使用者去看這個方向，不是叫他買" in prompt
+        assert "不下買進或賣出的指令，也不給你自己的目標價" in prompt
+        assert "均線只說收盤在之上或之下，不寫支撐、壓力" in prompt
+        assert "notes 說還沒有的期間不寫，也不自己推算" in prompt
+        assert "問某一檔該不該買賣時不寫" in prompt
+    # the editor deletes advice to act, not the directions
+    assert "寫「可以關注」「先觀察」某個方向或類股的句子是回答的內容，照留" in EDITOR_SYSTEM
+    assert "買賣、加減碼的指令與價位照刪" in EDITOR_SYSTEM

@@ -4881,3 +4881,31 @@ AI 工具給的價格不受影響。CLAUDE.md 的 Yahoo 例外多了一句。
   - **同一個欄位寫兩列**（`validate._check_brief`）：通過內容檢查的那一列才算佔了欄位——前一列因為沒有報導被拿掉時，後一列不再跟著被當成重複。
   - **給撰寫模型的圖名**（`prompts.trend_chart_name`）：G1 照這一份實際畫的寫——週報是「加權指數收盤」，盤前、盤後有幾條均線寫幾條。
   - **mock**（`apps/web/src/api/mock/market-reports.ts`）：有欄位時 `highlights` 就是那幾列的段落；更正勾「重點」整組換成規則版的列。
+
+## 2026-11-27 問 AI：趨勢與可以關注的方向（產品負責人：「改為分析趨勢並給予建議」）
+
+產品的決定與界線在 `PRODUCT.md`「問 AI：不說自己不知道、沒問倉位不提倉位」。這裡是實作。
+
+- **`get_market_trend`**（`ai/market_tools.market_trend`，不是 strict 工具、沒有參數，進度細線「查看市場趨勢」）：
+  - 加權指數：收盤、1 日漲跌、近 5／10／20 個交易日的漲跌（`periods`，各附起算的那個收盤日）、5／10／20 日線的值與收盤在之上或之下、
+    連幾日漲跌（數得到起點才給）。只算存檔裡連續的交易日：`mc.taiex_closes`（MI_INDEX＋FMTQIK 補缺）、`mc.unbroken_run`、
+    `mc.no_session_days`（臨時休市不算缺）——和市場報告的均線同一套，這次從 `reports/pack.py` 搬到 `reports/marketcalc.py` 共用。
+  - `listed_turnover`：官方的上市成交金額（FMTQIK，隔天清晨才有，所以下午問到的是前一個交易日的，欄位裡有 `date`）、比前一日多或少、
+    是 5 個交易日平均的幾成（五個都是官方數字才給）。
+  - `other_indices`：櫃買指數與臺灣50、中型100、小型股300 同一批期間的漲跌。
+  - `sectors`：上市類股照最短的多日期間排（有近 5 個交易日就用它，存檔太短時用 1 日），`strongest`／`weakest` 各 6 個，每個有 1 日與各期間的
+    漲跌、`vs_taiex`（和加權指數同期間的差，百分點，照顯示的兩位小數相減）、在較長期間是不是也排前（後）6、一檔佔一半以上時的 `note`；
+    最強的 4 個各附市值最大的 3 檔（`largest_stocks`：照市值，不是挑選；個股的多日漲跌用 `mc.chained_returns`，除權息日不算跌）。
+  - 存檔不夠長的期間不給，`notes` 寫明「不要自己推算」。完全沒有加權指數時回 `{"status": "none"}`。
+- **系統提示**（`prompts.CHAT_SYSTEM`「明天看點與市場整理」與「現在能不能進場」）：查 `get_market_trend`、行事曆、概況、報告；第一句是趨勢加方向；
+  分段「現在的趨勢」「可以關注的方向」「已排定」；方向最多 3 個、依據只能是查得到的事實；點名的個股最多挑 3 檔查 `get_analyst_views`
+  （只讀個股頁已經查好的法人觀點，沒有就不寫，不另外搜尋）；不寫自己的預測、評等、目標價、支撐壓力、買賣指令與價位。
+  `EDITOR_SYSTEM` 多一句：「可以關注」「先觀察」某個方向的句子照留，買賣指令照刪。
+- **只寫了一句備註就給接著問**（`chat.FOLLOW_UPS_NOTE`）：實測 Sonnet 在畫圖那一步寫「Per rules, no items means don't write it. Draw chart.」，
+  下一步只呼叫 `suggest_follow_ups`——那一句成了整則回答。現在這樣算還沒寫回答：到目前為止的字不到 `FOLLOW_UPS_NOTE_MAX`（60）個、
+  而且都不是在呼叫接著問的那一步寫的，就把字清掉（`text_reset` 送空字串）、回錯誤要模型把回答從第一句寫完；一輪只做一次。
+  回答和畫圖寫在同一步、下一步才給接著問的（夠長）照常收。提示也寫明查資料、查法人觀點與畫圖的那幾步不寫字。
+- **畫面的過濾**（`apps/web/src/ai/answer-text.ts`）：回答前面一行沒有中文字的英文句子（模型給自己的備註）拿掉。
+- **成本**：這種回答比原本多一輪（法人觀點與畫圖同一步）。沙盒實測 Sonnet 一題約 US$0.17（8 次呼叫，含被退回的接著問）、Haiku 約 US$0.04–0.05。
+- **測試**：`tests/reports/test_chat_trend.py`（工具）、`tests/ai/test_market_tools.py`（提示的規則、備註的防護）、`tests/ai/test_tools.py`（非 strict 的名單）。
+

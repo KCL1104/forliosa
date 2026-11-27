@@ -41,6 +41,7 @@ from forliosa.models import (
     Instrument,
     MarginDaily,
     MarketEvent,
+    MarketTurnoverDaily,
     PriceDaily,
     ReferencePrice,
     TaifexInstitutional,
@@ -597,6 +598,43 @@ def index_move(points: list[IndexPoint], end: date, base: date) -> Decimal | Non
     if last is None or first is None or not first.close:
         return None
     return (last.close - first.close) / first.close
+
+
+def taiex_closes(db: Session, cutoff: datetime, upto: date, since: date | None = None, policy: str = "commercial",
+                 limit: int = 60, turnover: bool | None = None) -> dict[date, tuple[Decimal, str]]:
+    """The TAIEX closes usable at ``cutoff`` (day -> (close, dataset)), the newest ``limit`` days up to ``upto``:
+    MI_INDEX rows, and FMTQIK's TAIEX column for the days the index archive lacks (the month FMTQIK carries; usable
+    from its next-morning batch). ``turnover``: whether FMTQIK may be used (default: the data policy serves it)."""
+    pts = {x.day: (x.close, x.dataset) for x in index_points(db, TAIEX, cutoff, upto=upto, since=since, policy=policy,
+                                                            limit=limit)}
+    if turnover is None:
+        turnover = dataset_served("twse-openapi/turnover", policy)
+    if turnover:
+        stmt = select(MarketTurnoverDaily).where(MarketTurnoverDaily.market == "TWSE",
+                                                 MarketTurnoverDaily.date <= upto)
+        if since:
+            stmt = stmt.where(MarketTurnoverDaily.date >= since)
+        for r in db.scalars(stmt):
+            if r.taiex and r.date not in pts and usable("twse-openapi/turnover", r.date, cutoff):
+                pts[r.date] = (r.taiex, "twse-openapi/turnover")
+    return {d: pts[d] for d in sorted(pts)[-limit:]}
+
+
+def no_session_days(db: Session, upto: date, cutoff: datetime, policy: str = "commercial", lookback: int = 100,
+                    turnover: bool | None = None) -> frozenset[date]:
+    """The weekdays up to ``upto`` on which the market did not open although the calendar has them (a typhoon day:
+    the calendar holds the year's scheduled closures only). Such a day has nothing at all in the archive — no index
+    close, no official turnover row, no listed close — while listed closes of an earlier day are there (the archive
+    was collecting). It is no session, so it is no hole in a run of sessions; a day with any of the three is one, and
+    a missing index close on it still breaks the run. ``lookback``: days (and rows) read."""
+    since = upto - timedelta(days=lookback)
+    listed = set(session_dates(db, "TWSE", upto, cutoff, policy, limit=lookback))
+    index = set(taiex_closes(db, cutoff, upto, since=since, policy=policy, limit=lookback, turnover=turnover))
+    rows = set(db.scalars(select(MarketTurnoverDaily.date).where(
+        MarketTurnoverDaily.market == "TWSE", MarketTurnoverDaily.date >= since, MarketTurnoverDaily.date <= upto)))
+    first = min(listed, default=None)
+    known = listed | index | rows
+    return frozenset(d for d in tw_trading_days(since, upto) if first is not None and d > first and d not in known)
 
 
 def unbroken_run(days: Iterable[date], end: date, closed: Iterable[date] = ()) -> list[date]:

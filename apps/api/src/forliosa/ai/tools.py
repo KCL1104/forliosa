@@ -1298,6 +1298,12 @@ def get_market_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
     return market_tools.market_overview(ctx, args)
 
 
+def get_market_trend(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.ai import market_tools
+
+    return market_tools.market_trend(ctx, args)
+
+
 def get_market_report(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.ai import market_tools
 
@@ -1567,6 +1573,18 @@ TOOLS: list[ToolSpec] = sorted([
              "down (largest value first). Every list is a stated rule, not a pick. Call this for how the market did, "
              "which sectors or stocks moved most, and for 明天/這週 questions (with get_market_calendar).",
              {}, (), get_market_overview, lambda a: "查看市場概況", strict=False),
+    ToolSpec("get_market_trend",
+             "The Taiwan market's trend over the last sessions, from the official archive only: the TAIEX (close, its "
+             "move over the last 5 / 10 / 20 sessions, on which side of its 5- / 10- / 20-session averages it "
+             "closed, a run of rises or falls), the OTC index and the size indices (臺灣50, 中型100, 小型股300) over "
+             "the same sessions, the official listed turnover against its 5-session average, and the listed sectors "
+             "ranked by their move over the last 5 sessions: the 6 strongest and the 6 weakest, each with its 1-day "
+             "and multi-session moves, the gap to the TAIEX, whether it also ranks so over the longer period and "
+             "whether one stock dominates it; the strongest sectors come with their 3 largest stocks by market cap "
+             "(a stated rule, not a pick). A period the archive does not reach yet is left out and named in notes: "
+             "never work it out yourself. Call this for 趨勢, 盤勢, 哪些類股強或弱, 可以關注什麼方向或類股, 下週可以"
+             "買什麼, 現在能不能進場, together with get_market_overview and get_market_calendar.",
+             {}, (), get_market_trend, lambda a: "查看市場趨勢", strict=False),
     ToolSpec("get_market_report",
              "The newest published Forliosa market report (shared by everyone; kind: latest, premarket = 盤前重點 "
              "07:30, close = 盤後重點 16:00, weekly = 市場週報 Sunday). Each news article the report cites comes back "
