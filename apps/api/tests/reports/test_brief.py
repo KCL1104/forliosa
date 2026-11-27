@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal as D
+from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 
 from forliosa.ai import market_tools
-from forliosa.models import IndexDaily, MarketTurnoverDaily
+from forliosa.models import IndexDaily, MarketTurnoverDaily, PriceDaily
 from forliosa.reports import assemble, pack, prompts, push, validate
 from forliosa.reports import marketcalc as mc
 from forliosa.timeutil import tw_trading_days
@@ -37,14 +39,17 @@ def test_moving_average_streak_and_unbroken_run():
     assert mc.unbroken_run(days, days[4]) == days and mc.unbroken_run(days[:4], days[4]) == []
 
 
-def _history(db, last: date = date(2026, 11, 12), n: int = 14, skip: date | None = None) -> list[date]:
+def _history(db, last: date = date(2026, 11, 12), n: int = 14, skip: date | None = None,
+             rise_first: bool = False) -> list[date]:
     """``n`` sessions of TAIEX closes before the conftest's Friday, each 100 points above the next (so the index
-    fell every day down to Monday's 41,040.08)."""
+    fell every day down to Monday's 41,040.08). ``rise_first``: the oldest of them closed lower than the one after
+    it, so the run of falls has a known first day."""
     days = tw_trading_days(last - timedelta(days=40), last)[-n:]
     for i, d in enumerate(reversed(days)):
         if d == skip:
             continue
-        db.add(IndexDaily(name=TAIEX, date=d, market="TWSE", close=D("43775.12") + 100 * i, change=D("-100"),
+        close = D("43775.12") + 100 * i - (150 if rise_first and i == n - 1 else 0)
+        db.add(IndexDaily(name=TAIEX, date=d, market="TWSE", close=close, change=D("-100"),
                           change_pct=D("0.0023"), source="twse-openapi"))
     db.commit()
     return days
@@ -55,13 +60,14 @@ def _facts(pk, metric):
 
 
 def test_position_facts_come_from_consecutive_official_closes(market_db, us_on):
-    _history(market_db)
+    _history(market_db, rise_first=True)
     built = pack.build(market_db, "close", MON, cutoff=ts(MON, 15, 40), now=ts(MON, 16))
     pk = built.pack
     # 5 日線: (41,040.08 + 43,675.12 + 43,775.12 + 43,875.12 + 43,975.12) / 5; 10 日線: those and the five sessions
     # before them (44,075.12 … 44,475.12); the close is under both
     assert _facts(pk, "index_ma") == [("5 日線", "43,268.11"), ("10 日線", "43,771.62")]
-    assert _facts(pk, "index_streak") == [("加權指數", "連 15 日下跌")]
+    # the oldest close of the archive was a rise: the falls began the session after it, fourteen of them
+    assert _facts(pk, "index_streak") == [("加權指數", "連 14 日下跌")]
     # ten sessions before Monday the index closed at 44,575.12: 41,040.08 / 44,575.12 − 1
     assert _facts(pk, "index_range_pct") == [("加權指數", "▼7.93%")]
     ma = next(f for f in pk["facts"] if f["metric"] == "index_ma")
@@ -79,27 +85,87 @@ def test_position_facts_come_from_consecutive_official_closes(market_db, us_on):
     position = next(r for r in pay["brief"] if r["key"] == "position")
     assert position["label"] == "位置" and position["origin"] == "rules"
     [sent] = position["paragraph"]["sentences"]
-    assert sent["text"] == "連 15 日下跌，收在 5 日線與 10 日線之下，近 10 個交易日 ▼7.93%。" and sent["cites"]
+    assert sent["text"] == "連 14 日下跌，收在 5 日線與 10 日線之下，近 10 個交易日 ▼7.93%。" and sent["cites"]
     assert not any(w in sent["text"] for w in ("支撐", "壓力", "反彈", "回檔"))
     assert pay["trend"] == g1
+
+
+def test_a_run_that_reaches_the_first_close_in_a_row_is_not_counted(market_db, us_on):
+    # every close the archive holds is a fall: the run began before the archive did, so its length is not known —
+    # 「連 15 日下跌」 would be a number that is too small said as a fact
+    _history(market_db)
+    built = pack.build(market_db, "close", MON, cutoff=ts(MON, 15, 40), now=ts(MON, 16))
+    assert _facts(built.pack, "index_streak") == []
+    assert not [u for u in built.pack["unusual"] if "連" in u["what"]]
+    pay = _build(market_db, "close", MON, built=built)
+    [sent] = next(r for r in pay["brief"] if r["key"] == "position")["paragraph"]["sentences"]
+    assert sent["text"] == "收在 5 日線與 10 日線之下，近 10 個交易日 ▼7.93%。"
 
 
 def test_a_missing_session_shortens_the_run_and_the_averages(market_db, us_on):
     _history(market_db, skip=date(2026, 11, 10))  # 11/11, 11/12, 11/13, 11/16 follow one another: four sessions
     built = pack.build(market_db, "close", MON, cutoff=ts(MON, 15, 40), now=ts(MON, 16))
     assert _facts(built.pack, "index_ma") == [] and _facts(built.pack, "index_range_pct") == []
-    assert _facts(built.pack, "index_streak") == [("加權指數", "連 3 日下跌")]
+    # the four fell every day, but the day before them is the missing one: not 「連 3 日下跌」 either
+    assert _facts(built.pack, "index_streak") == []
     assert [x["name"] for x in built.blocks["charts"]["G1"]["series"]] == ["加權指數"]  # no average to draw
     pay = _build(market_db, "close", MON, built=built)
-    [sent] = next(r for r in pay["brief"] if r["key"] == "position")["paragraph"]["sentences"]
-    assert sent["text"] == "連 3 日下跌。"
+    assert "position" not in [r["key"] for r in pay["brief"]]
+
+
+WED = date(2026, 11, 18)
+
+
+def _session(db, d: date, close: str, change: str, listed: bool = True, index: bool = True) -> None:
+    """One more session after the conftest's Monday: Monday's closes again, and the TAIEX."""
+    if listed:
+        for row in db.scalars(select(PriceDaily).where(PriceDaily.date == MON)).all():
+            db.add(PriceDaily(symbol=row.symbol, date=d, close=row.close, volume=row.volume, value=row.value,
+                              source=row.source))
+    if index:
+        db.add(IndexDaily(name=TAIEX, date=d, market="TWSE", close=D(close), change=D(change), change_pct=D("0.0015"),
+                          source="twse-opendata"))
+    db.commit()
+
+
+def test_a_day_the_market_did_not_open_is_no_hole_in_the_run(market_db, us_on):
+    # Tuesday 11/17 is a weekday of the calendar, but the market stayed shut (a typhoon day: the calendar holds the
+    # year's scheduled closures only) — the archive has nothing at all for it. Wednesday's averages go on from Monday
+    _history(market_db, rise_first=True)
+    _session(market_db, WED, "41100.00", "59.92")
+    built = pack.build(market_db, "close", WED, cutoff=ts(WED, 15, 40), now=ts(WED, 16))
+    assert [name for name, _v in _facts(built.pack, "index_ma")] == ["5 日線", "10 日線"]
+    # (41,100.00 + 41,040.08 + 43,675.12 + 43,775.12 + 43,875.12) / 5
+    assert _facts(built.pack, "index_ma")[0] == ("5 日線", "42,693.09")
+    assert [x["name"] for x in built.blocks["charts"]["G1"]["series"]] == ["加權指數", "5 日線", "10 日線"]
+    # the turnover is compared with Monday's, the session before
+    chg = next(f for f in built.pack["facts"] if f["metric"] == "turnover_change")
+    assert chg["label"].startswith("上市成交金額 11/18")
+
+
+def test_a_session_without_its_index_close_is_still_a_hole(market_db, us_on):
+    # Tuesday did trade (its listed closes are there) and only the index is missing: the run stops at Wednesday
+    _history(market_db, rise_first=True)
+    _session(market_db, TUE, "0", "0", index=False)
+    _session(market_db, WED, "41100.00", "59.92")
+    built = pack.build(market_db, "close", WED, cutoff=ts(WED, 15, 40), now=ts(WED, 16))
+    assert _facts(built.pack, "index_ma") == [] and _facts(built.pack, "index_streak") == []
+    assert [x["name"] for x in built.blocks["charts"]["G1"]["series"]] == ["加權指數"]
+    days = [date(2026, 11, d) for d in (12, 13, 16, 18)]
+    assert mc.unbroken_run(days, WED) == [WED] and mc.unbroken_run(days, WED, closed=[TUE]) == days
+    assert mc.unbroken_run([*days, TUE], WED, closed=[TUE])[-3:] == [MON, TUE, WED]  # a day with a close is a session
 
 
 def test_premarket_position_is_the_previous_session_and_the_writer_may_not_use_it(market_db, us_on):
-    _history(market_db)
+    _history(market_db, rise_first=True)
     built = pack.build(market_db, "premarket", TUE, cutoff=ts(TUE, 6, 55), now=ts(TUE, 7))
     pk = built.pack
     assert {f["group"] for f in pk["facts"] if f["metric"].startswith("index_")} == {"prev_session"}
+    # the 位置 row shows the averages alone: the previous session's streak (2 to 10) and 10-session move are not in the
+    # pack — nothing shows them, and a headline's own number (「2 奈米」) matching only them would read as a repeat
+    assert not [f for f in pk["facts"] if f["metric"] in ("index_streak", "index_range_pct")]
+    assert ("title", "repeats_close_report") not in _hard({**premarket_output(pk), "title": "台積電 14 奈米"}, pk,
+                                                          "premarket")
     pay = _build(market_db, "premarket", TUE, built=built)
     [sent] = next(r for r in pay["brief"] if r["key"] == "position")["paragraph"]["sentences"]
     assert sent["text"] == "加權指數 11/16 收 41,040.08 點（▼6.03%），在 5 日線與 10 日線之下。"
@@ -137,10 +203,10 @@ def test_turnover_is_compared_like_with_like(market_db, us_on):
 
 
 def test_unusual_lists_what_sets_the_day_apart_the_furthest_first(market_db, us_on):
-    _history(market_db)
+    _history(market_db, rise_first=True)
     pk = pack.build(market_db, "close", MON, cutoff=ts(MON, 15, 40), now=ts(MON, 16)).pack
     whats = [u["what"] for u in pk["unusual"]]
-    assert whats[0] == "加權指數連 15 日下跌"  # five times the three sessions that make a run worth a line
+    assert whats[0] == "加權指數連 14 日下跌"  # nearly five times the three sessions that make a run worth a line
     assert "中型100 ▼4.00%，臺灣50 ▼5.80%" in whats
     assert "加權指數下跌 2,635.04 點，其中半導體類約 −1,702 點（估算）" in whats
     assert len(whats) <= pack.UNUSUAL_MAX and all(u["refs"] for u in pk["unusual"])
@@ -200,6 +266,35 @@ def test_a_row_names_one_of_its_kinds_fields_once(close_pack):
     # each goes alone: the good row stays and the highlights are still the writer's
     d = validate.drop(out, [x for x in problems if x.hard], "close", close_pack)
     assert [r["slot"] for r in d.output["highlights"]] == ["drivers"] and not d.highlights_bad and not d.sections
+
+
+def test_a_row_that_goes_for_its_content_does_not_take_its_field(close_pack):
+    # two 為什麼 rows, the first without a report: only that one goes — the second is no repeat of a row that is gone
+    out = close_output(close_pack)
+    pct = fid(close_pack, "index_pct", None, "today")
+    good = row("why", s("〔中央社〕報導，外資賣超 1,234.5 億元。", "X001"))
+    out["highlights"] = [row("why", s("加權指數跌 6.03%。", pct)), good, good]
+    problems = validate.validate(out, close_pack, "close")
+    assert [(x.path, x.code) for x in problems if x.code.startswith("slot_")] == [
+        ("highlights[0]", "slot_needs_report"), ("highlights[2]", "slot_repeated")]
+    d = validate.drop(out, [x for x in problems if x.code.startswith("slot_")], "close", close_pack)
+    assert d.output["highlights"] == [good] and not d.highlights_bad
+
+
+def test_the_writer_is_told_what_the_trend_chart_really_shows(market_db, us_on):
+    # a short archive draws no average: the chart's name must not put 「5 日線」 into the writer's head
+    short = pack.build(market_db, "close", MON, cutoff=ts(MON, 15, 40), now=ts(MON, 16)).pack
+    assert prompts.trend_chart_name(short) == "加權指數收盤（在重點下面）"
+    assert "G1 加權指數收盤（在重點下面）" in prompts.kind_instructions("close", short)
+    _history(market_db, rise_first=True)
+    full = pack.build(market_db, "close", MON, cutoff=ts(MON, 15, 40), now=ts(MON, 16)).pack
+    assert prompts.trend_chart_name(full) == "加權指數收盤與 5 日線、10 日線（在重點下面）"
+    # the weekly's G1 is the plain line of its own section: no averages, not under a brief
+    weekly = pack.build(market_db, "weekly", date(2026, 11, 22), cutoff=ts(date(2026, 11, 22), 7),
+                        now=ts(date(2026, 11, 22), 8)).pack
+    assert prompts.trend_chart_name(weekly) == "加權指數收盤"
+    text = prompts.kind_instructions("weekly", weekly)
+    assert "日線" not in text.split("伺服器已經放好固定圖", 1)[1].split("）", 1)[0]
 
 
 def test_each_field_stands_on_what_it_is_about(close_pack, pre_pack):
@@ -315,7 +410,27 @@ def test_pushes_and_the_chat_tool_read_the_rows_with_their_fields(market_db, us_
     rows = ["貢獻：台積電（2330）點數貢獻約 −1,616 點（估算）。", "量：上市約 2,295 億元（估算），和前一日相近。",
             "籌碼：〔中央社〕報導，外資賣超 1,234.5 億元。"]
     assert lines == [*rows[:2], rows[2] + "（出處見全文）"]
-    assert [text for text, _cites in market_tools._report_sentences(pay)][:3] == rows
-    # a version from before the brief: its plain highlights, as before
+    # the day's own number comes first: the rows leave it to the page's number strip, which a push and the chat's
+    # tool do not show
+    number = "加權指數 41,040.08 點，▼2,635.04（▼6.03%）"
+    assert assemble.headline(pay) == number
+    assert [text for text, _cites in market_tools._report_sentences(pay)][:4] == [f"{number}。", *rows]
+    r = SimpleNamespace(id="mrp_x", kind="close", edition_date=MON, period_start=MON, period_end=MON, next_start=None,
+                        next_end=None)
+    settings = SimpleNamespace(frontend_url="https://forliosa.trade", is_dev=False,
+                               frontend_base="https://forliosa.trade")
+    sent = push.text(r, pay, "discord", settings).split("\n")
+    assert sent[0].startswith("【盤後重點 11/16（一）】") and sent[1] == number and sent[2] == f"・{rows[0]}"
+    # the data edition too (no writer's row says the number)
+    data = _build(market_db, "close", MON)
+    assert push.text(r, data, "discord", settings).split("\n")[1] == number
+    # a day without the official index: the estimated change of the listed market value
+    no_index = {**pay, "numbers": [{"key": "mcap_change", "label": "上市市值變化", "value": "▼5.80%", "change": None}]}
+    assert assemble.headline(no_index) == "上市市值變化（估算）▼5.80%"
+    assert assemble.headline({**pay, "numbers": []}) is None
+    # a version from before the brief: its plain highlights, as before (they say the number themselves)
     old = {**pay, "brief": None}
     assert push.highlight_lines(old, "discord")[0] == "台積電（2330）點數貢獻約 −1,616 點（估算）。"
+    assert assemble.headline(old) is None and "加權指數 41,040.08 點，" not in push.text(r, old, "discord", settings)
+    # the premarket's 位置 row names the previous close; the weekly has no brief
+    assert assemble.headline(_build(market_db, "premarket", TUE)) is None

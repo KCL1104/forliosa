@@ -321,7 +321,12 @@ def market_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
 def _report_sentences(payload: dict[str, Any]):
     """(text, footnote numbers) of every sentence: the highlights, then each section's text and item blocks (an item's
     title, the event or theme it is about, goes before its first sentence)."""
+    from forliosa.reports import assemble
+
     brief = payload.get("brief") or []
+    # the close's own number first (the brief's rows leave it to the page's number strip): no footnote of its own
+    if (line := assemble.headline(payload)) is not None:
+        yield f"{line}。", []
     # the brief's rows (2026-11-27) with their field's name: 「位置：收在 5 日線…」 has no subject without it
     heads = [(f"{r['label']}：", r["paragraph"]) for r in brief] or [("", p) for p in payload.get("highlights") or []]
     for head, p in heads:

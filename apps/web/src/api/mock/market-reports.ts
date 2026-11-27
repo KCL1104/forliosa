@@ -135,7 +135,7 @@ const S = (text: string, ...refs: string[]): ReportSentence => ({ text, cites: [
 const P = (...sentences: ReportSentence[]): ReportParagraph => ({ sentences })
 
 function paragraphsOf(r: MarketReport): ReportParagraph[] {
-  // 有欄位名稱的重點取代 3 個重點：頁面不放 `highlights`，所以不替它編號
+  // 有欄位名稱的重點取代 3 個重點：頁面放的是 `brief`，從它開始編號（`highlights` 在 `assemble` 最後換成同一批段落）
   const out: ReportParagraph[] = r.brief?.length ? r.brief.map((row) => row.paragraph) : [...r.highlights]
   for (const s of r.sections) {
     for (const b of s.blocks) {
@@ -180,7 +180,27 @@ function assemble(r: MarketReport, reg: Reg): MarketReport {
     }
   }
   const web = footnotes.filter((f) => f.kind === "web" && f.url && f.outlet).map((f) => ({ n: f.n, outlet: f.outlet!, title: f.label, url: f.url!, published_label: f.date_label ?? "" }))
-  return { ...r, footnotes, sources: { ...r.sources, web } }
+  // 和伺服器一樣：有欄位時 `highlights` 就是那幾列的段落、同一組註腳號碼（推播、AI 對話、舊的前端讀它）
+  const highlights = r.brief?.length ? r.brief.map((row) => row.paragraph) : r.highlights
+  return { ...r, highlights, footnotes, sources: { ...r.sources, web } }
+}
+
+/** 把另一個版本的幾列搬進這個版本：註腳號碼換成這個版本的（同一個註腳沿用號碼，沒有的接在後面） */
+function adoptRows(rows: ReportBriefRow[], from: ReportFootnote[], into: ReportFootnote[]): { rows: ReportBriefRow[]; footnotes: ReportFootnote[] } {
+  const footnotes = [...into]
+  const same = (a: ReportFootnote, b: ReportFootnote) => a.kind === b.kind && a.label === b.label && a.url === b.url && a.date_label === b.date_label
+  const numberOf = (n: number): number | null => {
+    const f = from.find((x) => x.n === n)
+    if (!f) return null
+    let hit = footnotes.find((x) => same(x, f))
+    if (!hit) {
+      hit = { ...f, n: footnotes.length + 1 }
+      footnotes.push(hit)
+    }
+    return hit.n
+  }
+  const renumber = (s: ReportSentence): ReportSentence => ({ ...s, cites: [...new Set(s.cites.map(numberOf).filter((n): n is number => n !== null))].sort((a, b) => a - b) })
+  return { rows: rows.map((row) => ({ ...row, paragraph: { sentences: row.paragraph.sentences.map(renumber) } })), footnotes }
 }
 
 /** 一般使用者看到的樣子：沒有 refs、沒有被拿掉的段、沒有 validation */
@@ -1679,15 +1699,20 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
       const drop = body.drop_sections ?? []
       const unknown = drop.filter((k) => k !== "title" && k !== "highlights" && !c.sections.some((s) => s.key === k))
       if (unknown.length) throw field("drop_sections", `沒有這個段落：${unknown.join("、")}。`)
-      // 標題與重點換回規則寫的（第一版就是只有資料的版本）
+      // 標題與重點換回規則寫的（第一版就是只有資料的版本）。重點有欄位時和伺服器一樣：整組換成規則版的列
+      // （位置、量，以及貢獻／隔夜／排定的規則版），不是只把 AI 的列拿掉
       const rules = r.versions[0]!
+      const heads = drop.includes("highlights") && c.highlights_origin === "ai"
+      const adopted = heads && rules.brief?.length ? adoptRows(rules.brief, rules.footnotes, c.footnotes) : null
       const next: MarketReport = {
         ...c, version: r.versions.length + 1, edition: "correction", published_at: nowAt,
         corrections: [...c.corrections, { at: nowAt, note }],
         sections: c.sections.map((s) => (drop.includes(s.key) && s.origin === "ai" ? { ...s, dropped: { reasons: ["更正"] } } : s)),
         ...(drop.includes("title") && c.title_origin === "ai" ? { title: rules.title, title_origin: "rules" as const } : {}),
-        ...(drop.includes("highlights") && c.highlights_origin === "ai"
-          ? { highlights: rules.highlights, highlights_origin: "rules" as const, brief: c.brief?.filter((row) => row.origin === "rules") ?? null }
+        ...(heads
+          ? adopted
+            ? { brief: adopted.rows, highlights: adopted.rows.map((row) => row.paragraph), footnotes: adopted.footnotes, highlights_origin: "rules" as const }
+            : { highlights: rules.highlights, highlights_origin: "rules" as const, brief: null }
           : {}),
       }
       r.versions.push(next)

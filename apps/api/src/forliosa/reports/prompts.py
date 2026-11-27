@@ -416,7 +416,7 @@ def pack_json(pack: dict[str, Any]) -> str:
 
 # Short names of the server's charts (the writer only needs to know what the page shows next to its text)
 CHART_NAMES = {
-    "G1": "加權指數收盤與 5 日線、10 日線（在重點下面）", "G2": "上市類股漲跌（加權指數虛線、期間切換）",
+    "G1": "加權指數收盤", "G2": "上市類股漲跌（加權指數虛線、期間切換）",
     "G2_otc": "上櫃類股漲跌（估算）",
     "G3": "市值前 10 點數貢獻（估算）", "G5": "權值股一個月比較", "G6": "美股 ETF 與台積電 ADR",
     "G7": "外資台指期淨未平倉", "G8": "類股成交金額比重", "G15": "規模與風格指數",
@@ -424,8 +424,19 @@ CHART_NAMES = {
 }
 
 
-def chart_list(codes: list[str]) -> str:
-    return "、".join(f"{c} {CHART_NAMES[c]}" if c in CHART_NAMES else c for c in codes)
+def trend_chart_name(pack: dict[str, Any]) -> str:
+    """G1 as this report draws it: the premarket's and the close's is the trend chart under the brief, with the
+    averages the pack has (none while the archive is short: the writer must not read 「5 日線」 into it); the weekly's
+    is the plain line of its own section."""
+    if pack.get("kind") not in BRIEF_ORDER:
+        return CHART_NAMES["G1"]
+    names = list(dict.fromkeys(str(f.get("subject")) for f in pack.get("facts") or [] if f.get("metric") == "index_ma"))
+    return CHART_NAMES["G1"] + ("與 " + "、".join(names) if names else "") + "（在重點下面）"
+
+
+def chart_list(codes: list[str], pack: dict[str, Any] | None = None) -> str:
+    names = {**CHART_NAMES, **({"G1": trend_chart_name(pack)} if pack is not None else {})}
+    return "、".join(f"{c} {names[c]}" if c in names else c for c in codes)
 
 
 def kind_instructions(kind: str, pack: dict[str, Any]) -> str:
@@ -442,8 +453,8 @@ def kind_instructions(kind: str, pack: dict[str, Any]) -> str:
         f"# 長度：{spec['length']}；重點 {spec['highlights']}。",
         "",
         "# 今日圖",
-        f"伺服器已經放好固定圖（{chart_list(list(pack.get('fixed_charts') or []))}），你不用處理；圖上的數字由伺服器"
-        "畫，段落不要逐一重抄，要寫數字就引用 F。可以從下面可用的選單另外挑 1 張；不需要就填 none：",
+        f"伺服器已經放好固定圖（{chart_list(list(pack.get('fixed_charts') or []), pack)}），你不用處理；"
+        "圖上的數字由伺服器畫，段落不要逐一重抄，要寫數字就引用 F。可以從下面可用的選單另外挑 1 張；不需要就填 none：",
         json.dumps(menu, ensure_ascii=False) if menu else "（這份沒有可選的圖：code 填 none）",
         "",
         "# 數字欄已經列出（段落不要整串重抄）",

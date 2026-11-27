@@ -100,6 +100,7 @@ AVERAGE_SESSIONS = (5, 10)
 RANGE_SESSIONS = 10  # 「近 10 個交易日」
 TURNOVER_SESSIONS = 5  # 「5 日均量」
 STREAK_MIN = 2  # 「連 2 日上漲」 from two sessions on
+SESSION_LOOKBACK = 100  # days (and rows) read to tell a day the market did not open from a hole in the archive
 AVERAGES_DATASET = "rules:averages"
 # How far something must be from an ordinary day to be offered to the writer as 「這一天不一樣的地方」 (``unusual``)
 UNUSUAL_GAP = Decimal("0.01")  # 櫃買 against 加權, 中型100 against 臺灣50: a percentage point
@@ -153,6 +154,7 @@ class Pack:
         self.already: list[dict[str, Any]] = []
         self.unusual: list[dict[str, Any]] = []
         self.through = data_through(edition)
+        self.closed: dict[date, frozenset[date]] = {}  # _no_session, by its last day
 
     # -- ids --------------------------------------------------------------------------------------------------------
     def _id(self, prefix: str) -> str:
@@ -1048,14 +1050,37 @@ def _unusual(p: Pack, score: Decimal | float, what: str, *facts: dict[str, Any] 
     p.unusual.append({"score": float(score), "what": what, "refs": [f["id"] for f in facts if f]})
 
 
-def _position(p: Pack, upto: date, group: str) -> list[tuple[int, list[tuple[date, Decimal]]]]:
+def _no_session(p: Pack, upto: date) -> frozenset[date]:
+    """The weekdays up to ``upto`` on which the market did not open although the calendar has them (a typhoon day:
+    the calendar holds the year's scheduled closures only). Such a day has nothing at all in the archive — no index
+    close, no official turnover row, no listed close — while listed closes of an earlier day are there (the archive
+    was collecting). It is no session, so it is no hole in a run of sessions; a day with any of the three is one, and
+    a missing index close on it still breaks the run."""
+    if upto not in p.closed:
+        since = upto - timedelta(days=SESSION_LOOKBACK)
+        listed = set(mc.session_dates(p.db, "TWSE", upto, p.cutoff, p.policy, limit=SESSION_LOOKBACK))
+        index = set(_taiex_closes(p, upto, since=since, limit=SESSION_LOOKBACK))
+        turnover = set(p.db.scalars(select(MarketTurnoverDaily.date).where(
+            MarketTurnoverDaily.market == "TWSE", MarketTurnoverDaily.date >= since,
+            MarketTurnoverDaily.date <= upto)))
+        first = min(listed, default=None)
+        known = listed | index | turnover
+        p.closed[upto] = frozenset(d for d in tw_trading_days(since, upto)
+                                   if first is not None and d > first and d not in known)
+    return p.closed[upto]
+
+
+def _position(p: Pack, upto: date, group: str, *,
+              averages_only: bool = False) -> list[tuple[int, list[tuple[date, Decimal]]]]:
     """Where the TAIEX stands on ``upto``, from the official closes of the archive only: its n-session averages
     (:data:`AVERAGE_SESSIONS`), the run of rises or falls ending that day (from :data:`STREAK_MIN` sessions on) and
     its move over the last :data:`RANGE_SESSIONS` sessions — each a fact, each only when the archive holds that many
-    sessions in a row (a missing day breaks the run: an average of five closes spanning six sessions is not 「5 日線」).
-    Returns the averages' series for G1."""
+    sessions in a row (a missing day breaks the run: an average of five closes spanning six sessions is not 「5 日線」;
+    a day the market did not open is no missing day, :func:`_no_session`). ``averages_only`` (the premarket, whose
+    位置 row shows the averages alone): no streak and no 10-session move — facts of the session before that nothing
+    shows would only be numbers a headline can collide with. Returns the averages' series for G1."""
     closes = _taiex_closes(p, upto, limit=60)
-    run = mc.unbroken_run(closes, upto)
+    run = mc.unbroken_run(closes, upto, _no_session(p, upto))
     if len(run) < 2:
         return []
     series = [(d, closes[d][0]) for d in run]
@@ -1071,8 +1096,12 @@ def _position(p: Pack, upto: date, group: str) -> list[tuple[int, list[tuple[dat
         p.fact(f"加權指數 {name} {md(upto)}（最近 {n} 個交易日收盤的平均）", name, "index_ma", group, avg[-1][1],
                B.number_text(avg[-1][1]), unit="點", day=upto, dataset=AVERAGES_DATASET,
                aliases=[f"{n}日線", f"{n} 日均線", f"{n}日均線"], note=note)
+    if averages_only:
+        return averages
     st = mc.streak([c for _d, c in series])
-    if abs(st) >= STREAK_MIN:
+    # a run that reaches the oldest close of the series may have begun before it (the archive's first day, a missing
+    # day): its length is not known then, so it is not said
+    if STREAK_MIN <= abs(st) < len(series) - 1:
         word = "上漲" if st > 0 else "下跌"
         p.fact(f"加權指數連續{word}的交易日數（至 {md(upto)}）", "加權指數", "index_streak", group, st,
                f"連 {abs(st)} 日{word}", unit="日", precision=0, day=upto, dataset=AVERAGES_DATASET,
@@ -1087,11 +1116,11 @@ def _position(p: Pack, upto: date, group: str) -> list[tuple[int, list[tuple[dat
     return averages
 
 
-def _trend_chart(p: Pack, upto: date, group: str) -> None:
+def _trend_chart(p: Pack, upto: date, group: str, *, averages_only: bool = False) -> None:
     """G1 with its averages: the trend chart under the brief (close: to the edition's day; premarket: to the session
-    before)."""
+    before, the averages alone)."""
     pts, ds = _taiex_series(p, upto, limit=60)
-    averages = _position(p, upto, group)
+    averages = _position(p, upto, group, averages_only=averages_only)
     p.chart(B.g1_index_line(pts, sources=p.labels([*sorted(ds), *([AVERAGES_DATASET] if averages else [])]),
                             title=f"加權指數收盤（至 {md(upto)}）", averages=averages))
 
@@ -1101,7 +1130,9 @@ def _turnover_before(p: Pack, d: date, official: bool) -> list[int]:
     number: the official FMTQIK value when the day's is the official one, else the same sum of that day's close file.
     Stops at the first trading day that has none (the average is of sessions in a row)."""
     out: list[int] = []
-    before = [x for x in tw_trading_days(d - timedelta(days=20), d) if x < d][-(TURNOVER_SESSIONS - 1):]
+    closed = _no_session(p, d)
+    before = [x for x in tw_trading_days(d - timedelta(days=20), d)
+              if x < d and x not in closed][-(TURNOVER_SESSIONS - 1):]
     for day in reversed(before):
         if official:
             row = p.db.get(MarketTurnoverDaily, (day, "TWSE"))
@@ -1200,7 +1231,7 @@ def _unusual_cross(p: Pack, group: str) -> None:
     """The close on the other side of an average than the session before (its close against that day's own average)."""
     day = p.through
     closes = _taiex_closes(p, day, limit=60)
-    run = mc.unbroken_run(closes, day)
+    run = mc.unbroken_run(closes, day, _no_session(p, day))
     series = [(d, closes[d][0]) for d in run]
     close = _fid(p, "index_close", group, "加權指數")
     for n in reversed(AVERAGE_SESSIONS):
@@ -1590,7 +1621,7 @@ def _premarket(p: Pack, md_: Any) -> None:
     # the trend chart under the brief and the 位置 row: where the previous session closed (the server's row, never the
     # writer's: the facts are of the previous session)
     if taiex_prev is not None:
-        _trend_chart(p, prev, "prev_session")
+        _trend_chart(p, prev, "prev_session", averages_only=True)
     _unusual_premarket(p)
     # 昨日籌碼: the margin's largest changes (TWSE's file of the previous session is out by 05:45, TPEx's by 23:40)
     _t10(p, [twse_prev, tpex], prev, title=md(prev))

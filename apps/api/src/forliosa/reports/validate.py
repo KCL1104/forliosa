@@ -1039,7 +1039,8 @@ def _check_brief(c: Ctx, output: dict[str, Any], kind: str) -> list[Problem]:
     """The brief's rows (the premarket's and the close's highlights): each fills one of the writer's fields of the
     kind, a field once; 為什麼 stands on a report (X / W), the close's 籌碼 on a report too (the listed institutions
     have no open data), 貢獻 on at least one fact, and every 排定 sentence on a calendar row or a report. Each problem
-    takes its row alone (:data:`ITEM_LEVEL`)."""
+    takes its row alone (:data:`ITEM_LEVEL`). A field is taken by the first row that stands on what it needs: a row
+    that goes for its content does not make the next row of its field a repeat (that one would go with it)."""
     slots = BRIEF_SLOTS.get(kind)
     if slots is None:
         return []
@@ -1055,7 +1056,6 @@ def _check_brief(c: Ctx, output: dict[str, Any], kind: str) -> list[Problem]:
         if slot in seen:
             out.append(Problem(path, "slot_repeated", slot))
             continue
-        seen.add(slot)
         para = row.get("para") if isinstance(row.get("para"), dict) else {}
         per = [[str(r) for r in x.get("refs") or []] for x in para.get("sentences") or [] if isinstance(x, dict)]
         refs = [r for one in per for r in one]
@@ -1067,6 +1067,8 @@ def _check_brief(c: Ctx, output: dict[str, Any], kind: str) -> list[Problem]:
             out.append(Problem(path, "slot_needs_fact", "貢獻至少引用一筆 F"))
         elif slot == "scheduled" and (not per or any(not any(r in c.cal or r in c.web for r in one) for one in per)):
             out.append(Problem(path, "slot_not_event", "排定的每一句都要引用行事曆（C）或報導（X）"))
+        else:
+            seen.add(slot)
     return out
 
 

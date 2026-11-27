@@ -599,16 +599,20 @@ def index_move(points: list[IndexPoint], end: date, base: date) -> Decimal | Non
     return (last.close - first.close) / first.close
 
 
-def unbroken_run(days: Iterable[date], end: date) -> list[date]:
+def unbroken_run(days: Iterable[date], end: date, closed: Iterable[date] = ()) -> list[date]:
     """The sessions of ``days`` that end at ``end`` without a missing trading day between them (oldest first): an
     average or a streak over 「最近 n 個交易日」 only counts sessions that really follow one another. Empty when ``end``
-    itself is not among them."""
+    itself is not among them. ``closed``: weekdays of the calendar on which the market did not open (a typhoon day —
+    the calendar holds the year's scheduled closures only); they are no session, so they break nothing."""
     have = set(days)
     if end not in have:
         return []
+    shut = set(closed) - have
     first = min(have)
     run: list[date] = []
     for d in reversed(tw_trading_days(first, end)):
+        if d in shut:
+            continue
         if d not in have:
             break
         run.append(d)

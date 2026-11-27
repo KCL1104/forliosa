@@ -4864,3 +4864,20 @@ AI 工具給的價格不受影響。CLAUDE.md 的 Yahoo 例外多了一句。
   推播與對話）；改了預期的：`test_assemble.py`、`test_dry_run_pack.py`、`test_pack.py`、`test_pipeline.py`、`test_review_pipeline.py`、
   `test_v2_blocks.py`、`test_validate.py`、`test_writer_fixes.py`、`helpers.py`。
 
+- **合併前 review 修掉的**（2026-11-27，負責人：「review 沒問題就 merge」）：
+  - **連幾日漲跌數不到起點就不寫**（`pack._position`）：存檔裡連續的交易日從頭到尾同一個方向時，真正的天數可能更長（存檔的第一天、
+    中間缺一天都會截斷），`index_streak` 不給。上面試跑記錄的「連 15 日下跌」是加這個條件以前的輸出（假市場的存檔每一天都跌）。
+  - **臨時休市不算缺一天**（`pack._no_session`、`marketcalc.unbroken_run(closed=…)`）：行事曆只有年度公告的休市日，颱風停止交易那一天
+    行事曆上還是交易日。那一天存檔裡什麼都沒有（沒有指數、沒有 FMTQIK 那一列、沒有任何上市收盤）而且比存檔的第一個上市交易日晚，
+    就當成沒有開盤：均線、連幾日漲跌、5 日均量照樣接下去。有上市收盤、只缺指數的日子仍然算缺。
+    已知的限制：整天什麼都沒抓到的交易日也會被當成沒有開盤；FMTQIK 是整個月的表，隔天重抓會把那一天的成交金額與指數補回來
+    （補回來以後就不再當成休市），所以只有跨月的最後一個交易日整天沒抓到時才會留下錯的均線。
+  - **盤前只給均線**（`_trend_chart(averages_only=True)`）：前一個交易日的 `index_streak`（2–10）與 `index_range_pct` 那一列用不到；
+    留在資料包裡，標題裡只對得上它們的數字（「2 奈米」）會被 `repeats_close_report` 當成重講昨天。
+  - **更正舊報告的重點**（`service.correction`）：沒有 `brief` 的版本（2026-11-27 以前發布的盤前、盤後，以及週報）換回當時規則版的
+    3 個重點（`assemble.data_highlights(brief=False)`），不拿新的欄位去套舊的資料包。
+  - **推播與對話先給當天的指數**（`assemble.headline`）：盤後的那幾列不重抄數字欄，而推播與 `get_market_report` 看不到數字欄，
+    所以在最前面補一行「加權指數 41,040.08 點，▼2,635.04（▼6.03%）」（官方指數沒進來時是上市市值的估算）。盤前的位置那一列自己有前一日收盤。
+  - **同一個欄位寫兩列**（`validate._check_brief`）：通過內容檢查的那一列才算佔了欄位——前一列因為沒有報導被拿掉時，後一列不再跟著被當成重複。
+  - **給撰寫模型的圖名**（`prompts.trend_chart_name`）：G1 照這一份實際畫的寫——週報是「加權指數收盤」，盤前、盤後有幾條均線寫幾條。
+  - **mock**（`apps/web/src/api/mock/market-reports.ts`）：有欄位時 `highlights` 就是那幾列的段落；更正勾「重點」整組換成規則版的列。

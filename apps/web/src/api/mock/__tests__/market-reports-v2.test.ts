@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AiChart } from "@/ai/remote"
-import { buildMockReport } from "@/api/mock/market-reports"
+import { buildMockReport, createMarketReportsStore } from "@/api/mock/market-reports"
 import type { MarketReport, ReportTable } from "@/api/types"
 
 /**
@@ -236,12 +236,28 @@ describe("重點的欄位與趨勢圖（2026-11-27）", () => {
     expect(rows(buildMockReport("premarket", "2026-11-12", { ai: false, edition: "data" })).map(([key]) => key)).toEqual(["overnight", "scheduled", "position", "chips"])
   })
 
-  it("重點的每一句都有出處，號碼從 1 開始、照出現的順序；3 個重點不在頁面上，所以不編號", () => {
+  it("重點的每一句都有出處，號碼從 1 開始、照出現的順序；highlights 是同一批段落、同一組號碼（和伺服器一樣）", () => {
     const cites = close.brief!.flatMap((row) => row.paragraph.sentences.flatMap((x) => x.cites))
     expect(close.brief!.every((row) => row.paragraph.sentences.every((x) => x.cites.length > 0))).toBe(true)
     expect(cites[0]).toBe(1)
     expect(cites.every((n) => close.footnotes.some((f) => f.n === n))).toBe(true)
-    expect(close.highlights.every((p) => p.sentences.every((x) => x.cites.length === 0))).toBe(true)
+    expect(close.highlights).toEqual(close.brief!.map((row) => row.paragraph))
+  })
+
+  it("更正時勾「重點」：整組換成規則版的列（貢獻也有規則版），註腳號碼對得上；不是只把 AI 的列拿掉", () => {
+    const store = createMarketReportsStore({ now: () => new Date("2026-11-12T10:00:00+08:00"), isAdmin: () => true, signedIn: () => true, demo: false })
+    const id = store.list({ kind: "close" }).items.find((x) => x.has_ai)!.id
+    const before = store.get(id)
+    expect(before.brief!.map((row) => row.origin)).toContain("ai")
+    const after = store.correction(id, { note: "籌碼那一列寫錯", drop_sections: ["highlights"] })
+    expect(after.highlights_origin).toBe("rules")
+    expect(after.brief!.map((row) => [row.key, row.origin])).toEqual([["drivers", "rules"], ["position", "rules"], ["volume", "rules"]])
+    expect(after.highlights).toEqual(after.brief!.map((row) => row.paragraph))
+    // 每一句的號碼都指到這一版自己的註腳，而且是同一個資料來源
+    const cites = after.brief!.flatMap((row) => row.paragraph.sentences.flatMap((x) => x.cites))
+    expect(cites.length).toBeGreaterThan(0)
+    expect(cites.every((n) => after.footnotes.some((f) => f.n === n))).toBe(true)
+    expect(new Set(after.footnotes.map((f) => f.n)).size).toBe(after.footnotes.length)
   })
 
   it("趨勢圖：加權指數是一條連續的線，最後一點是數字欄的收盤；5 日線、10 日線是收盤的平均，各自從第 5、10 天開始", () => {
