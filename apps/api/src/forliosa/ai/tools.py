@@ -1551,10 +1551,12 @@ TOOLS: list[ToolSpec] = sorted([
     ToolSpec("get_market_calendar",
              "Market-wide scheduled events of a date range (Taipei dates): ex-dividend dates, investor conferences "
              "(法說會), shareholder meetings, disposition (處置) periods, TAIEX futures/options settlement days, macro "
-             "releases (US and Taiwan), US earnings of a hand-kept list of large companies and NYSE closures. Events "
-             "of the user's own holdings and watchlist come first, marked yours (持有/觀察); market-wide rows and the "
-             "100 largest companies by market cap are listed; the rest are counted by kind in others, with a few of "
-             "the largest names. date_from and date_to are YYYY-MM-DD, \"\" for the next Taiwan trading day; at most "
+             "releases (US and Taiwan), US earnings of a hand-kept list of large companies and NYSE closures. "
+             "Market-wide rows and the 100 largest companies by market cap are listed; the rest are counted by kind "
+             "in others, with a few of the largest names. yours true — only when the user's question is about their "
+             "own holdings or watchlist (我的持股下週要注意什麼) — puts the events of their holdings and watchlist "
+             "first, marked yours (持有/觀察); leave it out for a question about the market, a sector or a stock. "
+             "date_from and date_to are YYYY-MM-DD, \"\" for the next Taiwan trading day; at most "
              "14 days. kind narrows to one kind and then lists every company of it (largest first, up to 80): use it "
              "when the question is about one kind (這週有哪些法說會、最近哪些股票除息). Ex-dividend rows carry amount "
              "(the official cash dividend per share, or 金額還沒公告). Call this for 明天/這週/下週 questions (what "
@@ -1563,7 +1565,9 @@ TOOLS: list[ToolSpec] = sorted([
               "date_to": {"type": "string", "description": "YYYY-MM-DD, or \"\" for the same day as date_from"},
               "kind": {"type": "string", "enum": ["", "除權息", "法說會", "股東會", "處置股", "注意股", "結算日",
                                                   "總經數據", "美股財報", "美股休市"],
-                       "description": "One kind of event, or \"\" for every kind"}},
+                       "description": "One kind of event, or \"\" for every kind"},
+              "yours": {"type": "boolean",
+                        "description": "true only when the question is about the user's own holdings or watchlist"}},
              ("date_from", "date_to"), get_market_calendar,
              lambda a: f"查看{a.get('kind') or ''}行事曆", blank_ok=("date_from", "date_to"), strict=False),
     ToolSpec("get_market_overview",

@@ -5,8 +5,9 @@ nothing about the whole market. These read what the market page and the market r
 
 * ``get_market_calendar`` — scheduled events of a date range (``reports.calendars.events_between``: ex-dividend
   dates, investor conferences, shareholder meetings, disposition, settlement days, macro releases, US earnings, NYSE
-  closures). The user's own holdings and watchlist come first and are marked; the 100 largest companies by market cap
-  and the market-wide rows are listed; the rest are counted by kind with a few names (largest first).
+  closures). The 100 largest companies by market cap and the market-wide rows are listed; the rest are counted by
+  kind with a few names (largest first). With ``yours`` — only when the question is about the user's own holdings
+  or watchlist (產品負責人 2026-11-27) — theirs come first and are marked.
 * ``get_market_overview`` — the latest session: both indices, advancers and decliners, sector moves, the market page's
   rankings (``services.market_overview.snapshot``) and the stocks at the limit up / down (both exchanges).
 * ``get_market_trend`` (產品負責人 2026-11-27: 「分析趨勢並給予建議」) — the last sessions, not just the latest one: the
@@ -220,7 +221,10 @@ def market_calendar(ctx: ToolContext, args: dict[str, Any]) -> Any:
     events = cal.events_between(ctx.db, start, end, cutoff=now, policy=ctx.md.policy, include_filings=False)
     if kind is not None:
         events = [e for e in events if e.kind == kind]
-    mine = _mine(ctx)
+    # the user's own holdings and watchlist only when the question is about them (``yours``; 產品負責人 2026-11-27:
+    # 「如果沒有提到跟倉位相關的東西回答就不要提到倉位」) — otherwise the list is the market's, by market cap, and
+    # a small company is not listed one by one because the user happens to hold it
+    mine = _mine(ctx) if args.get("yours") is True else {}
     ranks = _mcap_ranks([_latest_day(ctx, "TWSE", now), _latest_day(ctx, "TPEX", now)])
     far = 10**9  # not ranked (no close, an ETF): after every ranked company, never among the largest
 
@@ -259,9 +263,11 @@ def market_calendar(ctx: ToolContext, args: dict[str, Any]) -> Any:
         "from": start.isoformat(), "to": end.isoformat(), "next_tw_trading_day": nxt.isoformat(),
         "events": [_event_out(e, mine.get(e.symbol or ""), amounts) for e in listed],
         "others": others,
-        "rules": ((f"只查{cal.KIND_LABELS[kind]}：全部列出（最多 {CALENDAR_MAX_ONE_KIND} 筆，你的先列，其他依市值）"
+        "rules": ((f"只查{cal.KIND_LABELS[kind]}：全部列出（最多 {CALENDAR_MAX_ONE_KIND} 筆，"
+                   f"{'你的先列，其他' if mine else ''}依市值）"
                    if kind else
-                   "列出的是：你持有或在觀察清單裡的（yours）、全市場的事件（結算日、總經數據、美股財報與休市），"
+                   ("列出的是：你持有或在觀察清單裡的（yours）、" if mine else "列出的是：")
+                   + "全市場的事件（結算日、總經數據、美股財報與休市），"
                    f"以及市值前 {TOP_RANK} 名的公司；其他公司只算件數，examples 是其中市值較大的幾家。"
                    "問某一種事件（法說會、除權息…）時用 kind 再查一次就會全部列出")
                   + "；除權息的 amount 是官方公告的每股股利"),

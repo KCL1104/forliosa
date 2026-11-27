@@ -839,9 +839,13 @@ FOLLOW_UPS_EARLY = ("還沒有寫回答：使用者目前看不到任何回答�
                     "寫完再呼叫 suggest_follow_ups。")
 # All that is written is a line beside earlier tool calls (live test 2026-11-27, Sonnet, the look-ahead answer with
 # get_analyst_views between the market tools and draw_chart: 「Per rules, no items means don't write it. Draw chart.」
-# next to draw_chart, then suggest_follow_ups alone — that line was the whole answer). Fewer characters than this,
-# none of them written in the step that asks: a note, not the answer. It is taken off and the answer asked for.
-FOLLOW_UPS_NOTE_MAX = 60
+# next to draw_chart, then suggest_follow_ups alone — that line was the whole answer). Text without a single Chinese
+# character (the answers are in Traditional Chinese: a short answer written beside draw_chart — 「台積電近 3 個月漲
+# 12.4%。」 — is an answer and stays), shorter than this, none of it written in the step that asks: a note. It is taken
+# off and the answer asked for.
+FOLLOW_UPS_NOTE_MAX = 200
+FREE_STEPS = 2
+_CJK = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
 FOLLOW_UPS_NOTE = ("還沒有寫回答：到目前為止寫的只是查資料時的一句話，已經從畫面上拿掉"
                    "（思考的內容與工具的結果不會顯示）。現在把完整的回答從第一句寫起，寫完再呼叫 suggest_follow_ups。")
 # suggest_follow_ups written as text on a line of its own (``ChatTurn._written_follow_ups``)
@@ -1561,7 +1565,12 @@ class ChatTurn:
 
     def _loop(self, thread: AiThread, new: list[dict[str, Any]], state: TurnState, ctx: ToolContext):
         rounds = self.settings.ai_deep_max_tool_rounds if self.deep else self.settings.ai_max_tool_rounds
-        for _ in range(max(1, rounds)):
+        left = max(1, rounds)
+        # a step that only asked for the follow-ups before the answer was written is sent back; it is not one of the
+        # turn's rounds (at most ``FREE_STEPS`` a turn: the look-ahead answer already needs most of them)
+        free = FREE_STEPS
+        while left > 0:
+            left -= 1
             first_text = [True]
             final, slot_index = yield from self._call(thread.model, new, state, first_text)
             self._segments(final, state)
@@ -1612,6 +1621,9 @@ class ChatTurn:
                     # stored history keeps the tool_use and its result; the next question's user turn follows it)
                     state.display.stop_reason = "end_turn"
                     return True
+                if not rest and free and all(r.get("is_error") for r in answered.values()):
+                    free -= 1
+                    left += 1
                 continue
             return True  # end_turn / stop_sequence
         raise ChatFailure("too_many_steps")
@@ -1691,9 +1703,12 @@ class ChatTurn:
         """suggest_follow_ups: kept on the turn (the last valid call wins), no progress line; its tool results.
         ``wrote``: the step that asks also wrote text (the answer, normally)."""
         out: dict[str, dict[str, Any]] = {}
+        # decided once for the step: every suggest_follow_ups of it gets the same answer (two in one step, the first
+        # sent back and the second kept, would leave the questions under an emptied answer)
+        shown = state.display.text.strip()
+        note = (bool(shown) and not wrote and len(shown) < FOLLOW_UPS_NOTE_MAX and not _CJK.search(shown)
+                and not state.note_scrapped)
         for tu in asks:
-            shown = state.display.text.strip()
-            note = bool(shown) and not wrote and len(shown) < FOLLOW_UPS_NOTE_MAX and not state.note_scrapped
             if not shown or note:
                 from forliosa.ai.market_tools import clean_follow_ups
 

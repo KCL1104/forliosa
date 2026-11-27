@@ -116,9 +116,30 @@ const OFFER_TAIL = "(?:我)?(?:可以|能)(?:把|幫你|替你|提供|整理|說
 const NOT_DECIDING = new RegExp(`我(?:也|並|都|就|還是|同樣)?(?:不能|無法|沒辦法|不會|不)?(?:替|幫|為)你(?:判斷|決定|選|挑|推薦)[^。！？\\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?(?:${OFFER_TAIL})?)`, "g")
 /**
  * 說自己不知道漲跌（產品負責人 2026-11-27：「不要回什麼沒辦法幫你挑、沒辦法知道這種回覆」）：「下週要買什麼，漲跌沒辦法事先知道，」
- * 到那個逗號或句尾為止；同一句前面沒有數字時（多半只是重述問題）連前面一起拿掉，後面的結論留著；前面有數字的那半句留著。
+ * 到那個逗號或句尾為止。只看回答的第一句（模型的這個習慣在開頭；後面的句子可能是在轉述別人的話），而且前面不是轉述
+ * （「台積電表示匯率走勢無法預測，…」不動）。前面重述問題的子句一起拿掉，後面的結論留著；前面是事實的子句留著。
  */
-const CANNOT_KNOW = /(^|[。！？\n])([^。！？\n]*?)(?:漲跌|股價|行情|走勢|會不會漲|哪檔會漲)[^。！？\n，,]{0,8}(?:沒辦法|沒有辦法|無法|不能)(?:事先|預先|提前)?(?:知道|預測|預知|預料)[^。！？\n，,]*(?:[。！？]|[，,])/g
+const CANNOT_KNOW = /^([^。！？\n]*?)(?:漲跌|股價|行情|走勢|會不會漲|哪檔會漲)[^。！？\n，,]{0,8}(?:沒辦法|沒有辦法|無法|不能)(?:事先|預先|提前)?(?:知道|預測|預知|預料)[^。！？\n，,]*(?:[。！？]|[，,])/
+const REPORTED = /表示|指出|認為|提到|強調|坦言|預期|報導|說|稱/
+const ASKED = /什麼|哪|嗎|怎麼|如何|會不會|能不能|該不該|要不要|可不可以/
+
+/** 回答自己的第一句（第一個有字的行；條列、標題、表格的行不算）裡說不知道漲跌的那半句拿掉 */
+function dropCannotKnow(text: string): string {
+  const lead = /^\s*/.exec(text)![0]
+  const body = text.slice(lead.length)
+  if (/^(?:[-*+#|>]|\d+[.)]\s)/.test(body)) return text
+  const m = CANNOT_KNOW.exec(body)
+  if (!m || REPORTED.test(m[1]!)) return text
+  const before = m[1]!
+  const rest = body.slice(m[0].length)
+  const cut = before.lastIndexOf("，") // 只認全形逗號：半形的可能是「2,145」的千分位
+  // 前面沒有別的子句：只是那半句的主詞（「明天哪檔會漲沒辦法預測。」），整句拿掉；有數字的不動
+  if (cut < 0) return /\d/.test(before) ? text : lead + rest
+  // 前面的子句是重述問題（「下週要買什麼，」）就一起拿掉；是事實（「台積電收 2,145 元，」「半導體偏弱，」）就留著、補上句號
+  const kept = before.slice(0, cut)
+  if (!/\d/.test(kept) && ASKED.test(kept)) return lead + rest
+  return `${lead}${kept}。${rest}`
+}
 const CANNOT_JUDGE = /我(?:不能|無法|沒辦法)(?:判斷|決定|預測|保證|告訴你)[^。！？\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?)/g
 /** 「我可以…」到句尾；同一句前面沒有數字時整句拿掉（「你可以到帳本看殖利率，我可以幫你整理。」） */
 const OFFER_SENTENCE = /(^|[。！？\n])([^。！？\n]*?)我可以(?:提供|幫你|替你|整理|說明|再)[^。！？\n]*[。！？]/g
@@ -133,7 +154,8 @@ const DATES = /\d{1,2}\/\d{1,2}/g
 
 /** 中日韓的字：回答是繁體中文，整行沒有一個中文字、只有英文句子的第一行是模型寫給自己的備註 */
 const CJK = /[\u3400-\u9fff\uf900-\ufaff]/
-const ENGLISH_NOTE = /[A-Za-z]{2,}[^\n]*\s[A-Za-z]{2,}/
+/** 像一句話的英文：字母開頭（不是表格的 `|`、標題的 `#`、條列）、至少四個英文詞。「### NVDA vs AMD」「| | NVDA | AMD |」不算 */
+const ENGLISH_NOTE = /^\s*[A-Za-z][A-Za-z'’]*(?:[\s,;:.!?-]+[A-Za-z'’]+){3,}/
 
 export function dropAiHabits(text: string, { streaming = false }: { streaming?: boolean } = {}): string {
   const lines = text.split("\n")
@@ -145,13 +167,7 @@ export function dropAiHabits(text: string, { streaming = false }: { streaming?: 
   else if (first >= 0 && !CJK.test(lines[first]!) && ENGLISH_NOTE.test(lines[first]!) && rest.some((l) => CJK.test(l))) lines.splice(first, 1)
   let out = lines.join("\n").replace(WRITTEN_CALL, "").replace(/^[ \t]*<br\s*\/?>[ \t]*$/gim, "")
   const narrated = out.replace(OWN_CORRECTION, "$1").replace(NARRATION, "$1")
-  out = (narrated.trim() ? narrated : out)
-    .replace(CANNOT_KNOW, (m, lead: string, before: string) => {
-      if (!/\d/.test(before)) return lead
-      // 前面有數字：留到最後一個逗號為止，補上句號（「台積電收 2,145 元，之後的漲跌沒辦法事先知道。」→「台積電收 2,145 元。」）
-      const cut = before.lastIndexOf("，") // 只認全形逗號：半形的可能是「2,145」的千分位
-      return cut < 0 ? m : `${lead}${before.slice(0, cut)}。`
-    })
+  out = dropCannotKnow(narrated.trim() ? narrated : out)
     .replace(NOT_DECIDING, "")
     .replace(CANNOT_JUDGE, "").replace(OFFER_SENTENCE, (_m, lead: string, before: string) => lead + (/\d/.test(before) ? before.replace(/[，,、\s]+$/, "。") : ""))
   if (!streaming) {
