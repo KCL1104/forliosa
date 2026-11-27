@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { Conversation } from "@/ai/Conversation"
-import { applyChatEvent, followUpsOf, threadFromServer } from "@/ai/remote"
+import { applyChatEvent, followUpsOf, threadFromServer, type AiChart } from "@/ai/remote"
 import type { useAiRunner } from "@/ai/runner"
 import type { Message, Thread } from "@/ai/types"
 
@@ -50,6 +50,53 @@ describe("follow_ups 事件與對話紀錄", () => {
     })
     expect(thread.messages[1]!.followUps).toEqual(["台達電配多少股利？"])
     expect(thread.messages[2]!.followUps).toBeUndefined()
+  })
+})
+
+describe("回答下方的圖表（產品負責人 2026-11-27：等回答寫完才出現）", () => {
+  const runner = { submit: vi.fn() } as unknown as ReturnType<typeof useAiRunner>
+  const chart: AiChart = {
+    id: "cht_1", kind: "compare", title: "台積電、鴻海 漲跌幅（近 3 個月）", unit: "pct", currency: null, x: "date", range: "3M",
+    series: [
+      { name: "台積電", symbol: "2330.TW", points: [{ t: "2026-11-25", v: 0 }, { t: "2026-11-26", v: 0.01 }, { t: "2026-11-27", v: 0.02 }] },
+      { name: "鴻海", symbol: "2317.TW", points: [{ t: "2026-11-25", v: 0 }, { t: "2026-11-26", v: -0.01 }, { t: "2026-11-27", v: -0.02 }] },
+    ],
+    notes: [], sources: ["臺灣證券交易所〈上市個股日成交資訊〉"], is_demo: false,
+  }
+  const show = (ai: Partial<Message>) =>
+    withQuery(
+      <Conversation
+        thread={{ id: "t1", title: "t", updatedAt: at, messages: [{ id: "u1", role: "user", text: "下禮拜可以買什麼？", at }, { id: "a1", role: "ai", model: true, text: "", at, ...ai }] }}
+        runner={runner}
+      />,
+    )
+  const figure = () => screen.queryByRole("figure", { name: chart.title })
+
+  it("圖的事件先到（模型先畫圖再寫回答）：還沒有字、或字還在寫的時候不放圖", () => {
+    // 事件照樣收進訊息裡，只是先不畫
+    const start: Message = { id: "a1", role: "ai", model: true, text: "", streaming: true, at }
+    const got = applyChatEvent(start, { event: "chart", data: chart })
+    expect(got.charts).toEqual([chart])
+    const first = show(got)
+    expect(figure()).toBeNull()
+    first.unmount()
+    show({ ...got, text: "11/30 到 12/4 的重點在台積電法說會" })
+    expect(figure()).toBeNull()
+  })
+
+  it("回答寫完：圖在回答下面、接著問上面", () => {
+    show({ text: "11/30 到 12/4 的重點在台積電法說會。", charts: [chart], followUps: ["台積電法說會說了什麼？"] })
+    const fig = figure()!
+    expect(fig).toBeInTheDocument()
+    const answer = screen.getByText(/的重點在台積電法說會/)
+    const list = screen.getByRole("list", { name: "接著問" })
+    expect(answer.compareDocumentPosition(fig) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(fig.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("中途出錯的回答：已經畫好的圖照樣顯示", () => {
+    show({ text: "11/30 到 12/4 的重點", charts: [chart], error: { code: "ai_unavailable", message: "AI 暫時沒有回應" } })
+    expect(figure()).toBeInTheDocument()
   })
 })
 

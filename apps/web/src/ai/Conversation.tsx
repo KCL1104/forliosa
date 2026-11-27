@@ -34,9 +34,9 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
   const endRef = useRef<HTMLDivElement>(null)
   const count = thread.messages.length
   const last = thread.messages[count - 1]
-  // 串流時跟著新的字往下捲（每多約一行才捲一次）；草稿卡與來源出現時也捲
+  // 串流時跟著新的字往下捲（每多約一行才捲一次）；草稿卡出現時也捲。圖表與來源等回答寫完才出現，那時再捲一次
   const growth = last?.streaming
-    ? Math.floor((last.text?.length ?? 0) / 40) + (last.tools?.length ?? 0) * 100 + ((last.draftIds?.length ?? 0) + (last.charts?.length ?? 0)) * 1000
+    ? Math.floor((last.text?.length ?? 0) / 40) + (last.tools?.length ?? 0) * 100 + (last.draftIds?.length ?? 0) * 1000
     : -((last?.draftIds?.length ?? 0) + (last?.charts?.length ?? 0) + (last?.citations?.length ?? 0))
   // 免責只跟著回答（模型的回答、規則版回答），而且一段對話只出現一次：在最新一則回答下方；那則還在寫時先不出現。
   // 草稿前的說明是照使用者的指令算的稅費，不是建議，不算回答。
@@ -96,7 +96,10 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
             {m.streaming && <StreamingLine message={m} />}
             {m.answer && <AnswerView answer={m.answer} runner={runner} size={size} onNavigate={onNavigate} />}
             {m.error && <ErrorNote code={m.error.code} message={m.error.message} size={size} />}
-            {m.charts?.map((c) => <ChartCard key={c.id} chart={c} />)}
+            {/* 圖表等回答寫完才出現（產品負責人 2026-11-27）：模型先畫圖再寫回答，圖一畫好事件就到了；回答還在寫
+                （用了報導的回答要先整理，這時連第一個字都還沒有）就先不放，和接著問、出處、免責一樣。
+                中途出錯的回答已經不在串流，畫好的圖照樣顯示 */}
+            {!m.streaming && m.charts?.map((c) => <ChartCard key={c.id} chart={c} />)}
             {[m.draftId, ...(m.draftIds ?? [])].map((id) =>
               id && drafts[id] ? (
                 <DraftCard
