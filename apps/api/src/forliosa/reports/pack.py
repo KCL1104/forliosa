@@ -51,7 +51,7 @@ from forliosa.timeutil import (
 
 log = logging.getLogger(__name__)
 
-PACK_VERSION = 1
+PACK_VERSION = 2  # 2 (2026-11-27): the position and turnover comparisons, ``unusual``, G1 with its averages
 # The metrics a fact may carry (validators and the writer's rules refer to them)
 METRICS = frozenset({
     "index_close", "index_change", "index_pct", "tr_close", "tr_pct", "otc_close", "otc_change", "otc_pct",
@@ -61,6 +61,10 @@ METRICS = frozenset({
     "pc_ratio_oi", "pc_ratio_vol", "futures_oi_net", "futures_oi_change", "large_traders", "otc_inst_total",
     "otc_inst_foreign", "otc_inst_trust", "otc_inst_dealer", "otc_adv_up", "otc_adv_down", "industry_value",
     "week_pct", "week_points", "count", "sector_contrib_est",
+    # 2026-11-27, the brief's 位置 and 量 rows: the TAIEX's n-session averages, its run of rises or falls, its move
+    # over the last 10 sessions; the listed turnover against the session before and the 5-session average; the size
+    # indices' moves (臺灣50, 中型100)
+    "index_ma", "index_streak", "index_range_pct", "turnover_change", "turnover_ratio", "style_pct",
 })
 # Position-type numbers: never a reason why something is watched (validator §10.2 item 15)
 OPTION_METRICS = frozenset({"pc_ratio_oi", "pc_ratio_vol", "futures_oi_net", "futures_oi_change", "large_traders"})
@@ -90,6 +94,24 @@ RULE_WATCH_EMPTY = ("今天的行事曆沒有已排定的事件：watch 只寫�
                     "（這時不受 2–4 項的限制），不要湊數。")
 # the number strip's 漲停／跌停 when a movers table counts only its scope (「範圍內跌停 17 家」 beside 「6／30 家」)
 LIMITS_NOTE = "全部上市普通股；排行表只算範圍內"
+# The brief's 位置 row and the trend chart (owner 2026-11-27, option B): averages of the official closes in the archive
+# only — a 20-session average and longer ones come when the archive is long enough, never from the reference history
+AVERAGE_SESSIONS = (5, 10)
+RANGE_SESSIONS = 10  # 「近 10 個交易日」
+TURNOVER_SESSIONS = 5  # 「5 日均量」
+STREAK_MIN = 2  # 「連 2 日上漲」 from two sessions on
+AVERAGES_DATASET = "rules:averages"
+# How far something must be from an ordinary day to be offered to the writer as 「這一天不一樣的地方」 (``unusual``)
+UNUSUAL_GAP = Decimal("0.01")  # 櫃買 against 加權, 中型100 against 臺灣50: a percentage point
+UNUSUAL_SHARE = Decimal("0.5")  # one sector's estimated points: half of the index's change
+UNUSUAL_VOLUME = Decimal("0.25")  # the turnover a quarter above or below its 5-session average
+UNUSUAL_LIMITS = 30  # stocks at their limit
+UNUSUAL_STREAK = 3
+UNUSUAL_US_MOVE = Decimal("0.02")
+UNUSUAL_MAX = 5
+# the afternoon's own sum against the days before (their files were replaced by the next morning's full ones): a
+# difference this small is within what the two files differ by, so it is written as 「和前一日相近」, not as a number
+TURNOVER_NEAR = Decimal("0.03")
 
 
 @dataclass
@@ -129,6 +151,7 @@ class Pack:
                                            "prev_session": set()}
         self.blocks: dict[str, Any] = {"charts": {}, "tables": {}, "numbers": [], "calendar": None, "notes": {}}
         self.already: list[dict[str, Any]] = []
+        self.unusual: list[dict[str, Any]] = []
         self.through = data_through(edition)
 
     # -- ids --------------------------------------------------------------------------------------------------------
@@ -245,7 +268,8 @@ class Pack:
             "dates": {k: sorted(v) for k, v in self.dates.items()},
             "facts": self.facts, "calendar": self.calendar, "filings": self.filings, "research": self.research,
             "web": [], "stocks": list(self.stocks.values()), "sectors": self.sectors, "missing": self.missing,
-            "strip": self.strip, "already_reported": self.already, "rules": self.rules, "charts_menu": self.menu,
+            "strip": self.strip, "already_reported": self.already, "unusual": unusual_for_writer(self.unusual),
+            "rules": self.rules, "charts_menu": self.menu,
             "fixed_charts": self.fixed, "notes": self.notes,
         }
         self.blocks["source_labels"] = self.labels(sorted(d for d in self.datasets if not d.startswith("rules:")))
@@ -1002,6 +1026,214 @@ def _fixed(p: Pack, codes: Iterable[str]) -> list[str]:
     return [c for c in codes if c in p.blocks["charts"]]
 
 
+# -- the brief's 位置 and 量, the trend chart, 「這一天不一樣的地方」 (2026-11-27) ---------------------------------
+def _fid(p: Pack, metric: str, group: str, subject: str | None = None) -> dict[str, Any] | None:
+    return next((f for f in p.facts if f["metric"] == metric and f["group"] == group
+                 and (subject is None or f["subject"] == subject)), None)
+
+
+def unusual_for_writer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The candidates the writer reads: the furthest from an ordinary day first, at most :data:`UNUSUAL_MAX`."""
+    kept: list[dict[str, Any]] = []
+    for r in sorted(rows, key=lambda r: -r["score"]):
+        if not any(set(r["refs"]) <= set(k["refs"]) for k in kept):  # says nothing a better one did not
+            kept.append(r)
+    return [{"what": r["what"], "refs": r["refs"]} for r in kept[:UNUSUAL_MAX]]
+
+
+def _unusual(p: Pack, score: Decimal | float, what: str, *facts: dict[str, Any] | None) -> None:
+    """One thing that sets the day apart, as a plain statement of the facts it cites (never a view of what follows)."""
+    if any(f is None for f in facts):
+        return
+    p.unusual.append({"score": float(score), "what": what, "refs": [f["id"] for f in facts if f]})
+
+
+def _position(p: Pack, upto: date, group: str) -> list[tuple[int, list[tuple[date, Decimal]]]]:
+    """Where the TAIEX stands on ``upto``, from the official closes of the archive only: its n-session averages
+    (:data:`AVERAGE_SESSIONS`), the run of rises or falls ending that day (from :data:`STREAK_MIN` sessions on) and
+    its move over the last :data:`RANGE_SESSIONS` sessions — each a fact, each only when the archive holds that many
+    sessions in a row (a missing day breaks the run: an average of five closes spanning six sessions is not 「5 日線」).
+    Returns the averages' series for G1."""
+    closes = _taiex_closes(p, upto, limit=60)
+    run = mc.unbroken_run(closes, upto)
+    if len(run) < 2:
+        return []
+    series = [(d, closes[d][0]) for d in run]
+    last = series[-1][1]
+    note = "官方收盤的平均，Forliosa 計算；只用存檔裡連續的交易日"
+    averages = []
+    for n in AVERAGE_SESSIONS:
+        avg = mc.moving_average(series, n)
+        if not avg:
+            continue
+        averages.append((n, avg))
+        name = B.average_name(n)
+        p.fact(f"加權指數 {name} {md(upto)}（最近 {n} 個交易日收盤的平均）", name, "index_ma", group, avg[-1][1],
+               B.number_text(avg[-1][1]), unit="點", day=upto, dataset=AVERAGES_DATASET,
+               aliases=[f"{n}日線", f"{n} 日均線", f"{n}日均線"], note=note)
+    st = mc.streak([c for _d, c in series])
+    if abs(st) >= STREAK_MIN:
+        word = "上漲" if st > 0 else "下跌"
+        p.fact(f"加權指數連續{word}的交易日數（至 {md(upto)}）", "加權指數", "index_streak", group, st,
+               f"連 {abs(st)} 日{word}", unit="日", precision=0, day=upto, dataset=AVERAGES_DATASET,
+               aliases=TAIEX_ALIASES)
+    if len(series) > RANGE_SESSIONS:
+        base_day, base = series[-RANGE_SESSIONS - 1]
+        chg = last / base - 1
+        p.dates["report"].add(base_day.isoformat())  # the label names it: a sentence may too
+        p.fact(f"加權指數近 {RANGE_SESSIONS} 個交易日漲跌幅（{md(base_day)} 收盤至 {md(upto)}）", "加權指數",
+               "index_range_pct", group, chg, B.pct_text(chg), unit="%", day=upto, dataset=AVERAGES_DATASET,
+               aliases=TAIEX_ALIASES)
+    return averages
+
+
+def _trend_chart(p: Pack, upto: date, group: str) -> None:
+    """G1 with its averages: the trend chart under the brief (close: to the edition's day; premarket: to the session
+    before)."""
+    pts, ds = _taiex_series(p, upto, limit=60)
+    averages = _position(p, upto, group)
+    p.chart(B.g1_index_line(pts, sources=p.labels([*sorted(ds), *([AVERAGES_DATASET] if averages else [])]),
+                            title=f"加權指數收盤（至 {md(upto)}）", averages=averages))
+
+
+def _turnover_before(p: Pack, d: date, official: bool) -> list[int]:
+    """The listed turnover of the trading days before ``d``, newest first, on the same footing as the day's own
+    number: the official FMTQIK value when the day's is the official one, else the same sum of that day's close file.
+    Stops at the first trading day that has none (the average is of sessions in a row)."""
+    out: list[int] = []
+    before = [x for x in tw_trading_days(d - timedelta(days=20), d) if x < d][-(TURNOVER_SESSIONS - 1):]
+    for day in reversed(before):
+        if official:
+            row = p.db.get(MarketTurnoverDaily, (day, "TWSE"))
+            value = row.trade_value if row is not None and usable("twse-openapi/turnover", day, p.cutoff) else None
+        else:
+            loaded = mc.load_day(p.db, "TWSE", day, p.cutoff, p.policy)
+            value = mc.turnover_sum(loaded) if loaded is not None and loaded.day == day else None
+        if not value:
+            break
+        out.append(int(value))
+    return out
+
+
+def _turnover_compare(p: Pack, twse: mc.Day, today: int, official: bool) -> None:
+    """The 量 row's comparisons: the day's listed turnover against the session before and against the average of the
+    last :data:`TURNOVER_SESSIONS` sessions (the day included), like with like (:func:`_turnover_before`)."""
+    d = twse.day
+    before = _turnover_before(p, d, official)
+    if not before:
+        return
+    ds = "twse-openapi/turnover" if official else "rules:turnover_sum"
+    est = not official
+    diff = today - before[0]
+    near = est and abs(Decimal(diff)) < TURNOVER_NEAR * before[0]
+    display = "和前一日相近" if near or diff == 0 else f"{'多' if diff > 0 else '少'} {B.yi_text(abs(diff))}"
+    p.fact(f"上市成交金額 {md(d)} 較前一日", "上市成交金額", "turnover_change", "today", diff, display, unit="億元",
+           precision=0, day=d, dataset=ds, estimate=est, aliases=["成交金額", "成交值", "量能"],
+           note="下午的檔和隔天清晨的完整檔略有差異，差距很小時只寫相近" if est else "")
+    if len(before) == TURNOVER_SESSIONS - 1:
+        ratio = Decimal(today) * TURNOVER_SESSIONS / (today + sum(before))
+        p.fact(f"上市成交金額 {md(d)} 相當於 {TURNOVER_SESSIONS} 日均量的比例（含當日）", f"{TURNOVER_SESSIONS} 日均量",
+               "turnover_ratio", "today", ratio, f"{round(ratio * 100)}%", unit="%", precision=0, day=d,
+               dataset=AVERAGES_DATASET, estimate=est,
+               aliases=[f"{TURNOVER_SESSIONS}日均量", "五日均量", "均量"])
+
+
+def _style_facts(p: Pack, d: date, group: str) -> None:
+    """臺灣50 and 中型100 as facts (G15 draws them): whether the large or the mid caps carried the day."""
+    for m in mc.style_moves(p.db, d, p.cutoff, p.policy):
+        if m.label in ("臺灣50", "中型100"):
+            p.fact(f"{m.label}指數 {md(d)} 漲跌幅", m.label, "style_pct", group, m.point.pct, B.pct_text(m.point.pct),
+                   unit="%", day=d, dataset=m.point.dataset, aliases=[f"{m.label}指數", m.label.replace("臺", "台")])
+
+
+def _v(f: dict[str, Any]) -> Decimal:
+    return Decimal(str(f["value"]))
+
+
+def _unusual_close(p: Pack) -> None:
+    """What sets the session apart, for the headline (never a view: each is a statement of facts already in the
+    pack): one sector's share of the index's points, 櫃買 against 加權, 中型100 against 臺灣50, the turnover against
+    its 5-session average, advancers against the index's direction, stocks at their limit, a run of rises or falls,
+    a close on the other side of an average."""
+    g = "today"
+    chg, pct = _fid(p, "index_change", g, "加權指數"), _fid(p, "index_pct", g, "加權指數")
+    if chg is not None and chg["value"]:
+        move = _v(chg)
+        head = f"加權指數{'上漲' if move > 0 else '下跌'} {B.number_text(abs(move))} 點"
+        contribs = [f for f in p.facts if f["metric"] == "sector_contrib_est" and f["group"] == g and f["value"]]
+        same = [f for f in contribs if (f["value"] > 0) == (move > 0)]
+        against = [f for f in contribs if (f["value"] > 0) != (move > 0)]
+        if same:
+            lead = max(same, key=lambda f: abs(f["value"]))
+            share = _v(lead) / move
+            if share >= UNUSUAL_SHARE:
+                _unusual(p, min(share, Decimal("1.5")), f"{head}，其中{lead['subject']}類約 {lead['display']}（估算）",
+                         chg, lead)
+        if against:
+            other = max(against, key=lambda f: abs(f["value"]))
+            if abs(_v(other)) >= UNUSUAL_SHARE * abs(move):
+                _unusual(p, 1.2, f"{head}，{other['subject']}類約 {other['display']}（估算）", chg, other)
+        up, down = _fid(p, "adv_up", g), _fid(p, "adv_down", g)
+        if up and down and pct and (down["value"] > up["value"] if move > 0 else up["value"] > down["value"]):
+            _unusual(p, 1.0, f"加權指數 {pct['display']}，上漲 {up['display']}、下跌 {down['display']}", pct, up, down)
+    for a, b in ((_fid(p, "otc_pct", g, "櫃買指數"), pct),
+                 (_fid(p, "style_pct", g, "中型100"), _fid(p, "style_pct", g, "臺灣50"))):
+        if a and b and abs(_v(a) - _v(b)) >= UNUSUAL_GAP:
+            _unusual(p, abs(_v(a) - _v(b)) / UNUSUAL_GAP * Decimal("0.4"),
+                     f"{a['subject']} {a['display']}，{b['subject']} {b['display']}", a, b)
+    ratio = _fid(p, "turnover_ratio", g)
+    if ratio and abs(_v(ratio) - 1) >= UNUSUAL_VOLUME:
+        est = ("約", "（估算）") if ratio["estimate"] else ("", "")
+        _unusual(p, abs(_v(ratio) - 1) / UNUSUAL_VOLUME * Decimal("0.6"),
+                 f"上市成交金額{est[0]}是 {ratio['subject']}的 {ratio['display']}{est[1]}", ratio)
+    for metric, name in (("limit_up", "漲停"), ("limit_down", "跌停")):
+        f = _fid(p, metric, g)
+        if f and f["value"] >= UNUSUAL_LIMITS:
+            _unusual(p, Decimal(f["value"]) / UNUSUAL_LIMITS * Decimal("0.5"), f"上市普通股{name} {f['display']}", f)
+    st = _fid(p, "index_streak", g)
+    if st and abs(st["value"]) >= UNUSUAL_STREAK:
+        _unusual(p, Decimal(abs(st["value"])) / UNUSUAL_STREAK * Decimal("0.5"), f"加權指數{st['display']}", st)
+    _unusual_cross(p, g)
+
+
+def _unusual_cross(p: Pack, group: str) -> None:
+    """The close on the other side of an average than the session before (its close against that day's own average)."""
+    day = p.through
+    closes = _taiex_closes(p, day, limit=60)
+    run = mc.unbroken_run(closes, day)
+    series = [(d, closes[d][0]) for d in run]
+    close = _fid(p, "index_close", group, "加權指數")
+    for n in reversed(AVERAGE_SESSIONS):
+        avg = mc.moving_average(series, n)
+        fact = next((f for f in p.facts if f["metric"] == "index_ma" and f["group"] == group
+                     and f["subject"] == B.average_name(n)), None)
+        if len(avg) < 2 or fact is None or close is None:
+            continue
+        now_above, was_above = series[-1][1] >= avg[-1][1], series[-2][1] >= avg[-2][1]
+        if now_above != was_above:
+            _unusual(p, 0.5 + n / 50, f"加權指數收盤在 {B.average_name(n)}之{'上' if now_above else '下'}"
+                                      f"（前一個交易日在之{'上' if was_above else '下'}）", close, fact)
+            return  # the longer average's crossing says it; the shorter one's would repeat it
+
+
+def _unusual_premarket(p: Pack) -> None:
+    """Overnight: a US row that moved 2% or more, the semiconductor ETF apart from the S&P 500's by a point or more
+    (the last US session; ETF and ADR moves only, never index points)."""
+    us = [f for f in p.facts if f["metric"] == "us_pct" and f["group"] == "overnight"]
+    if not us:
+        return
+    last = max(f["date"] or "" for f in us)
+    row = {f["subject"]: f for f in us if f["date"] == last}
+    when = f"美股 {md(date.fromisoformat(last))}" if last else "美股"
+    for f in row.values():
+        if abs(_v(f)) >= UNUSUAL_US_MOVE:
+            _unusual(p, abs(_v(f)) / UNUSUAL_US_MOVE * Decimal("0.5"), f"{f['subject']} {when} {f['display']}", f)
+    smh, spy = row.get("SMH"), row.get("SPY")
+    if smh and spy and abs(_v(smh) - _v(spy)) >= UNUSUAL_GAP:
+        _unusual(p, abs(_v(smh) - _v(spy)) / UNUSUAL_GAP * Decimal("0.4"),
+                 f"SMH {when} {smh['display']}，SPY {spy['display']}", smh, spy)
+
+
 # -- 盤後重點 ---------------------------------------------------------------------------------------------------
 def _close(p: Pack, md_: Any) -> None:
     d = p.ed.edition_date
@@ -1034,6 +1266,7 @@ def _close(p: Pack, md_: Any) -> None:
                          B.yi_text(official.trade_value), unit="億元", precision=0, day=d,
                          dataset="twse-openapi/turnover", aliases=["成交金額", "成交值", "量能"])
             p.number(fid, B.number("turnover", "上市成交金額", B.yi_text(official.trade_value), date_label=md(d)))
+            _turnover_compare(p, twse, int(official.trade_value), True)
         elif (total := mc.turnover_sum(twse)) is not None:
             fid = p.fact(f"上市成交金額（Forliosa 加總，估算）{md(d)}", "上市成交金額", "turnover_est", "today", total,
                          B.yi_text(total), unit="億元", precision=0, day=d, dataset="rules:turnover_sum",
@@ -1041,6 +1274,7 @@ def _close(p: Pack, md_: Any) -> None:
                          note="個股成交金額加總；證交所官方數字隔天清晨公布")
             p.number(fid, B.number("turnover", "上市成交金額", B.yi_text(total), date_label=md(d), estimate=True,
                                    note="隔天清晨換成證交所官方數字"))
+            _turnover_compare(p, twse, int(total), False)
         now_cap, _ = mc.total_mcap(twse)
         if now_cap:
             p.fact(f"上市普通股總市值 {md(d)}（Forliosa 估算）", "上市總市值", "mcap_total", "structure", now_cap,
@@ -1086,12 +1320,13 @@ def _close(p: Pack, md_: Any) -> None:
                                        title=f"市值前 10 大對加權指數的點數貢獻（估算，{md(d)}）",
                                        sources=p.labels([*twse.datasets, "rules:contribution"])))
         _research(p, list(p.stocks), d)
-    # G1
+    # G1 with its averages: the trend chart under the brief, and the facts of the 位置 row
     if taiex is not None:
-        pts, ds = _taiex_series(p, d, limit=60)
-        p.chart(B.g1_index_line(pts, sources=p.labels(ds), title=f"加權指數收盤（至 {md(d)}）"))
+        _trend_chart(p, d, "today")
     else:
         p.blocks["notes"]["G1"] = "官方加權指數尚未取得"
+    _style_facts(p, d, "today")
+    _unusual_close(p)
     g5 = _g5(p, md_, _top5_weight_symbols(twse), f"權值前 5 檔一個月比較（至 {md(d)}）")
     p.chart(g5)
     # the chart of the day: G5 (G4's advancers and decliners are the number strip's; v2 took it out)
@@ -1352,13 +1587,18 @@ def _premarket(p: Pack, md_: Any) -> None:
     _sector_facts(p, [s for s in secs if s.text_eligible], prev, "prev_session")
     ref = _breadth_reference(mc.breadth(twse_prev), "上市普通股") if _moves(twse_prev) else None
     _sector_blocks(p, prev, twse_prev, taiex_prev, secs, contribs, reference=ref)
+    # the trend chart under the brief and the 位置 row: where the previous session closed (the server's row, never the
+    # writer's: the facts are of the previous session)
+    if taiex_prev is not None:
+        _trend_chart(p, prev, "prev_session")
+    _unusual_premarket(p)
     # 昨日籌碼: the margin's largest changes (TWSE's file of the previous session is out by 05:45, TPEx's by 23:40)
     _t10(p, [twse_prev, tpex], prev, title=md(prev))
     g5 = _g5(p, md_, _top5_weight_symbols(twse_prev), f"權值前 5 檔一個月比較（至 {md(prev)}）")
     p.chart(g5)
     # the chart of the day: G5 only (G2 is fixed now; G4's breadth is G2's reference line)
     _menu(p, "G5", g5 is not None, ["day"], ["top5_weight"] if g5 is not None else [])
-    p.fixed = _fixed(p, ("G6", "G17", "G15", "G2", "G2_otc", "G8", "G7", "G16"))
+    p.fixed = _fixed(p, ("G1", "G6", "G17", "G15", "G2", "G2_otc", "G8", "G7", "G16"))
     # today's calendar (until the next session), the filings since the previous session's close
     top100 = mc.top_by_mcap([twse_prev, tpex])
     names = {q.symbol: q.name for day in (twse_prev, tpex) if day for q in day.quotes.values()}

@@ -211,14 +211,16 @@ describe("重點的欄位與趨勢圖（2026-11-27）", () => {
   const rows = (r: MarketReport) => (r.brief ?? []).map((row) => [row.key, row.label, row.origin])
   const text = (r: MarketReport, key: string) => r.brief!.find((row) => row.key === key)!.paragraph.sentences.map((x) => x.text).join("")
 
-  it("盤後：為什麼、誰帶的、位置、量、籌碼；位置與量是規則算的", () => {
+  it("盤後：為什麼、貢獻、位置、量、籌碼；位置與量是規則算的", () => {
     expect(rows(close)).toEqual([
-      ["why", "為什麼", "ai"], ["drivers", "誰帶的", "ai"], ["position", "位置", "rules"], ["volume", "量", "rules"], ["chips", "籌碼", "ai"],
+      ["why", "為什麼", "ai"], ["drivers", "貢獻", "ai"], ["position", "位置", "rules"], ["volume", "量", "rules"], ["chips", "籌碼", "ai"],
     ])
     expect(text(close, "position")).toMatch(/收在 5 日線(與 10 日線)?之[上下]/)
-    expect(text(close, "volume")).toMatch(/^上市 [\d,]+ 億元，(比前一日[多少] [\d,]+ 億元|和前一日相同)，是 5 日均量的 \d+%。$/)
+    expect(text(close, "volume")).toMatch(/^上市 [\d,]+ 億元，(比前一日[多少] [\d,]+ 億元|和前一日相近)，是 5 日均量的 \d+%。$/)
     // 點數貢獻是估算，句子裡要標出來
-    expect(text(close, "drivers")).toMatch(/類約 [+−][\d,]+ 點、.+類約 [+−][\d,]+ 點（估算）。$/)
+    expect(text(close, "drivers")).toMatch(/^.+類約 [+−][\d,]+ 點（估算[^）]*）、.+類約 [+−][\d,]+ 點（估算[^）]*）。$/)
+    // 半導體連同它的集中度一起寫
+    expect(text(close, "drivers")).toContain("半導體類約 +83 點（估算；主要由台積電構成，約 77%）")
   })
 
   it("盤前：隔夜、為什麼、排定、位置、籌碼；位置寫前一個交易日收在哪", () => {
@@ -228,8 +230,9 @@ describe("重點的欄位與趨勢圖（2026-11-27）", () => {
 
   it("資料版只有規則算的幾列：沒有為什麼，盤後也沒有籌碼", () => {
     const data = buildMockReport("close", "2026-11-11", { ai: false, edition: "data" })
-    expect(rows(data)).toEqual([["drivers", "誰帶的", "rules"], ["position", "位置", "rules"], ["volume", "量", "rules"]])
-    expect(text(data, "volume")).toMatch(/^上市約 [\d,]+ 億元（估算）/)
+    expect(rows(data)).toEqual([["drivers", "貢獻", "rules"], ["position", "位置", "rules"], ["volume", "量", "rules"]])
+    // 下午自己加總的數字是估算：差距不到 3% 不寫成數字，比例前面加「約」
+    expect(text(data, "volume")).toMatch(/^上市約 [\d,]+ 億元（估算），(比前一日[多少] [\d,]+ 億元|和前一日相近)，約是 5 日均量的 \d+%。$/)
     expect(rows(buildMockReport("premarket", "2026-11-12", { ai: false, edition: "data" })).map(([key]) => key)).toEqual(["overnight", "scheduled", "position", "chips"])
   })
 

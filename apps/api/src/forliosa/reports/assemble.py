@@ -7,6 +7,12 @@ dropped section, no id string anywhere (``F\\d{3}`` / ``X\\d{3}``), no quote.
 
 :func:`data_highlights` and :func:`data_title` are the rule-made headline and highlights (§12.4) of the data edition,
 also used when the writer's title or highlights failed the checks.
+
+The brief (2026-11-27): the premarket's and the close's highlights are rows of a printed form (``payload["brief"]``:
+key, label, origin, paragraph) in a fixed order — the writer's rows (為什麼, 貢獻 …) where they passed the checks, the
+server's own (:func:`data_brief`: 位置, 量 and the rule-made stand-ins) everywhere else; ``payload["highlights"]`` are
+the same paragraphs (pushes and older clients read them). ``payload["trend"]`` is G1 with its averages, shown under
+the brief.
 """
 
 from __future__ import annotations
@@ -17,7 +23,7 @@ from datetime import date, datetime
 from typing import Any
 
 from forliosa.datapolicy import label as source_label
-from forliosa.reports.prompts import STOCKS_NOT_FOUND
+from forliosa.reports.prompts import BRIEF_LABELS, BRIEF_ORDER, BRIEF_SLOTS, STOCKS_NOT_FOUND
 from forliosa.reports.schedule import KIND_LABELS, md, md_wd, span
 from forliosa.timeutil import TAIPEI, iso_taipei
 
@@ -52,8 +58,9 @@ ID_PATTERN = re.compile(r"\b[FXCNW]\d{3}\b")
 # notes, the futures and TPEx institutions, margin); its single-chart 「圖」 section is gone; the weekly's
 # 「多期間報酬」 is part of 「類股一週與大方向」.
 SECTIONS: dict[str, list[tuple[str, str, str | None, bool]]] = {
+    # 「昨日台股全貌」 is folded on phones (2026-11-27): the previous close report showed these charts already
     "premarket": [("overnight", "隔夜要聞", "overnight", False), ("watch", "今天市場在看什麼", "watch", False),
-                  ("yesterday", "昨日台股全貌", None, False),
+                  ("yesterday", "昨日台股全貌", None, True),
                   ("chips", "昨日籌碼（晚間公布）", "evening_notes", True), ("chart_of_day", "今日圖", None, True)],
     "close": [("what_happened", "今天發生什麼", "what_happened", False), ("sectors", "類股", "sectors", False),
               ("stocks", "權值股與個股", "stocks", True), ("chips", "籌碼", "chips", True),
@@ -161,66 +168,12 @@ def data_title(kind: str, pack: dict[str, Any]) -> str:
 
 
 def data_highlights(kind: str, pack: dict[str, Any]) -> list[dict[str, Any]]:
-    """Up to three (weekly: three) rule-made highlights, each sentence citing the facts it shows."""
+    """The rule-made highlights, each sentence citing the facts it shows: the premarket's and the close's are the
+    brief's rule-made rows (:func:`brief_rows`), the weekly's up to three points."""
+    if kind in BRIEF_ORDER:
+        return [r["paragraph"] for r in brief_rows(kind, pack)]
     out: list[dict[str, Any]] = []
     facts = pack.get("facts") or []
-    if kind == "premarket":
-        us = [f for f in facts if f.get("metric") == "us_pct" and f.get("group") == "overnight"]
-        if us:
-            last = max(f.get("date") or "" for f in us)
-            row = [f for f in us if f.get("date") == last]
-            d = _d(last)
-            text = f"美股 ETF（美股 {md(d) if d else ''} 收盤）：" + "、".join(
-                f"{f['subject']} {f['display']}" for f in row)
-            out.append(_para(_sent(text, [f["id"] for f in row])))
-        ed = pack.get("edition_date")
-        today = [c for c in pack.get("calendar") or [] if c.get("date") == ed]
-        key = next((c for c in today if c.get("kind") == "settlement"), None) or next(
-            (c for c in today if not c.get("fold")
-             and c.get("kind") in ("investor_conference", "macro", "us_earnings")),
-            None)
-        n_ex = sum(1 for c in today if c.get("kind") == "ex_dividend" and not c.get("fold"))
-        n_conf = sum(1 for c in today if c.get("kind") == "investor_conference" and not c.get("fold"))
-        parts = []
-        refs = []
-        if key is not None:
-            parts.append(key["title"])
-            refs.append(key["id"])
-        if n_ex or n_conf:
-            parts.append(f"市值前 100 中 {n_ex} 家除權息、{n_conf} 家法說會")
-            refs += [c["id"] for c in today if c.get("kind") in ("ex_dividend", "investor_conference")
-                     and not c.get("fold")][:6]
-        if parts:
-            out.append(_para(_sent("今天：" + "；".join(parts), refs)))
-        net = _first(pack, "futures_oi_net", "evening")
-        if net:
-            ch = _first(pack, "futures_oi_change", "evening")
-            d = _d(net.get("date"))
-            text = f"外資台指期淨未平倉（{md(d) if d else ''}）：{net['display']}" \
-                + (f"，較前一日 {ch['display']}" if ch else "")
-            out.append(_para(_sent(text, [net["id"], *([ch["id"]] if ch else [])])))
-        return out
-    if kind == "close":
-        close, chg, pct = (_first(pack, m, "today", "加權指數") for m in ("index_close", "index_change", "index_pct"))
-        if close and chg and pct:
-            out.append(_para(_sent(f"加權指數收 {close['display']} 點，{chg['display']} 點（{pct['display']}）",
-                                   [close["id"], chg["id"], pct["id"]])))
-        elif (est := _first(pack, "mcap_change_est")) is not None:
-            out.append(_para(_sent(f"上市市值變化（Forliosa 估算）：{est['display']}", [est["id"]])))
-        up, down = _first(pack, "adv_up", "today"), _first(pack, "adv_down", "today")
-        lu, ld = _first(pack, "limit_up", "today"), _first(pack, "limit_down", "today")
-        if up and down:
-            text = f"上漲 {up['display']}、下跌 {down['display']}"
-            refs = [up["id"], down["id"]]
-            if lu and ld:
-                text += f"；漲停 {lu['display']}、跌停 {ld['display']}"
-                refs += [lu["id"], ld["id"]]
-            out.append(_para(_sent(text, refs)))
-        contribs = [f for f in facts if f.get("metric") == "stock_contrib" and isinstance(f.get("value"), (int, float))]
-        if contribs:
-            top = max(contribs, key=lambda f: abs(f["value"]))
-            out.append(_para(_sent(f"點數貢獻最大：{top['subject']} 約 {top['display']}（估算）", [top["id"]])))
-        return out
     wk, pts = _first(pack, "week_pct", "week", "加權指數"), _first(pack, "week_points", "week", "加權指數")
     if wk:
         out.append(_para(_sent(f"加權指數週 {wk['display']}" + (f"（{pts['display']} 點）" if pts else ""),
@@ -239,6 +192,193 @@ def data_highlights(kind: str, pack: dict[str, Any]) -> list[dict[str, Any]]:
         out.append(_para(_sent(f"週漲幅最大的類股：{hi[0]['name']} {hi[1]['display']}；"
                                f"最小：{lo[0]['name']} {lo[1]['display']}"
                                "（排除一檔占一半以上的類股）", [hi[1]["id"], lo[1]["id"]])))
+    return out
+
+
+# -- the brief (2026-11-27) ----------------------------------------------------------------------------------------
+def _averages(pack: dict[str, Any], group: str) -> list[dict[str, Any]]:
+    """The TAIEX's n-session averages of ``group``, the shortest first."""
+    def n(f: dict[str, Any]) -> int:
+        m = re.match(r"\s*(\d+)", str(f.get("subject") or ""))
+        return int(m.group(1)) if m else 0
+
+    return sorted((f for f in _facts(pack, "index_ma", group) if isinstance(f.get("value"), (int, float))), key=n)
+
+
+def _against_averages(close: float, averages: list[dict[str, Any]]) -> tuple[str, list[str]] | None:
+    """「5 日線與 10 日線之上」 / 「5 日線之上、10 日線之下」: on which side of each average the close is — a statement
+    of where it closed, never of what the averages will do (no 支撐, no 壓力)."""
+    if not averages:
+        return None
+    sides = [(str(f["subject"]), "之上" if close >= f["value"] else "之下") for f in averages]
+    refs = [f["id"] for f in averages]
+    if len({side for _n, side in sides}) == 1:
+        names = [n for n, _s in sides]
+        joined = names[0] if len(names) == 1 else "、".join(names[:-1]) + "與 " + names[-1]
+        return f"{joined}{sides[0][1]}", refs
+    return "、".join(f"{n}{side}" for n, side in sides), refs
+
+
+def _position_row(kind: str, pack: dict[str, Any]) -> dict[str, Any] | None:
+    """位置: the close: a run of rises or falls, the close against its averages, its move over the last 10 sessions;
+    the premarket: where the previous session closed and on which side of its averages. Nothing without the index."""
+    group = "today" if kind == "close" else "prev_session"
+    close = _first(pack, "index_close", group, "加權指數")
+    if close is None or not isinstance(close.get("value"), (int, float)):
+        return None
+    rel = _against_averages(close["value"], _averages(pack, group))
+    if kind == "premarket":
+        pct = _first(pack, "index_pct", group, "加權指數")
+        d = _d(close.get("date"))
+        text = f"加權指數 {md(d) if d else ''} 收 {close['display']} 點" + (f"（{pct['display']}）" if pct else "")
+        refs = [close["id"], *([pct["id"]] if pct else [])]
+        if rel is not None:
+            text, refs = f"{text}，在 {rel[0]}", [*refs, *rel[1]]
+        return _para(_sent(f"{text}。", refs))
+    parts: list[str] = []
+    refs = []
+    if (st := _first(pack, "index_streak", group)) is not None:
+        parts.append(st["display"])
+        refs.append(st["id"])
+    if rel is not None:
+        parts.append(f"收在 {rel[0]}")
+        refs += [close["id"], *rel[1]]
+    if (rng := _first(pack, "index_range_pct", group)) is not None:
+        parts.append(f"近 10 個交易日 {rng['display']}")
+        refs.append(rng["id"])
+    return _para(_sent("，".join(parts) + "。", refs)) if parts else None
+
+
+def _volume_row(pack: dict[str, Any]) -> dict[str, Any] | None:
+    """量 (the close): the listed turnover against the session before and its 5-session average. Without either
+    comparison there is no row (the number alone is the number strip's)."""
+    tv = _first(pack, "turnover", "today") or _first(pack, "turnover_est", "today")
+    chg, ratio = _first(pack, "turnover_change", "today"), _first(pack, "turnover_ratio", "today")
+    if tv is None or (chg is None and ratio is None):
+        return None
+    est = bool(tv.get("estimate"))
+    parts = [f"上市約 {tv['display']}（估算）" if est else f"上市 {tv['display']}"]
+    refs = [tv["id"]]
+    if chg is not None:
+        near = str(chg["display"]).startswith("和")
+        parts.append(chg["display"] if near else f"比前一日{chg['display']}")
+        refs.append(chg["id"])
+    if ratio is not None:
+        parts.append(f"{'約' if est else ''}是 {ratio['subject']}的 {ratio['display']}")
+        refs.append(ratio["id"])
+    return _para(_sent("，".join(parts) + "。", refs))
+
+
+def _drivers_row(pack: dict[str, Any]) -> dict[str, Any] | None:
+    """貢獻 (the close's rule-made stand-in): the sector that moved the index most its way and the largest one against
+    it (Forliosa's estimates, marked so); without sector estimates, the stock that moved it most."""
+    secs = [f for f in _facts(pack, "sector_contrib_est", "today") if isinstance(f.get("value"), (int, float))
+            and f["value"]]
+    if secs:
+        chg = _first(pack, "index_change", "today", "加權指數")
+        up = (chg["value"] if chg and chg.get("value") else sum(f["value"] for f in secs)) >= 0
+        same = [f for f in secs if (f["value"] > 0) == up]
+        against = [f for f in secs if (f["value"] > 0) != up]
+        picks = [max(g, key=lambda f: abs(f["value"])) for g in (same, against) if g]
+        parts, refs = [], []
+        for f in picks:
+            # a sector one stock dominates is said with its concentration, as the writer's own text must:
+            # 「半導體類約 −1,702 點（估算；主要由台積電構成，約 94%）」
+            conc = _first(pack, "sector_concentration", "structure", f["subject"])
+            top = next(iter(conc.get("aliases") or []), None) if conc else None
+            note = f"估算；主要由{top}構成，{conc['display']}" if conc and top else "估算"
+            parts.append(f"{f['subject']}類約 {f['display']}（{note}）")
+            refs += [f["id"], *([conc["id"]] if conc and top else [])]
+        return _para(_sent("、".join(parts) + "。", refs))
+    stocks = [f for f in _facts(pack, "stock_contrib", "today") if isinstance(f.get("value"), (int, float))]
+    if stocks:
+        top = max(stocks, key=lambda f: abs(f["value"]))
+        return _para(_sent(f"點數貢獻最大：{top['subject']} 約 {top['display']}（估算）。", [top["id"]]))
+    return None
+
+
+def _overnight_row(pack: dict[str, Any]) -> dict[str, Any] | None:
+    us = [f for f in _facts(pack, "us_pct", "overnight")]
+    if not us:
+        return None
+    last = max(f.get("date") or "" for f in us)
+    row = [f for f in us if f.get("date") == last]
+    d = _d(last)
+    text = f"美股 {md(d) if d else ''} " + "、".join(f"{f['subject']} {f['display']}" for f in row)
+    return _para(_sent(f"{text}。", [f["id"] for f in row]))
+
+
+def _scheduled_row(pack: dict[str, Any]) -> dict[str, Any] | None:
+    """排定 (the premarket's rule-made stand-in): the day's key event and how many of the 100 largest companies have
+    an ex-dividend date or an investor conference."""
+    ed = pack.get("edition_date")
+    today = [c for c in pack.get("calendar") or [] if c.get("date") == ed]
+    key = next((c for c in today if c.get("kind") == "settlement"), None) or next(
+        (c for c in today if not c.get("fold") and c.get("kind") in ("investor_conference", "macro", "us_earnings")),
+        None)
+    n_ex = sum(1 for c in today if c.get("kind") == "ex_dividend" and not c.get("fold"))
+    n_conf = sum(1 for c in today if c.get("kind") == "investor_conference" and not c.get("fold"))
+    parts, refs = [], []
+    if key is not None:
+        parts.append(key["title"])
+        refs.append(key["id"])
+    if n_ex or n_conf:
+        parts.append(f"市值前 100 中 {n_ex} 家除權息、{n_conf} 家法說會")
+        refs += [c["id"] for c in today if c.get("kind") in ("ex_dividend", "investor_conference")
+                 and not c.get("fold")][:6]
+    return _para(_sent("；".join(parts) + "。", list(dict.fromkeys(refs)))) if parts else None
+
+
+def _futures_row(pack: dict[str, Any]) -> dict[str, Any] | None:
+    """籌碼 (the premarket): foreign investors' TAIEX futures position of the previous session — numbers only."""
+    net = _first(pack, "futures_oi_net", "evening")
+    if net is None:
+        return None
+    ch = _first(pack, "futures_oi_change", "evening")
+    text = f"外資台指期{net['display']}" + (f"，較前一日 {ch['display']}" if ch else "")
+    return _para(_sent(f"{text}。", [net["id"], *([ch["id"]] if ch else [])]))
+
+
+def data_brief(kind: str, pack: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The server's own rows of the brief, by field: 位置 and 量 (always the server's), and the rule-made stand-ins of
+    the writer's rows (the data edition, a row the checks took out has none: 為什麼 needs a report)."""
+    if kind == "close":
+        rows = {"drivers": _drivers_row(pack), "position": _position_row(kind, pack), "volume": _volume_row(pack)}
+    elif kind == "premarket":
+        rows = {"overnight": _overnight_row(pack), "scheduled": _scheduled_row(pack),
+                "position": _position_row(kind, pack), "chips": _futures_row(pack)}
+    else:
+        rows = {}
+    return {k: v for k, v in rows.items() if v}
+
+
+_SCHEDULED_PREFIX = re.compile(r"^已排定[：:]\s*")
+
+
+def brief_rows(kind: str, pack: dict[str, Any], output: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """The brief in the page's order (:data:`prompts.BRIEF_ORDER`): the writer's row of a field when ``output`` has one
+    (``highlights[i]``: ``slot`` and ``para``; the first of a field), else the server's (:func:`data_brief`), else no
+    row. The 排定 row drops a leading 「已排定：」 (the field's name says it). ``[]`` for a kind without a brief (the
+    weekly)."""
+    order = BRIEF_ORDER.get(kind)
+    if order is None:
+        return []
+    written: dict[str, dict[str, Any]] = {}
+    for row in (output or {}).get("highlights") or []:
+        slot = str(row.get("slot") or "") if isinstance(row, dict) else ""
+        para = _para_from(row.get("para")) if isinstance(row, dict) else None
+        if para is None or slot not in BRIEF_SLOTS[kind] or slot in written:
+            continue
+        if slot == "scheduled":
+            for sent in para["sentences"]:
+                sent["text"] = _SCHEDULED_PREFIX.sub("", sent["text"])
+        written[slot] = para
+    rules = data_brief(kind, pack)
+    out = []
+    for slot in order:
+        para, origin = (written[slot], "ai") if slot in written else (rules.get(slot), "rules")
+        if para:
+            out.append({"key": slot, "label": BRIEF_LABELS[slot], "origin": origin, "paragraph": para})
     return out
 
 
@@ -368,7 +508,10 @@ def _blocks_for(kind: str, section: str, pack: dict[str, Any], blocks: dict[str,
             out.append(chart_of_day)
     elif kind == "close":
         if section == "what_happened":
-            out += [_text(paras("what_happened")), _chart(blocks, "G1")]
+            # the TAIEX chart is the trend chart under the brief (``payload["trend"]``); only its note stays here
+            # (「官方加權指數尚未取得」) when there is no chart
+            note = None if (blocks.get("charts") or {}).get("G1") else (blocks.get("notes") or {}).get("G1")
+            out += [_text(paras("what_happened")), {"type": "note", "text": note} if note else None]
         elif section == "sectors":
             out += [_text(paras("sectors")), *(_chart(blocks, k) for k in CLOSE_SECTOR_CHARTS)]
         elif section == "stocks":
@@ -497,8 +640,15 @@ def _page_key(url: Any, rid: str) -> str:
     return f"U:{normalize_url(u)}" if u else f"{rid[0]}:{rid}"
 
 
+def _head_paragraphs(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """The paragraphs under the headline: the brief's rows when there are any (the page shows them, not the
+    highlights), else the highlights."""
+    brief = payload.get("brief") or []
+    return [r["paragraph"] for r in brief] if brief else list(payload.get("highlights") or [])
+
+
 def _all_sentences(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    out = [s for p in payload.get("highlights") or [] for s in p.get("sentences") or []]
+    out = [s for p in _head_paragraphs(payload) for s in p.get("sentences") or []]
     for sec in payload.get("sections") or []:
         if sec.get("dropped"):
             continue
@@ -544,6 +694,8 @@ def number_footnotes(payload: dict[str, Any], pack: dict[str, Any]) -> None:
             cites.append(notes[k]["n"])
         s["cites"] = sorted(set(cites))
     payload["footnotes"] = [{k: v for k, v in n.items() if k != "_x"} for n in notes.values()]
+    if payload.get("brief"):  # the highlights are the brief's paragraphs, with the same footnote numbers
+        payload["highlights"] = [copy.deepcopy(r["paragraph"]) for r in payload["brief"]]
     web = []
     by_x = {x["id"]: x for x in pack.get("web") or []}
     for n in notes.values():
@@ -569,10 +721,16 @@ def build(*, kind: str, report_id: str, edition_date: date, period: tuple[date, 
     dropped = dropped or {}
     has_ai_text = output is not None
     title = str(output.get("title") or "") if output and title_origin == "ai" else data_title(kind, pack)
-    if output is not None and highlights_origin == "ai":
+    brief: list[dict[str, Any]] | None = None
+    if kind in BRIEF_ORDER:
+        brief = brief_rows(kind, pack, output if highlights_origin == "ai" else None)
+        highlights = [r["paragraph"] for r in brief]
+        highlights_origin = "ai" if output is not None and any(r["origin"] == "ai" for r in brief) else "rules"
+    elif output is not None and highlights_origin == "ai":
         highlights = [p for p in (_para_from(x) for x in output.get("highlights") or []) if p]
     else:
         highlights = data_highlights(kind, pack)
+    trend = (blocks.get("charts") or {}).get("G1") if kind in BRIEF_ORDER else None
     cod = chart_of_day_block(kind, output, blocks, extra_charts)
     sections = []
     for key, stitle, out_key, collapsed in SECTIONS[kind]:
@@ -608,6 +766,7 @@ def build(*, kind: str, report_id: str, edition_date: date, period: tuple[date, 
         "disclaimer_line": DISCLAIMER_AI if ai_text_left else DISCLAIMER_DATA,
         "title": title, "title_origin": "ai" if title_origin == "ai" and output else "rules",
         "highlights": highlights, "highlights_origin": "ai" if highlights_origin == "ai" and output else "rules",
+        "brief": brief or None, "trend": copy.deepcopy(trend) if isinstance(trend, dict) else None,
         "numbers": copy.deepcopy(blocks.get("numbers") or []), "sections": sections, "calendar": cal,
         "footnotes": [],
         "sources": {"data": list(blocks.get("source_labels") or []), "web": [],
@@ -669,6 +828,9 @@ def retable(payload: dict[str, Any], kind: str, pack: dict[str, Any], blocks: di
             sections.append(new)
     sections.sort(key=lambda s: order.index(s["key"]) if s["key"] in order else 99)
     out["sections"] = sections
+    # the trend chart is the server's (no footnote of its own): redrawn from the newer pack. The brief stays as it
+    # was written — its rows carry this version's footnote numbers, which a later table version never renumbers
+    out["trend"] = fresh.get("trend")
     out["numbers"] = fresh["numbers"]
     out["calendar"] = fresh["calendar"]
     out["sources"]["data"] = list(dict.fromkeys([*out["sources"]["data"], *fresh["sources"]["data"]]))
@@ -692,6 +854,8 @@ def public(payload: dict[str, Any]) -> dict[str, Any]:
 
     for p in out.get("highlights") or []:
         clean(p)
+    for row in out.get("brief") or []:
+        clean(row["paragraph"])
     sections = []
     for sec in out.get("sections") or []:
         if sec.get("dropped"):  # members see the server's blocks of a dropped section, never its text

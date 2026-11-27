@@ -174,7 +174,7 @@ describe("報告頁", () => {
     const brief = article.querySelector<HTMLElement>("[data-report-brief]")!
     expect(brief.tagName).toBe("DL")
     expect(brief).toHaveAttribute("aria-label", "重點")
-    expect([...brief.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["為什麼", "誰帶的", "位置", "量", "籌碼"])
+    expect([...brief.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["為什麼", "貢獻", "位置", "量", "籌碼"])
     for (const dt of brief.querySelectorAll("dt")) expect(dt.className).toMatch(/print-label/)
     const voice = (key: string) => brief.querySelector(`[data-brief="${key}"] dd p`)!.className
     expect(voice("why")).toMatch(/ai-voice/)

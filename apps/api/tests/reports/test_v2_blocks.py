@@ -164,7 +164,7 @@ def test_premarket_uses_the_previous_session_only(otc3):
         assert "11/16" in charts[cid]["title"], cid
     assert charts["G2"]["reference"]["label"] == "上市普通股" and "漲停" in charts["G2"]["reference"]["display"]
     assert "T_evening" not in built.blocks["tables"] and "T7" in built.blocks["tables"]
-    assert built.pack["fixed_charts"] == ["G17", "G15", "G2", "G2_otc", "G8", "G7", "G16"]  # US prices off: no G6
+    assert built.pack["fixed_charts"] == ["G1", "G17", "G15", "G2", "G2_otc", "G8", "G7", "G16"]  # US off: no G6
     assert [m["code"] for m in built.pack["charts_menu"]] == ["G5"]
     assert {f["group"] for f in built.pack["facts"] if f["metric"] == "sector_contrib_est"} == {"prev_session"}
 
@@ -390,7 +390,7 @@ def test_the_writer_is_told_what_the_page_draws(market_db, us_on):
     pre = prompts.SPEC["premarket"]["sections"]
     assert "昨日籌碼" in pre and "昨日台股全貌" in pre and "不要重述" in pre
     assert "類股一週與大方向" in prompts.SPEC["weekly"]["sections"]
-    assert prompts.PROMPT_VERSION == "mr-2026-11-18a"
+    assert prompts.PROMPT_VERSION == "mr-2026-11-27a"
 
 
 def test_a_sector_contribution_sentence_is_checked(market_db):

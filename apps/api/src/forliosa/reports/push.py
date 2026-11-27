@@ -175,9 +175,12 @@ def _t(text: Any, kind: str) -> str:
 
 
 def highlight_lines(payload: dict[str, Any], kind: str) -> list[str]:
-    """The highlights as push lines: the sentences joined, a cited report marked 「（出處見全文）」."""
+    """The highlights as push lines: the sentences joined, a cited report marked 「（出處見全文）」. The brief's rows
+    (2026-11-27) carry their field's name (「位置：收在 5 日線…」: without it the row has no subject)."""
     out = []
-    for p in payload.get("highlights") or []:
+    brief = payload.get("brief") or []
+    rows = [(f"{r['label']}：", r["paragraph"]) for r in brief] or [("", p) for p in payload.get("highlights") or []]
+    for head, p in rows:
         parts = []
         for s in p.get("sentences") or []:
             text = str(s.get("text") or "").strip()
@@ -187,7 +190,7 @@ def highlight_lines(payload: dict[str, Any], kind: str) -> list[str]:
                 text += SOURCE_NOTE
             parts.append(text)
         if parts:
-            out.append(_t("".join(parts), kind))
+            out.append(_t(head + "".join(parts), kind))
     return out
 
 

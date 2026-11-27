@@ -127,7 +127,8 @@ def test_premarket_overnight_evening_and_previous_session(market_db, us_on):
                                       "highlights": ["加權指數 ▼6.03%"]}]
     assert set(built.blocks["charts"]) >= {"G6", "G7", "G17", "G15", "G2", "G8", "G16"}
     # G2_otc needs an industry of three OTC commons (this market has two and one)
-    assert pk["fixed_charts"] == ["G6", "G17", "G15", "G2", "G8", "G7", "G16"]
+    # G1 (2026-11-27): the trend chart under the brief, drawn to the previous session
+    assert pk["fixed_charts"] == ["G1", "G6", "G17", "G15", "G2", "G8", "G7", "G16"]
     assert [m["code"] for m in pk["charts_menu"]] == ["G5"] and "G2_prev" not in built.blocks["charts"]
     g6 = built.blocks["charts"]["G6"]
     assert [b["label"] for b in g6["bars"]] == ["SPY", "DIA", "ONEQ", "SMH", "台積電 ADR"]

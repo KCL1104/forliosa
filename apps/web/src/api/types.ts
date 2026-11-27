@@ -2507,7 +2507,7 @@ export interface ReportSection {
 }
 /**
  * 重點的一列（2026-11-27）：每天同一個位置的欄位，一欄一段。
- * 盤後：為什麼（why）、誰帶的（drivers）、位置（position）、量（volume）、籌碼（chips）；
+ * 盤後：為什麼（why）、貢獻（drivers）、位置（position）、量（volume）、籌碼（chips）；
  * 盤前：隔夜（overnight）、為什麼、排定（scheduled）、位置、籌碼。沒有東西可寫的欄位整列不給。
  */
 export interface ReportBriefRow {

@@ -321,9 +321,12 @@ def market_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
 def _report_sentences(payload: dict[str, Any]):
     """(text, footnote numbers) of every sentence: the highlights, then each section's text and item blocks (an item's
     title, the event or theme it is about, goes before its first sentence)."""
-    for p in payload.get("highlights") or []:
-        for s in p.get("sentences") or []:
-            yield s.get("text") or "", s.get("cites") or []
+    brief = payload.get("brief") or []
+    # the brief's rows (2026-11-27) with their field's name: 「位置：收在 5 日線…」 has no subject without it
+    heads = [(f"{r['label']}：", r["paragraph"]) for r in brief] or [("", p) for p in payload.get("highlights") or []]
+    for head, p in heads:
+        for i, s in enumerate(p.get("sentences") or []):
+            yield (head if i == 0 else "") + (s.get("text") or ""), s.get("cites") or []
     for sec in payload.get("sections") or []:
         for b in sec.get("blocks") or []:
             if b.get("type") == "text":

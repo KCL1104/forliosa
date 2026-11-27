@@ -286,8 +286,8 @@ def test_a_section_whose_every_sentence_fails_is_dropped(env):
     dropped = next(sec for sec in pay["sections"] if sec["key"] == "what_happened")
     assert dropped["dropped"] == {"reasons": ["forbidden_word", "outlook_pattern"]}
     public = assemble.public(pay)
-    kept = next(sec for sec in public["sections"] if sec["key"] == "what_happened")
-    assert kept["origin"] == "data" and all(b["type"] != "text" for b in kept["blocks"])  # G1 only
+    # the section had only its text (the TAIEX chart is under the brief now): members do not see it at all
+    assert "what_happened" not in [sec["key"] for sec in public["sections"]] and public["trend"]["id"] == "G1"
     assert "明天" not in str(public)
 
 
@@ -461,7 +461,8 @@ def test_correction_and_copy_are_independent(env):
         u = User(id="usr_admin", email="admin@x.tw", display_name="管理員")
         db.add(u)
         db.commit()
-        out = service.correction(db, u, r.id, "加權指數的漲跌點數寫錯", ["what_happened"])
+        # (「今天發生什麼」 is not in a data edition any more: its only block, the TAIEX chart, is under the brief)
+        out = service.correction(db, u, r.id, "加權指數的漲跌點數寫錯", ["sectors"])
     assert out["edition"] == "correction" and out["corrections"][0]["note"] == "加權指數的漲跌點數寫錯"
     vs = versions(env, r.id)
     assert vs[-1].edition == "correction" and vs[-1].correction_note == "加權指數的漲跌點數寫錯"

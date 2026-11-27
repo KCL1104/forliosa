@@ -188,6 +188,15 @@ class Correction(_Out):
     note: str
 
 
+class BriefRow(_Out):
+    """One row of the brief (2026-11-27): a field of the printed form and what is written in it."""
+
+    key: str = Field(description="why｜drivers｜position｜volume｜chips｜overnight｜scheduled")
+    label: str = Field(description="伺服器的字：為什麼、貢獻、位置、量、籌碼、隔夜、排定")
+    origin: Literal["ai", "rules"] = Field(description="ai：模型依資料與報導寫的；rules：伺服器照規則算的")
+    paragraph: Paragraph
+
+
 class MarketReport(_Out):
     id: str
     kind: Kind
@@ -208,6 +217,10 @@ class MarketReport(_Out):
     title_origin: Literal["ai", "rules"]
     highlights: list[Paragraph]
     highlights_origin: Literal["ai", "rules"]
+    brief: list[BriefRow] | None = Field(
+        default=None, description="重點的欄位（盤前、盤後；有它時頁面不放 highlights）。週報與舊的版本沒有")
+    trend: dict[str, Any] | None = Field(
+        default=None, description="重點下面的趨勢圖：AiChart，加權指數的收盤與均線（series 的 role=\"average\"）")
     numbers: list[NumberItem]
     sections: list[Section]
     calendar: CalendarBlock | None = None

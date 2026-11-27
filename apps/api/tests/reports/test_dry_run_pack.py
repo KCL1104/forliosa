@@ -222,8 +222,10 @@ def test_section_labels_say_data_where_the_server_s_tables_or_charts_are(market_
                          title_origin="ai", highlights_origin="ai")
     by = {sec["key"]: sec for sec in pay["sections"]}
     # AI text under the server's chart or tables: still an AI section, labelled as data
-    assert by["what_happened"]["origin"] == "ai" and by["what_happened"]["origin_label"] == "資料"
     assert by["stocks"]["origin"] == "ai" and by["stocks"]["origin_label"] == "資料"
+    # 「今天發生什麼」 is AI text alone since the TAIEX chart moved under the brief (2026-11-27)
+    assert by["what_happened"]["origin"] == "ai" and by["what_happened"]["origin_label"] == "AI 依資料與報導整理"
+    assert pay["trend"]["id"] == "G1"
     # AI text alone
     assert by["chips"]["origin_label"] == "AI 依資料與報導整理"
     pre = pack.build(market_db, "premarket", TUE, cutoff=ts(TUE, 6, 55), now=ts(TUE, 7))
@@ -239,7 +241,10 @@ def test_section_labels_say_data_where_the_server_s_tables_or_charts_are(market_
     # a table version keeps the label right
     again = assemble.retable(pay, "close", built.pack, built.blocks, version=2, published_at=ts(MON, 23, 46),
                              as_of=ts(MON, 23, 46))
-    assert {sec["key"]: sec["origin_label"] for sec in again["sections"]}["what_happened"] == "資料"
+    labels = {sec["key"]: sec["origin_label"] for sec in again["sections"]}
+    assert labels["stocks"] == "資料" and labels["what_happened"] == "AI 依資料與報導整理"
+    # the brief stays as it was written (its footnote numbers are the version's own); the trend chart is redrawn
+    assert again["brief"] == pay["brief"] and again["highlights"] == pay["highlights"] and again["trend"]["id"] == "G1"
 
 
 def test_the_attempt_records_its_key_slot_on_the_shared_pool(env):  # noqa: F811 (the imported fixture)

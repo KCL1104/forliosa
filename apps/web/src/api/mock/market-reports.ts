@@ -410,21 +410,31 @@ function positionText(d: string, opts: { range?: boolean } = {}): string | null 
   if (opts.range !== false && closes.length > 10) parts.push(`近 10 個交易日 ${pct(last / closes[closes.length - 11]! - 1)}`)
   return parts.length ? `${parts.join("，")}。` : null
 }
-/** 「量」那一列（規則算的）：上市成交金額、和前一日比、是 5 日均量的幾成 */
+/**
+ * 「量」那一列（規則算的，寫法和伺服器一樣）：上市成交金額、和前一日比、是 5 日均量的幾成。
+ * 下午自己加總的數字（估算）和前幾天的完整檔略有差異：差距不到 3% 只寫「和前一日相近」，比例前面加「約」。
+ */
 function volumeText(d: string, estimate: boolean): string {
   const x = day(d)
   const days = tradingDays(d, 5)
-  const diff = x.turnover - day(prevTrading(d)).turnover
-  const vs = diff === 0 ? "和前一日相同" : `比前一日${diff > 0 ? "多" : "少"} ${fmt(diff, 0)} 億元`
-  const share = days.length === 5 ? `，是 5 日均量的 ${Math.round((x.turnover / (days.reduce((a, t) => a + day(t).turnover, 0) / 5)) * 100)}%` : ""
-  return `上市${estimate ? "約 " : " "}${fmt(x.turnover, 0)} 億元${estimate ? "（估算）" : ""}，${vs}${share}。`
+  const before = day(prevTrading(d)).turnover
+  const diff = x.turnover - before
+  const near = diff === 0 || (estimate && Math.abs(diff) < before * 0.03)
+  const vs = near ? "和前一日相近" : `比前一日${diff > 0 ? "多" : "少"} ${fmt(diff, 0)} 億元`
+  const share = days.length === 5 ? `，${estimate ? "約" : ""}是 5 日均量的 ${Math.round((x.turnover / (days.reduce((a, t) => a + day(t).turnover, 0) / 5)) * 100)}%` : ""
+  return `${estimate ? "上市約" : "上市"} ${fmt(x.turnover, 0)} 億元${estimate ? "（估算）" : ""}，${vs}${share}。`
 }
-/** 「誰帶的」那一列：點數貢獻（估算）最大的一類，和方向相反裡最大的一類（漲跌家數在數字欄，這裡不重複） */
+/** 「貢獻」那一列：點數貢獻（估算）最大的一類，和方向相反裡最大的一類（漲跌家數在數字欄，這裡不重複） */
 function driversText(d: string): string {
   const x = day(d)
   const rows = SECTOR_NAMES.map((name) => ({ name, pts: (x.taiex - x.taiexChg) * sectorW(name) * x.sectors.find((s) => s.name === name)!.pct })).sort((a, b) => b.pts - a.pts)
   const [lead, other] = x.taiexChg >= 0 ? [rows[0]!, rows[rows.length - 1]!] : [rows[rows.length - 1]!, rows[0]!]
-  return `${lead.name}類約 ${points(lead.pts)}、${other.name}類約 ${points(other.pts)}（估算）。`
+  // 一檔佔大半的類股連同它的集中度一起寫（和 AI 寫的字同一條規則）：「半導體類約 +83 點（估算；主要由台積電構成，約 77%）」
+  const part = (r: { name: string; pts: number }) => {
+    const top = CONCENTRATED[r.name]?.replace(/（(約 \d+%)）$/, "，$1")
+    return `${r.name}類約 ${points(r.pts)}（${top ? `估算；${top}` : "估算"}）`
+  }
+  return `${part(lead)}、${part(other)}。`
 }
 const briefRow = (key: string, label: string, origin: "ai" | "rules", ...sentences: ReportSentence[]): ReportBriefRow => ({ key, label, origin, paragraph: P(...sentences) })
 /** G3：市值前 10 的點數貢獻（估算）＋其餘合計，官方漲跌點數在下面一行 */
@@ -1153,11 +1163,11 @@ function close(b: Build): MarketReport {
         ? `加權指數 ${pct(x.taiexPct)}，上市 ${x.down} 家下跌、${x.up} 家上漲`
         : `加權指數${rise(x.taiexChg)} ${fmt(x.taiexChg)} 點，其中半導體類約 ${signed(semiPts, 0)} 點（估算）`
     : `盤後重點 ${mdw(D)}：${indexLine}`
-  // 重點（2026-11-27）：為什麼、籌碼是 AI 依報導寫的；誰帶的在 AI 版由 AI 寫、資料版照規則；位置與量是規則算的
+  // 重點（2026-11-27）：為什麼、籌碼是 AI 依報導寫的；貢獻在 AI 版由 AI 寫、資料版照規則；位置與量是規則算的
   const where = b.indexMissing ? null : positionText(D)
   const brief: ReportBriefRow[] = [
     ...(ai ? [briefRow("why", "為什麼", "ai", S(`〔示範通訊社〕報導，電子股${rise(semi.pct)}、傳產股走勢不一。`, "X001"))] : []),
-    briefRow("drivers", "誰帶的", ai ? "ai" : "rules", S(driversText(D), "F042")),
+    briefRow("drivers", "貢獻", ai ? "ai" : "rules", S(driversText(D), "F042")),
     ...(where ? [briefRow("position", "位置", "rules", S(where, "F001", "F043"))] : []),
     briefRow("volume", "量", "rules", S(volumeText(D, !b.tables), "F007", "F043")),
     ...(ai ? [briefRow("chips", "籌碼", "ai", S(`〔示範日報〕報導，上市三大法人合計${inst >= 0 ? "買超" : "賣超"} ${fmt(inst)} 億元。`, "X002"))] : []),

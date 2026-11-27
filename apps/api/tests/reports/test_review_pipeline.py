@@ -204,6 +204,11 @@ def test_a_correction_puts_the_rule_made_title_and_highlights_back(env):
         got = service.correction(db, u, r.id, "標題的漲跌幅寫錯", ["title", "highlights"])
     assert got["title"].startswith("盤後重點 11/16（一）：加權指數") and got["title_origin"] == "rules"
     assert got["highlights_origin"] == "rules" and got["has_ai"] is True  # the sections are still AI
+    # the brief keeps its fields: the writer's rows (貢獻, 籌碼) are gone, the server's stand in and are renumbered
+    assert [(r["key"], r["origin"]) for r in got["brief"]] == [("drivers", "rules"), ("volume", "rules")]
+    assert got["highlights"] == [r["paragraph"] for r in got["brief"]]
+    # (both are Forliosa's own calculations of the day: one footnote, the first)
+    assert [sent["cites"] for r in got["brief"] for sent in r["paragraph"]["sentences"]] == [[1], [1]]
     assert got["corrections"][0]["note"] == "標題的漲跌幅寫錯"
     with Session(env["engine"]) as db:
         u = db.get(User, "usr_admin")

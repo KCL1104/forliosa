@@ -392,7 +392,11 @@ def correction(db: Session, user: User, report_id: str, note: str, drop_sections
         if "title" in heads:
             payload["title"], payload["title_origin"] = assemble.data_title(r.kind, pk), "rules"
         if "highlights" in heads:
-            payload["highlights"], payload["highlights_origin"] = assemble.data_highlights(r.kind, pk), "rules"
+            # the brief (premarket, close) keeps its fields: the writer's rows go, the server's own stay or stand in
+            rows = assemble.brief_rows(r.kind, pk)
+            payload["brief"] = rows or None
+            payload["highlights"] = [row["paragraph"] for row in rows] if rows else assemble.data_highlights(r.kind, pk)
+            payload["highlights_origin"] = "rules"
         assemble.number_footnotes(payload, pk)
     assemble.refresh_ai_lines(payload)
     # ``note`` is the note alone: the page writes 「已更正（11/18 09:10）：…」 from ``at``
