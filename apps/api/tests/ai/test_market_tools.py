@@ -304,3 +304,25 @@ def test_the_prompt_organises_instead_of_refusing():
     assert "## 接著問" in CHAT_SYSTEM and "suggest_follow_ups" in CHAT_SYSTEM
     for name in ("get_market_calendar", "get_market_overview", "get_market_report", "get_watchlist", "get_performance"):
         assert name in CHAT_SYSTEM and name in TOOLS_BY_NAME
+
+
+def test_the_prompt_says_what_it_found_and_leaves_the_users_positions_out_unless_asked():
+    """Owner 2026-11-27, on an answer to 「下禮拜可以買什麼？」 that opened 「漲跌沒辦法事先知道，我也不替你挑」 and led
+    with 「你的持股」: no line about what the assistant cannot know or will not do, and the user's own positions only
+    when the question is about them (「不然會導致想要得到的答案有些偏差」)."""
+    from forliosa.ai.prompts import CHAT_SYSTEM_TW, EDITOR_SYSTEM, is_lookahead
+
+    assert is_lookahead("下禮拜可以買什麼？")
+    for prompt in (CHAT_SYSTEM, CHAT_SYSTEM_TW):
+        # the 2026-11-26 half-sentence is gone; the first sentence is the conclusion
+        assert "只在第一句用半句話說漲跌沒辦法事先知道" not in prompt
+        assert "第一句照樣直接寫結論：不寫「漲跌沒辦法事先知道」" in prompt and "「我也不替你挑」" in prompt
+        # positions: neither looked up nor written unless the question brings them up
+        assert "不查也不寫他的倉位" in prompt
+        assert "不呼叫 get_holdings、get_position、get_portfolio_summary、get_watchlist" in prompt
+        assert "get_market_report（kind latest）、get_holdings、get_watchlist" not in prompt  # no longer every time
+        assert "再加 get_holdings、get_watchlist" in prompt
+        assert "最前面多一段「你的持股與觀察清單」，沒問到就沒有這一段" in prompt
+        assert "使用者持有的優先，其次是" not in prompt and "只問這一檔能不能買、好不好時不寫" in prompt
+        assert "才寫他持股的集中度" in prompt
+    assert "「漲跌沒辦法事先知道」「我也不替你挑」" in EDITOR_SYSTEM

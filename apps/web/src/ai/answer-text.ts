@@ -103,7 +103,7 @@ export function tidyAnswer(text: string, { titles = [], year }: TidyOptions = {}
 /**
  * 模型談自己的三種固定寫法（2026-11-26 常見問題實測：24 題裡 7 題有），系統提示也禁止，這裡是安全網，只拿掉整句或句首的那一段：
  * - 開頭交代要做什麼的一行：「我先查兩檔的基本資料、估值與財報。」
- * - 說自己不替使用者決定：「我不能替你判斷現在該不該買。」「我不替你選一檔。」「我可以提供的是…」；
+ * - 說自己不替使用者決定：「我不能替你判斷現在該不該買。」「我不替你選一檔。」「我也不替你挑。」「我可以提供的是…」；
  *   後面接「，但…」或「，這要看…」的，只拿掉前半（「我不能替你決定要不要停損，但目前的數字是：…」→「目前的數字是：…」）。
  * - 結尾的提議與交代資料的句子（寫完才拿，串流中不動，免得字閃掉）：「…可以再問我。」「我可以幫你整理。」
  *   「收盤數字以官方資料為準。」「以上是媒體整理的…」——句子裡有數字的不動。
@@ -113,7 +113,12 @@ const PREAMBLE = /^(?:[^。\n]{0,60}[，,])?(?:好的?[，,]\s*)?我(?:先|來|�
 const WRITTEN_CALL = /^[ \t]*`?suggest_follow_ups\b.*$/gm
 /** 到第一個逗號或句尾為止；「，但可以把幾個面向講清楚。」這種接著談自己的尾巴一起拿掉 */
 const OFFER_TAIL = "(?:我)?(?:可以|能)(?:把|幫你|替你|提供|整理|說明)[^。！？\\n]*[。！？]"
-const NOT_DECIDING = new RegExp(`我(?:不能|無法|沒辦法|不會|不)?(?:替|幫|為)你(?:判斷|決定|選|挑|推薦)[^。！？\\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?(?:${OFFER_TAIL})?)`, "g")
+const NOT_DECIDING = new RegExp(`我(?:也|並|都|就|還是|同樣)?(?:不能|無法|沒辦法|不會|不)?(?:替|幫|為)你(?:判斷|決定|選|挑|推薦)[^。！？\\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?(?:${OFFER_TAIL})?)`, "g")
+/**
+ * 說自己不知道漲跌（產品負責人 2026-11-27：「不要回什麼沒辦法幫你挑、沒辦法知道這種回覆」）：「下週要買什麼，漲跌沒辦法事先知道，」
+ * 到那個逗號或句尾為止；同一句前面沒有數字時（多半只是重述問題）連前面一起拿掉，後面的結論留著；前面有數字的那半句留著。
+ */
+const CANNOT_KNOW = /(^|[。！？\n])([^。！？\n]*?)(?:漲跌|股價|行情|走勢|會不會漲|哪檔會漲)[^。！？\n，,]{0,8}(?:沒辦法|沒有辦法|無法|不能)(?:事先|預先|提前)?(?:知道|預測|預知|預料)[^。！？\n，,]*(?:[。！？]|[，,])/g
 const CANNOT_JUDGE = /我(?:不能|無法|沒辦法)(?:判斷|決定|預測|保證|告訴你)[^。！？\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?)/g
 /** 「我可以…」到句尾；同一句前面沒有數字時整句拿掉（「你可以到帳本看殖利率，我可以幫你整理。」） */
 const OFFER_SENTENCE = /(^|[。！？\n])([^。！？\n]*?)我可以(?:提供|幫你|替你|整理|說明|再)[^。！？\n]*[。！？]/g
@@ -132,7 +137,15 @@ export function dropAiHabits(text: string, { streaming = false }: { streaming?: 
   if (first >= 0 && PREAMBLE.test(lines[first]!.trim()) && lines.slice(first + 1).some((l) => l.trim())) lines.splice(first, 1)
   let out = lines.join("\n").replace(WRITTEN_CALL, "").replace(/^[ \t]*<br\s*\/?>[ \t]*$/gim, "")
   const narrated = out.replace(OWN_CORRECTION, "$1").replace(NARRATION, "$1")
-  out = (narrated.trim() ? narrated : out).replace(NOT_DECIDING, "").replace(CANNOT_JUDGE, "").replace(OFFER_SENTENCE, (_m, lead: string, before: string) => lead + (/\d/.test(before) ? before.replace(/[，,、\s]+$/, "。") : ""))
+  out = (narrated.trim() ? narrated : out)
+    .replace(CANNOT_KNOW, (m, lead: string, before: string) => {
+      if (!/\d/.test(before)) return lead
+      // 前面有數字：留到最後一個逗號為止，補上句號（「台積電收 2,145 元，之後的漲跌沒辦法事先知道。」→「台積電收 2,145 元。」）
+      const cut = before.lastIndexOf("，") // 只認全形逗號：半形的可能是「2,145」的千分位
+      return cut < 0 ? m : `${lead}${before.slice(0, cut)}。`
+    })
+    .replace(NOT_DECIDING, "")
+    .replace(CANNOT_JUDGE, "").replace(OFFER_SENTENCE, (_m, lead: string, before: string) => lead + (/\d/.test(before) ? before.replace(/[，,、\s]+$/, "。") : ""))
   if (!streaming) {
     // 結尾：最後一行從後面往前，拿掉沒有數字的提議或交代資料的句子；整行都拿掉時換上一行
     const rows = out.replace(/\s+$/, "").split("\n")
