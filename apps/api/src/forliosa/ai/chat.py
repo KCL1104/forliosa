@@ -172,6 +172,10 @@ class TurnState:
     # suggest_follow_ups called before any answer text (refused, ``FOLLOW_UPS_EARLY``): its questions, used when the
     # model does not ask again after the answer
     early_follow_ups: list[str] = field(default_factory=list)
+    # suggest_follow_ups called when all that is written is a note beside earlier tool calls (``FOLLOW_UPS_NOTE``):
+    # the note is taken off the answer (``scrap``, done by the loop) — once a turn
+    note_scrapped: bool = False
+    scrap: bool = False
 
     def add_text(self, s: str) -> None:
         self.display.text += s
@@ -833,6 +837,17 @@ class _HeadingFilter:
 
 FOLLOW_UPS_EARLY = ("還沒有寫回答：使用者目前看不到任何回答文字（思考的內容不會顯示）。現在把完整的回答寫出來，"
                     "寫完再呼叫 suggest_follow_ups。")
+# All that is written is a line beside earlier tool calls (live test 2026-11-27, Sonnet, the look-ahead answer with
+# get_analyst_views between the market tools and draw_chart: 「Per rules, no items means don't write it. Draw chart.」
+# next to draw_chart, then suggest_follow_ups alone — that line was the whole answer). Text without a single Chinese
+# character (the answers are in Traditional Chinese: a short answer written beside draw_chart — 「台積電近 3 個月漲
+# 12.4%。」 — is an answer and stays), shorter than this, none of it written in the step that asks: a note. It is taken
+# off and the answer asked for.
+FOLLOW_UPS_NOTE_MAX = 200
+FREE_STEPS = 2
+_CJK = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
+FOLLOW_UPS_NOTE = ("還沒有寫回答：到目前為止寫的只是查資料時的一句話，已經從畫面上拿掉"
+                   "（思考的內容與工具的結果不會顯示）。現在把完整的回答從第一句寫起，寫完再呼叫 suggest_follow_ups。")
 # suggest_follow_ups written as text on a line of its own (``ChatTurn._written_follow_ups``)
 _WRITTEN_FOLLOW_UPS = re.compile(r"\n?[ \t]*`?suggest_follow_ups\s*\(\s*(\{.*?\})\s*\)`?[ \t]*(?=\n|$)", re.S)
 
@@ -1550,7 +1565,12 @@ class ChatTurn:
 
     def _loop(self, thread: AiThread, new: list[dict[str, Any]], state: TurnState, ctx: ToolContext):
         rounds = self.settings.ai_deep_max_tool_rounds if self.deep else self.settings.ai_max_tool_rounds
-        for _ in range(max(1, rounds)):
+        left = max(1, rounds)
+        # a step that only asked for the follow-ups before the answer was written is sent back; it is not one of the
+        # turn's rounds (at most ``FREE_STEPS`` a turn: the look-ahead answer already needs most of them)
+        free = FREE_STEPS
+        while left > 0:
+            left -= 1
             first_text = [True]
             final, slot_index = yield from self._call(thread.model, new, state, first_text)
             self._segments(final, state)
@@ -1582,7 +1602,15 @@ class ChatTurn:
             if final.stop_reason == "tool_use" and tool_uses:
                 asks = [tu for tu in tool_uses if tu.name == FOLLOW_UPS_TOOL]
                 rest = [tu for tu in tool_uses if tu.name != FOLLOW_UPS_TOOL]
-                answered = self._follow_ups(asks, state, ctx)
+                wrote = any(b.type == "text" and (getattr(b, "text", "") or "").strip() for b in final.content)
+                answered = self._follow_ups(asks, state, ctx, wrote)
+                if state.scrap:
+                    # a note written while looking things up is not the answer: off the screen, the answer comes next
+                    state.scrap = False
+                    state.display.text = ""
+                    state.held_from = None
+                    state.segments.clear()
+                    yield "text_reset", {"text": ""}
                 if state.display.follow_ups and asks:
                     yield "follow_ups", {"questions": state.display.follow_ups}
                 results = (yield from self._run_tools(rest, state, ctx)) if rest else []
@@ -1593,6 +1621,9 @@ class ChatTurn:
                     # stored history keeps the tool_use and its result; the next question's user turn follows it)
                     state.display.stop_reason = "end_turn"
                     return True
+                if not rest and free and all(r.get("is_error") for r in answered.values()):
+                    free -= 1
+                    left += 1
                 continue
             return True  # end_turn / stop_sequence
         raise ChatFailure("too_many_steps")
@@ -1667,20 +1698,30 @@ class ChatTurn:
             yield "follow_ups", {"questions": questions}
 
     @staticmethod
-    def _follow_ups(asks: list[Any], state: TurnState, ctx: ToolContext) -> dict[str, dict[str, Any]]:
-        """suggest_follow_ups: kept on the turn (the last valid call wins), no progress line; its tool results."""
+    def _follow_ups(asks: list[Any], state: TurnState, ctx: ToolContext,
+                    wrote: bool = True) -> dict[str, dict[str, Any]]:
+        """suggest_follow_ups: kept on the turn (the last valid call wins), no progress line; its tool results.
+        ``wrote``: the step that asks also wrote text (the answer, normally)."""
         out: dict[str, dict[str, Any]] = {}
+        # decided once for the step: every suggest_follow_ups of it gets the same answer (two in one step, the first
+        # sent back and the second kept, would leave the questions under an emptied answer)
+        shown = state.display.text.strip()
+        note = (bool(shown) and not wrote and len(shown) < FOLLOW_UPS_NOTE_MAX and not _CJK.search(shown)
+                and not state.note_scrapped)
         for tu in asks:
-            if not state.display.text.strip():
+            if not shown or note:
                 from forliosa.ai.market_tools import clean_follow_ups
 
                 state.early_follow_ups = clean_follow_ups((tu.input or {}).get("questions")
                                                           if isinstance(tu.input, dict) else None)
                 # called before any answer text (QA 2026-11-26, Sonnet, 2 of 4 runs: right after draw_chart, the answer
                 # drafted only in its thinking, then 「已顯示在回答下方。」 or 「以上是 11/27 的整理。」 as the whole
-                # answer): not kept; an error that says the user has seen nothing yet
-                out[tu.id] = {"type": "tool_result", "tool_use_id": tu.id, "content": FOLLOW_UPS_EARLY,
-                              "is_error": True}
+                # answer): not kept; an error that says the user has seen nothing yet. The same when the only text is
+                # a note written beside earlier tool calls (``FOLLOW_UPS_NOTE``): the note goes, once a turn
+                if note:
+                    state.note_scrapped = state.scrap = True
+                out[tu.id] = {"type": "tool_result", "tool_use_id": tu.id,
+                              "content": FOLLOW_UPS_NOTE if note else FOLLOW_UPS_EARLY, "is_error": True}
                 continue
             outcome = execute(ctx, tu.name, tu.input)
             result: dict[str, Any] = {"type": "tool_result", "tool_use_id": tu.id, "content": outcome.content}

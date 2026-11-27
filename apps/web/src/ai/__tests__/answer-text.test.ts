@@ -151,6 +151,47 @@ describe("dropAiHabits：模型談自己的固定寫法（2026-11-26 常見問�
     expect(dropAiHabits("券商不能替你決定，法人也是。")).toBe("券商不能替你決定，法人也是。")
   })
 
+  it("回答前面一行寫給自己的英文備註拿掉；本來就是英文開頭的資料不動", () => {
+    expect(dropAiHabits("Per rules, no items means don't write it. Draw chart.\n\n11/27 加權指數收在 5 日線之上。")).toBe("11/27 加權指數收在 5 日線之上。")
+    // 有中文字的第一行、只有一行、後面沒有中文的回答：都不動
+    expect(dropAiHabits("NVDA 11/26 收 180.25 美元。\n\n- 本益比 45 倍。")).toBe("NVDA 11/26 收 180.25 美元。\n\n- 本益比 45 倍。")
+    expect(dropAiHabits("Draw chart first.")).toBe("Draw chart first.")
+    expect(dropAiHabits("TSM\n\n台積電 ADR 11/26 收 297 美元。")).toBe("TSM\n\n台積電 ADR 11/26 收 297 美元。")
+    expect(dropAiHabits("Rules say no extra search there; skip ratings.\n\n11/27 加權指數收在 5 日線之上。")).toBe("11/27 加權指數收在 5 日線之上。")
+    // 沒有中文字的表頭、小標題不是備註（review 2026-11-27：表格會壞掉）
+    const table = "| | NVDA | AMD |\n|---|---|---|\n| 收盤 | 180 美元 | 120 美元 |"
+    expect(dropAiHabits(table)).toBe(table)
+    expect(dropAiHabits("### NVDA vs AMD\n\n兩檔 11/26 的收盤如下。")).toBe("### NVDA vs AMD\n\n兩檔 11/26 的收盤如下。")
+    expect(dropAiHabits("NVDA vs AMD\n\n兩檔 11/26 的收盤如下。")).toBe("NVDA vs AMD\n\n兩檔 11/26 的收盤如下。")
+  })
+
+  it("說自己不知道漲跌、也不替你挑（產品負責人 2026-11-27）：拿掉，後面的結論留著當第一句", () => {
+    // 負責人截圖的那一則回答的第一句
+    const seen = "下週要買什麼，漲跌沒辦法事先知道，我也不替你挑。下面是 11/30 到 12/4 已排定的事和市場焦點。重點是 11/30 台積電法說會。"
+    expect(dropAiHabits(seen)).toBe("下面是 11/30 到 12/4 已排定的事和市場焦點。重點是 11/30 台積電法說會。")
+    expect(dropAiHabits("明天哪檔會漲沒辦法預測。11/27 的重點在台達電除息。")).toBe("11/27 的重點在台達電除息。")
+    expect(dropAiHabits("股價無法事先知道，但 11/27 有兩場法說會。")).toBe("但 11/27 有兩場法說會。")
+    expect(dropAiHabits("我也不替你挑。這三檔的差別在配息。")).toBe("這三檔的差別在配息。")
+    // 同一句前面是事實的子句留著；不是在說漲跌的不動
+    expect(dropAiHabits("台積電 11/27 收 2,145 元，之後的漲跌沒辦法事先知道。")).toBe("台積電 11/27 收 2,145 元。")
+    expect(dropAiHabits("台積電 2,145 元之後的漲跌無法預測。")).toBe("台積電 2,145 元之後的漲跌無法預測。")
+    expect(dropAiHabits("公司表示目前無法預測下一季的營收。")).toBe("公司表示目前無法預測下一季的營收。")
+    expect(dropAiHabits("半導體類股近期偏弱，電子零組件偏強，個股漲跌無法預測。")).toBe("半導體類股近期偏弱，電子零組件偏強。")
+  })
+
+  it("轉述別人說無法預測的句子不動；回答第一句以外的也不動（review 2026-11-27）", () => {
+    // 第一句是轉述
+    const quoted = "台積電表示匯率走勢無法預測，毛利率目標維持在五成以上。"
+    expect(dropAiHabits(quoted)).toBe(quoted)
+    const analyst = "法人指出，股價短線無法預測，但長期看好 AI 需求。"
+    expect(dropAiHabits(analyst)).toBe(analyst)
+    // 第一句以外、條列裡的事實句
+    const later = "11/27 加權指數收在 5 日線之上。\n\n- 半導體類股近期偏弱，電子零組件偏強，個股漲跌無法預測。\n- 台積電表示匯率走勢無法預測。"
+    expect(dropAiHabits(later)).toBe(later)
+    const second = "台積電 11/27 收 2,145 元。之後的漲跌沒辦法事先知道，下週有法說會。"
+    expect(dropAiHabits(second)).toBe(second)
+  })
+
   it("結尾的提議與交代資料的句子：寫完才拿；有數字的句子不動", () => {
     const answer = "集中度偏高。\n\n- 台積電佔 36%。\n\n如果你想看某一檔的走勢，告訴我股票代號就可以查。"
     expect(dropAiHabits(answer)).toBe("集中度偏高。\n\n- 台積電佔 36%。")

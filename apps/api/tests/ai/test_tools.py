@@ -16,7 +16,8 @@ from forliosa.models import AiDraft, Transaction, User
 from tests.ai.conftest import API, buy, chat, make_account
 from tests.ai.fake_anthropic import text, tool_use
 
-NOT_STRICT = {"get_market_calendar", "get_market_overview", "get_market_report", "get_watchlist", "get_performance",
+NOT_STRICT = {"get_market_calendar", "get_market_overview", "get_market_report", "get_market_trend", "get_watchlist",
+              "get_performance",
               "suggest_follow_ups"}
 
 

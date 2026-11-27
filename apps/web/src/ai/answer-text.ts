@@ -103,7 +103,7 @@ export function tidyAnswer(text: string, { titles = [], year }: TidyOptions = {}
 /**
  * 模型談自己的三種固定寫法（2026-11-26 常見問題實測：24 題裡 7 題有），系統提示也禁止，這裡是安全網，只拿掉整句或句首的那一段：
  * - 開頭交代要做什麼的一行：「我先查兩檔的基本資料、估值與財報。」
- * - 說自己不替使用者決定：「我不能替你判斷現在該不該買。」「我不替你選一檔。」「我可以提供的是…」；
+ * - 說自己不替使用者決定：「我不能替你判斷現在該不該買。」「我不替你選一檔。」「我也不替你挑。」「我可以提供的是…」；
  *   後面接「，但…」或「，這要看…」的，只拿掉前半（「我不能替你決定要不要停損，但目前的數字是：…」→「目前的數字是：…」）。
  * - 結尾的提議與交代資料的句子（寫完才拿，串流中不動，免得字閃掉）：「…可以再問我。」「我可以幫你整理。」
  *   「收盤數字以官方資料為準。」「以上是媒體整理的…」——句子裡有數字的不動。
@@ -113,7 +113,33 @@ const PREAMBLE = /^(?:[^。\n]{0,60}[，,])?(?:好的?[，,]\s*)?我(?:先|來|�
 const WRITTEN_CALL = /^[ \t]*`?suggest_follow_ups\b.*$/gm
 /** 到第一個逗號或句尾為止；「，但可以把幾個面向講清楚。」這種接著談自己的尾巴一起拿掉 */
 const OFFER_TAIL = "(?:我)?(?:可以|能)(?:把|幫你|替你|提供|整理|說明)[^。！？\\n]*[。！？]"
-const NOT_DECIDING = new RegExp(`我(?:不能|無法|沒辦法|不會|不)?(?:替|幫|為)你(?:判斷|決定|選|挑|推薦)[^。！？\\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?(?:${OFFER_TAIL})?)`, "g")
+const NOT_DECIDING = new RegExp(`我(?:也|並|都|就|還是|同樣)?(?:不能|無法|沒辦法|不會|不)?(?:替|幫|為)你(?:判斷|決定|選|挑|推薦)[^。！？\\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?(?:${OFFER_TAIL})?)`, "g")
+/**
+ * 說自己不知道漲跌（產品負責人 2026-11-27：「不要回什麼沒辦法幫你挑、沒辦法知道這種回覆」）：「下週要買什麼，漲跌沒辦法事先知道，」
+ * 到那個逗號或句尾為止。只看回答的第一句（模型的這個習慣在開頭；後面的句子可能是在轉述別人的話），而且前面不是轉述
+ * （「台積電表示匯率走勢無法預測，…」不動）。前面重述問題的子句一起拿掉，後面的結論留著；前面是事實的子句留著。
+ */
+const CANNOT_KNOW = /^([^。！？\n]*?)(?:漲跌|股價|行情|走勢|會不會漲|哪檔會漲)[^。！？\n，,]{0,8}(?:沒辦法|沒有辦法|無法|不能)(?:事先|預先|提前)?(?:知道|預測|預知|預料)[^。！？\n，,]*(?:[。！？]|[，,])/
+const REPORTED = /表示|指出|認為|提到|強調|坦言|預期|報導|說|稱/
+const ASKED = /什麼|哪|嗎|怎麼|如何|會不會|能不能|該不該|要不要|可不可以/
+
+/** 回答自己的第一句（第一個有字的行；條列、標題、表格的行不算）裡說不知道漲跌的那半句拿掉 */
+function dropCannotKnow(text: string): string {
+  const lead = /^\s*/.exec(text)![0]
+  const body = text.slice(lead.length)
+  if (/^(?:[-*+#|>]|\d+[.)]\s)/.test(body)) return text
+  const m = CANNOT_KNOW.exec(body)
+  if (!m || REPORTED.test(m[1]!)) return text
+  const before = m[1]!
+  const rest = body.slice(m[0].length)
+  const cut = before.lastIndexOf("，") // 只認全形逗號：半形的可能是「2,145」的千分位
+  // 前面沒有別的子句：只是那半句的主詞（「明天哪檔會漲沒辦法預測。」），整句拿掉；有數字的不動
+  if (cut < 0) return /\d/.test(before) ? text : lead + rest
+  // 前面的子句是重述問題（「下週要買什麼，」）就一起拿掉；是事實（「台積電收 2,145 元，」「半導體偏弱，」）就留著、補上句號
+  const kept = before.slice(0, cut)
+  if (!/\d/.test(kept) && ASKED.test(kept)) return lead + rest
+  return `${lead}${kept}。${rest}`
+}
 const CANNOT_JUDGE = /我(?:不能|無法|沒辦法)(?:判斷|決定|預測|保證|告訴你)[^。！？\n，,]*(?:[。！？]|[，,](?:但(?:是)?)?)/g
 /** 「我可以…」到句尾；同一句前面沒有數字時整句拿掉（「你可以到帳本看殖利率，我可以幫你整理。」） */
 const OFFER_SENTENCE = /(^|[。！？\n])([^。！？\n]*?)我可以(?:提供|幫你|替你|整理|說明|再)[^。！？\n]*[。！？]/g
@@ -126,13 +152,24 @@ const TRAIL_FILLER = /以[^。]{0,12}為準|^以上(?:是|為)?[^。]*(?:整理|
 /** 交代資料的結尾句裡的日期，回答別的地方都寫過了才算沒有新資訊 */
 const DATES = /\d{1,2}\/\d{1,2}/g
 
+/** 中日韓的字：回答是繁體中文，整行沒有一個中文字、只有英文句子的第一行是模型寫給自己的備註 */
+const CJK = /[\u3400-\u9fff\uf900-\ufaff]/
+/** 像一句話的英文：字母開頭（不是表格的 `|`、標題的 `#`、條列）、至少四個英文詞。「### NVDA vs AMD」「| | NVDA | AMD |」不算 */
+const ENGLISH_NOTE = /^\s*[A-Za-z][A-Za-z'’]*(?:[\s,;:.!?-]+[A-Za-z'’]+){3,}/
+
 export function dropAiHabits(text: string, { streaming = false }: { streaming?: boolean } = {}): string {
   const lines = text.split("\n")
   const first = lines.findIndex((l) => l.trim())
-  if (first >= 0 && PREAMBLE.test(lines[first]!.trim()) && lines.slice(first + 1).some((l) => l.trim())) lines.splice(first, 1)
+  const rest = first >= 0 ? lines.slice(first + 1) : []
+  // 開頭交代要做什麼的一行；或一行英文的備註（「Per rules, no items means don't write it. Draw chart.」，2026-11-27 實測）——
+  // 後面要有中文的回答才拿，整則只有這一行時不動
+  if (first >= 0 && PREAMBLE.test(lines[first]!.trim()) && rest.some((l) => l.trim())) lines.splice(first, 1)
+  else if (first >= 0 && !CJK.test(lines[first]!) && ENGLISH_NOTE.test(lines[first]!) && rest.some((l) => CJK.test(l))) lines.splice(first, 1)
   let out = lines.join("\n").replace(WRITTEN_CALL, "").replace(/^[ \t]*<br\s*\/?>[ \t]*$/gim, "")
   const narrated = out.replace(OWN_CORRECTION, "$1").replace(NARRATION, "$1")
-  out = (narrated.trim() ? narrated : out).replace(NOT_DECIDING, "").replace(CANNOT_JUDGE, "").replace(OFFER_SENTENCE, (_m, lead: string, before: string) => lead + (/\d/.test(before) ? before.replace(/[，,、\s]+$/, "。") : ""))
+  out = dropCannotKnow(narrated.trim() ? narrated : out)
+    .replace(NOT_DECIDING, "")
+    .replace(CANNOT_JUDGE, "").replace(OFFER_SENTENCE, (_m, lead: string, before: string) => lead + (/\d/.test(before) ? before.replace(/[，,、\s]+$/, "。") : ""))
   if (!streaming) {
     // 結尾：最後一行從後面往前，拿掉沒有數字的提議或交代資料的句子；整行都拿掉時換上一行
     const rows = out.replace(/\s+$/, "").split("\n")

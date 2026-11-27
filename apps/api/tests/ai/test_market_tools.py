@@ -96,6 +96,92 @@ def test_follow_ups_before_the_answer_ask_for_the_answer(client, pool, fake):
     assert follow == [{"questions": ["智邦上次法說會說了什麼？", "健策為什麼被處置？"]}]
 
 
+def test_a_note_beside_the_lookups_is_not_the_answer(client, pool, fake):
+    # live test 2026-11-27 (Sonnet, the look-ahead answer): a line to itself next to draw_chart, then
+    # suggest_follow_ups alone — the line was the whole answer. It is taken off and the answer asked for.
+    from forliosa.ai.chat import FOLLOW_UPS_NOTE
+
+    fake.reply(text("Per rules, no items means don't write it. Draw chart."),
+               tool_use("toolu_o", "get_market_overview", {}), stop_reason="tool_use")
+    fake.reply(tool_use("toolu_f", "suggest_follow_ups",
+                        {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？"]}), stop_reason="tool_use")
+    answer = "11/27 加權指數收在 5 日線之上；可以關注近 5 個交易日比大盤強的電腦及週邊設備，11/30 另有智邦法說會。"
+    fake.reply(text(answer), tool_use("toolu_g", "suggest_follow_ups",
+                                      {"questions": ["智邦上次法說會說了什麼？", "健策為什麼被處置？"]}),
+               stop_reason="tool_use")
+    status, events = chat(client, "下禮拜可以買什麼？")
+    assert status == 200 and len(fake.requests) == 3
+    result = fake.requests[2]["body"]["messages"][-1]["content"][0]
+    assert result["content"] == FOLLOW_UPS_NOTE and result["is_error"] is True
+    # the note leaves the screen before the answer is written
+    names = [n for n, _d in events]
+    reset = names.index("text_reset")
+    assert events[reset][1] == {"text": ""} and "".join(d["delta"] for n, d in events[reset:] if n == "text") == answer
+    detail = client.get(f"{API}/ai/threads/{events[-1][1]['thread_id']}").json()
+    assert detail["messages"][-1]["text"] == answer
+    assert detail["messages"][-1]["follow_ups"] == ["智邦上次法說會說了什麼？", "健策為什麼被處置？"]
+
+
+def test_a_short_answer_beside_a_tool_is_an_answer(client, pool, fake):
+    # review 2026-11-27: a real answer of a sentence, written in the same step as its chart, was taken for a note and
+    # wiped. Only text without a single Chinese character is a note
+    answer = "台積電近 3 個月漲 12.4%，同期加權指數漲 5.1%。"
+    asked = {"questions": ["台積電最近有什麼消息？", "台積電的本益比和過去五年比如何？"]}
+    fake.reply(text(answer), tool_use("toolu_o", "get_market_overview", {}), stop_reason="tool_use")
+    fake.reply(tool_use("toolu_f", "suggest_follow_ups", asked), stop_reason="tool_use")
+    status, events = chat(client, "台積電這三個月走勢？")
+    assert status == 200 and len(fake.requests) == 2 and "text_reset" not in [n for n, _d in events]
+    assert "".join(d["delta"] for n, d in events if n == "text") == answer
+    assert [d for n, d in events if n == "follow_ups"] == [asked]
+
+
+def test_two_follow_up_calls_in_one_step_get_the_same_answer(client, pool, fake):
+    from forliosa.ai.chat import FOLLOW_UPS_NOTE
+
+    asked = {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？"]}
+    fake.reply(text("Draw chart first."), tool_use("toolu_o", "get_market_overview", {}), stop_reason="tool_use")
+    fake.reply(tool_use("toolu_f", "suggest_follow_ups", asked), tool_use("toolu_g", "suggest_follow_ups", asked),
+               stop_reason="tool_use")
+    answer = "11/27 加權指數收在 5 日線之上。"
+    fake.reply(text(answer), tool_use("toolu_h", "suggest_follow_ups", asked), stop_reason="tool_use")
+    status, events = chat(client, "下禮拜可以買什麼？")
+    assert status == 200 and len(fake.requests) == 3
+    results = fake.requests[2]["body"]["messages"][-1]["content"]
+    assert [(r["content"], r["is_error"]) for r in results] == [(FOLLOW_UPS_NOTE, True)] * 2
+    # no questions are shown under the emptied answer: they come with the answer
+    names = [n for n, _d in events]
+    reset = names.index("text_reset")
+    assert names.index("follow_ups") > reset
+    assert "".join(d["delta"] for n, d in events[reset:] if n == "text") == answer
+
+
+def test_follow_ups_sent_back_do_not_use_up_the_turns_rounds(client, pool, fake, monkeypatch):
+    # the look-ahead answer needs most of the rounds a turn has: a step that only asked too early is not one of them
+    from forliosa.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "ai_max_tool_rounds", 2)
+    asked = {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？"]}
+    fake.reply(tool_use("toolu_o", "get_market_overview", {}), stop_reason="tool_use")
+    fake.reply(tool_use("toolu_f", "suggest_follow_ups", asked), stop_reason="tool_use")  # too early: sent back
+    fake.reply(text("11/27 加權指數收在 5 日線之上。"), tool_use("toolu_g", "suggest_follow_ups", asked),
+               stop_reason="tool_use")
+    status, events = chat(client, "下禮拜可以買什麼？")
+    assert status == 200 and len(fake.requests) == 3 and "error" not in [n for n, _d in events]
+    assert [d for n, d in events if n == "follow_ups"] == [asked]
+
+
+def test_an_answer_written_beside_a_tool_keeps_its_follow_ups(client, pool, fake):
+    # the answer may come in the same step as draw_chart and the questions alone in the next: long enough to be one
+    answer = ("11/27 加權指數收在 5 日線之上，近 5 個交易日漲 3.2%；可以關注近兩週都比大盤強的電腦及週邊設備，"
+              "11/30 另有智邦法說會。")
+    asked = {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？"]}
+    fake.reply(text(answer), tool_use("toolu_o", "get_market_overview", {}), stop_reason="tool_use")
+    fake.reply(tool_use("toolu_f", "suggest_follow_ups", asked), stop_reason="tool_use")
+    status, events = chat(client, "下禮拜可以買什麼？")
+    assert status == 200 and len(fake.requests) == 2 and "text_reset" not in [n for n, _d in events]
+    assert [d for n, d in events if n == "follow_ups"] == [asked]
+
+
 def test_follow_ups_asked_only_before_the_answer_are_used_after_it(client, pool, fake):
     asked = {"questions": ["智邦法說會會說什麼？", "健策為什麼被處置？", "要不要買智邦？"]}
     fake.reply(tool_use("toolu_f", "suggest_follow_ups", asked), stop_reason="tool_use")
@@ -188,7 +274,8 @@ def test_calendar_lists_yours_first_and_counts_the_rest(client, ctx, engine):
                                 data={}, source="twse-openapi")
                     for s in ("2330.TW", "2454.TW", "1234.TW")])
         db.commit()
-    out, res = run(ctx, "get_market_calendar", date_from="", date_to="")
+    # the question is about the user's own holdings or watchlist (``yours``): theirs first, marked
+    out, res = run(ctx, "get_market_calendar", date_from="", date_to="", yours=True)
     assert not out.is_error
     assert res["from"] == res["to"] == res["next_tw_trading_day"] == day.isoformat()
     yours = {e["code"]: e["yours"] for e in res["events"] if e.get("yours")}
@@ -197,7 +284,15 @@ def test_calendar_lists_yours_first_and_counts_the_rest(client, ctx, engine):
     # 1234 has no close (no market cap): counted under others with its name, never listed as one of the largest
     assert "1234" not in {e.get("code") for e in res["events"]}
     assert res["others"] == [{"kind": "除權息", "count": 1, "examples": ["1234"]}]
-    assert "市值前 100 名" in res["rules"]
+    assert "市值前 100 名" in res["rules"] and "你持有或在觀察清單裡的（yours）" in res["rules"]
+    # any other question (owner 2026-11-27: 「如果沒有提到跟倉位相關的東西回答就不要提到倉位」): the market's list —
+    # nothing is marked, and what the user holds is not listed one by one because they hold it
+    out, res = run(ctx, "get_market_calendar", date_from="", date_to="")
+    assert not out.is_error and not [e for e in res["events"] if "yours" in e]
+    assert "yours" not in res["rules"] and "你持有" not in res["rules"]
+    held = {e.get("code") for e in res["events"]} & {"2330", "2454"}
+    plain = [x for x in res["others"] if x["kind"] == "除權息"]
+    assert len(held) + (plain[0]["count"] if plain else 0) == 3  # each of the three is listed by rank or counted
 
 
 def test_calendar_of_one_kind_lists_every_company_with_the_amount(client, ctx, engine):
@@ -304,3 +399,61 @@ def test_the_prompt_organises_instead_of_refusing():
     assert "## 接著問" in CHAT_SYSTEM and "suggest_follow_ups" in CHAT_SYSTEM
     for name in ("get_market_calendar", "get_market_overview", "get_market_report", "get_watchlist", "get_performance"):
         assert name in CHAT_SYSTEM and name in TOOLS_BY_NAME
+
+
+def test_the_prompt_says_what_it_found_and_leaves_the_users_positions_out_unless_asked():
+    """Owner 2026-11-27, on an answer to 「下禮拜可以買什麼？」 that opened 「漲跌沒辦法事先知道，我也不替你挑」 and led
+    with 「你的持股」: no line about what the assistant cannot know or will not do, and the user's own positions only
+    when the question is about them (「不然會導致想要得到的答案有些偏差」)."""
+    from forliosa.ai.prompts import CHAT_SYSTEM_TW, EDITOR_SYSTEM, is_lookahead
+
+    assert is_lookahead("下禮拜可以買什麼？")
+    for prompt in (CHAT_SYSTEM, CHAT_SYSTEM_TW):
+        # the 2026-11-26 half-sentence is gone; the first sentence is the conclusion
+        assert "只在第一句用半句話說漲跌沒辦法事先知道" not in prompt
+        assert "第一句照樣直接寫結論：不寫「漲跌沒辦法事先知道」" in prompt and "「我也不替你挑」" in prompt
+        # positions: neither looked up nor written unless the question brings them up
+        assert "不查也不寫他的倉位" in prompt
+        assert "不呼叫 get_holdings、get_position、get_portfolio_summary、get_watchlist" in prompt
+        assert "get_market_report（kind latest）、get_holdings、get_watchlist" not in prompt  # no longer every time
+        assert "再加 get_holdings、get_watchlist，get_market_calendar 的 yours 填 true" in prompt
+        assert "get_market_calendar 的 yours 這時不填" in prompt and "他持有或觀察的才會放最前面" in prompt
+        assert "使用者持有或觀察的放最前面。" not in prompt
+        assert "最前面多一段「你的持股與觀察清單」，沒問到就沒有這一段" in prompt
+        assert "使用者持有的優先，其次是" not in prompt and "只問這一檔能不能買、好不好時不寫" in prompt
+        assert "才寫他持股的集中度" in prompt
+    assert "「漲跌沒辦法事先知道」「我也不替你挑」" in EDITOR_SYSTEM
+
+
+def test_the_prompt_reads_the_trend_and_names_directions_worth_watching():
+    """Owner 2026-11-27: 「改為分析趨勢並給予建議」, then 「可以推薦可關注方向 類股等，也可以若是個股也可以引用機構
+    目標價 評級等」 — the answer states the trend from ``get_market_trend``, names up to three directions or sectors
+    with the facts they stand on, and may quote named institutions' ratings and targets for the stocks it names. Still
+    no forecast of its own, no target of its own, no order to buy or sell."""
+    from forliosa.ai.prompts import CHAT_SYSTEM_TW, EDITOR_SYSTEM
+
+    assert "get_market_trend" in TOOLS_BY_NAME
+    for prompt in (CHAT_SYSTEM, CHAT_SYSTEM_TW):
+        assert "這些一次一起查：get_market_trend、get_market_calendar" in prompt
+        assert "照下面「明天看點與市場整理」寫現在的趨勢（get_market_trend）" in prompt  # 現在能不能進場
+        assert "可以關注的方向（產品負責人 2026-11-27）：直接寫「可以關注」哪幾個方向或類股，最多 3 個" in prompt
+        assert "依據只能是查得到的事實" in prompt and "只有單日漲跌、沒有其他依據的" in prompt
+        assert "依序是「現在的趨勢」「可以關注的方向」" in prompt
+        assert "整份回答最多挑 3 檔呼叫 get_analyst_views" in prompt and "不另外搜尋，也不說沒有" in prompt
+        # the ratings tool's own note sends the model searching (its normal use): not in this kind of answer
+        assert "它的 note 叫你改用 tw_news_search 或 web_search 找" in prompt and "在這種回答裡都不照做" in prompt
+        # 現在能不能進場 opens with the trend, not with 「通常看哪幾項」; four headings when the holdings are asked for
+        assert "問現在能不能進場時例外：照下面那一點，第一句寫現在趨勢的結論" in prompt
+        assert "（最多 3 個；「明天看點與市場整理」問到持股時是 4 個）" in prompt
+        # the words that were banned on 2026-11-26 are no longer: naming a direction is the point now
+        assert "「值得關注」「建議留意」「可以留意」這類推薦的字" not in prompt
+        # what stays out: its own forecast, rating, target, orders and price levels
+        assert "你自己對漲跌的預測" in prompt and "你自己的評等、目標價與合理價" in prompt
+        assert "買賣或加減碼的指令與價位" in prompt and "「可以關注」是請使用者去看這個方向，不是叫他買" in prompt
+        assert "不下買進或賣出的指令，也不給你自己的目標價" in prompt
+        assert "均線只說收盤在之上或之下，不寫支撐、壓力" in prompt
+        assert "notes 說還沒有的期間不寫，也不自己推算" in prompt
+        assert "問某一檔該不該買賣時不寫" in prompt
+    # the editor deletes advice to act, not the directions
+    assert "寫「可以關注」「先觀察」某個方向或類股的句子是回答的內容，照留" in EDITOR_SYSTEM
+    assert "買賣、加減碼的指令與價位照刪" in EDITOR_SYSTEM

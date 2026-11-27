@@ -1051,22 +1051,11 @@ def _unusual(p: Pack, score: Decimal | float, what: str, *facts: dict[str, Any] 
 
 
 def _no_session(p: Pack, upto: date) -> frozenset[date]:
-    """The weekdays up to ``upto`` on which the market did not open although the calendar has them (a typhoon day:
-    the calendar holds the year's scheduled closures only). Such a day has nothing at all in the archive — no index
-    close, no official turnover row, no listed close — while listed closes of an earlier day are there (the archive
-    was collecting). It is no session, so it is no hole in a run of sessions; a day with any of the three is one, and
-    a missing index close on it still breaks the run."""
+    """The weekdays up to ``upto`` on which the market did not open although the calendar has them
+    (:func:`marketcalc.no_session_days`), kept per pack."""
     if upto not in p.closed:
-        since = upto - timedelta(days=SESSION_LOOKBACK)
-        listed = set(mc.session_dates(p.db, "TWSE", upto, p.cutoff, p.policy, limit=SESSION_LOOKBACK))
-        index = set(_taiex_closes(p, upto, since=since, limit=SESSION_LOOKBACK))
-        turnover = set(p.db.scalars(select(MarketTurnoverDaily.date).where(
-            MarketTurnoverDaily.market == "TWSE", MarketTurnoverDaily.date >= since,
-            MarketTurnoverDaily.date <= upto)))
-        first = min(listed, default=None)
-        known = listed | index | turnover
-        p.closed[upto] = frozenset(d for d in tw_trading_days(since, upto)
-                                   if first is not None and d > first and d not in known)
+        p.closed[upto] = mc.no_session_days(p.db, upto, p.cutoff, p.policy, SESSION_LOOKBACK,
+                                            turnover=p.ok("twse-openapi/turnover"))
     return p.closed[upto]
 
 
@@ -1437,16 +1426,8 @@ def _taiex_series(p: Pack, upto: date, since: date | None = None,
 def _taiex_closes(p: Pack, upto: date, since: date | None = None,
                   limit: int = 60) -> dict[date, tuple[Decimal, str]]:
     """:func:`_taiex_series` with each close's dataset (day -> (close, dataset)), the newest ``limit`` days."""
-    pts = {x.day: (x.close, x.dataset) for x in mc.index_points(p.db, mc.TAIEX, p.cutoff, upto=upto, since=since,
-                                                                 policy=p.policy, limit=limit)}
-    stmt = select(MarketTurnoverDaily).where(MarketTurnoverDaily.market == "TWSE", MarketTurnoverDaily.date <= upto)
-    if since:
-        stmt = stmt.where(MarketTurnoverDaily.date >= since)
-    if p.ok("twse-openapi/turnover"):
-        for r in p.db.scalars(stmt):
-            if r.taiex and r.date not in pts and usable("twse-openapi/turnover", r.date, p.cutoff):
-                pts[r.date] = (r.taiex, "twse-openapi/turnover")
-    return {d: pts[d] for d in sorted(pts)[-limit:]}
+    return mc.taiex_closes(p.db, p.cutoff, upto, since=since, policy=p.policy, limit=limit,
+                           turnover=p.ok("twse-openapi/turnover"))
 
 
 def _latest_day(p: Pack, market: str, upto: date) -> mc.Day | None:

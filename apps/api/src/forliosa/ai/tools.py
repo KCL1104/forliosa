@@ -1298,6 +1298,12 @@ def get_market_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
     return market_tools.market_overview(ctx, args)
 
 
+def get_market_trend(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.ai import market_tools
+
+    return market_tools.market_trend(ctx, args)
+
+
 def get_market_report(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.ai import market_tools
 
@@ -1545,10 +1551,12 @@ TOOLS: list[ToolSpec] = sorted([
     ToolSpec("get_market_calendar",
              "Market-wide scheduled events of a date range (Taipei dates): ex-dividend dates, investor conferences "
              "(法說會), shareholder meetings, disposition (處置) periods, TAIEX futures/options settlement days, macro "
-             "releases (US and Taiwan), US earnings of a hand-kept list of large companies and NYSE closures. Events "
-             "of the user's own holdings and watchlist come first, marked yours (持有/觀察); market-wide rows and the "
-             "100 largest companies by market cap are listed; the rest are counted by kind in others, with a few of "
-             "the largest names. date_from and date_to are YYYY-MM-DD, \"\" for the next Taiwan trading day; at most "
+             "releases (US and Taiwan), US earnings of a hand-kept list of large companies and NYSE closures. "
+             "Market-wide rows and the 100 largest companies by market cap are listed; the rest are counted by kind "
+             "in others, with a few of the largest names. yours true — only when the user's question is about their "
+             "own holdings or watchlist (我的持股下週要注意什麼) — puts the events of their holdings and watchlist "
+             "first, marked yours (持有/觀察); leave it out for a question about the market, a sector or a stock. "
+             "date_from and date_to are YYYY-MM-DD, \"\" for the next Taiwan trading day; at most "
              "14 days. kind narrows to one kind and then lists every company of it (largest first, up to 80): use it "
              "when the question is about one kind (這週有哪些法說會、最近哪些股票除息). Ex-dividend rows carry amount "
              "(the official cash dividend per share, or 金額還沒公告). Call this for 明天/這週/下週 questions (what "
@@ -1557,7 +1565,9 @@ TOOLS: list[ToolSpec] = sorted([
               "date_to": {"type": "string", "description": "YYYY-MM-DD, or \"\" for the same day as date_from"},
               "kind": {"type": "string", "enum": ["", "除權息", "法說會", "股東會", "處置股", "注意股", "結算日",
                                                   "總經數據", "美股財報", "美股休市"],
-                       "description": "One kind of event, or \"\" for every kind"}},
+                       "description": "One kind of event, or \"\" for every kind"},
+              "yours": {"type": "boolean",
+                        "description": "true only when the question is about the user's own holdings or watchlist"}},
              ("date_from", "date_to"), get_market_calendar,
              lambda a: f"查看{a.get('kind') or ''}行事曆", blank_ok=("date_from", "date_to"), strict=False),
     ToolSpec("get_market_overview",
@@ -1567,6 +1577,18 @@ TOOLS: list[ToolSpec] = sorted([
              "down (largest value first). Every list is a stated rule, not a pick. Call this for how the market did, "
              "which sectors or stocks moved most, and for 明天/這週 questions (with get_market_calendar).",
              {}, (), get_market_overview, lambda a: "查看市場概況", strict=False),
+    ToolSpec("get_market_trend",
+             "The Taiwan market's trend over the last sessions, from the official archive only: the TAIEX (close, its "
+             "move over the last 5 / 10 / 20 sessions, on which side of its 5- / 10- / 20-session averages it "
+             "closed, a run of rises or falls), the OTC index and the size indices (臺灣50, 中型100, 小型股300) over "
+             "the same sessions, the official listed turnover against its 5-session average, and the listed sectors "
+             "ranked by their move over the last 5 sessions: the 6 strongest and the 6 weakest, each with its 1-day "
+             "and multi-session moves, the gap to the TAIEX, whether it also ranks so over the longer period and "
+             "whether one stock dominates it; the strongest sectors come with their 3 largest stocks by market cap "
+             "(a stated rule, not a pick). A period the archive does not reach yet is left out and named in notes: "
+             "never work it out yourself. Call this for 趨勢, 盤勢, 哪些類股強或弱, 可以關注什麼方向或類股, 下週可以"
+             "買什麼, 現在能不能進場, together with get_market_overview and get_market_calendar.",
+             {}, (), get_market_trend, lambda a: "查看市場趨勢", strict=False),
     ToolSpec("get_market_report",
              "The newest published Forliosa market report (shared by everyone; kind: latest, premarket = 盤前重點 "
              "07:30, close = 盤後重點 16:00, weekly = 市場週報 Sunday). Each news article the report cites comes back "
