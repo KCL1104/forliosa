@@ -103,8 +103,12 @@ export interface AiChart {
   /** 橫軸：日期 YYYY-MM-DD、月份 YYYY-MM、季別 2026Q3、交易日（一天一根，日期當類別）、類別（bars） */
   x: "date" | "month" | "quarter" | "day" | "category"
   range: string | null
-  /** `hidden` 的線不畫，只出現在讀數（提示框、螢幕報讀） */
-  series: { name: string; symbol: string | null; points: { t: string; v: number }[]; hidden?: boolean }[]
+  /**
+   * `hidden` 的線不畫，只出現在讀數（提示框、螢幕報讀）。
+   * `role: "average"`（市場報告的趨勢圖，2026-11-27）：這一條是主線的均線（5 日線、10 日線）——主線墨色，
+   * 均線照順序是赭、藍筆、鉛筆灰的細線，沒有線尾的圓點與標籤。
+   */
+  series: { name: string; symbol: string | null; points: { t: string; v: number }[]; hidden?: boolean; role?: "average" }[]
   /** bars：每一條的值（和 unit 同一個尺度）、印出來的字、顏色（漲跌色／墨色／鉛筆灰）、名稱下面一行、站內連結 */
   bars?: AiChartBar[] | null
   /** 圖下面一行（點數貢獻的「官方漲跌 −2,635.04 點」） */

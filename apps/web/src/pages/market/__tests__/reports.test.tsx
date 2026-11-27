@@ -114,7 +114,7 @@ describe("市場頁的分頁「行情｜報告」", () => {
 })
 
 describe("報告頁", () => {
-  it("由上到下：免責一行與資料截至、名稱、一句話、重點、數字欄、各段、行事曆、來源、完整免責、模型行；畫面上沒有 F001／X003", async () => {
+  it("由上到下：免責一行與資料截至、名稱、一句話、重點、趨勢圖、數字欄、各段、行事曆、來源、完整免責、模型行；畫面上沒有 F001／X003", async () => {
     desktop = true
     mount({ reports: "public" })
     renderApp("/market?tab=reports&kind=close")
@@ -125,8 +125,10 @@ describe("報告頁", () => {
       "資料截至",
       "已更正（",
       "盤後重點 11/11（三）",
-      "上市普通股上漲",
-      "加權指數",
+      "為什麼",
+      "籌碼",
+      "加權指數收盤",
+      "報酬指數",
       "今天發生什麼",
       "類股",
       "權值股與個股",
@@ -165,6 +167,48 @@ describe("報告頁", () => {
     expect(within(article).getAllByRole("link", { name: /台積電（2330）/ })[0]).toHaveAttribute("href", "/stock/2330.TW")
   })
 
+  it("重點是一列一格的欄位：左邊印好的欄位名稱、右邊一段；AI 寫的是 .ai-voice，規則算的不是；下面接趨勢圖，再來才是數字欄", async () => {
+    mount({ reports: "public" })
+    renderApp("/market?tab=reports&kind=close")
+    const article = await report()
+    const brief = article.querySelector<HTMLElement>("[data-report-brief]")!
+    expect(brief.tagName).toBe("DL")
+    expect(brief).toHaveAttribute("aria-label", "重點")
+    expect([...brief.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["為什麼", "誰帶的", "位置", "量", "籌碼"])
+    for (const dt of brief.querySelectorAll("dt")) expect(dt.className).toMatch(/print-label/)
+    const voice = (key: string) => brief.querySelector(`[data-brief="${key}"] dd p`)!.className
+    expect(voice("why")).toMatch(/ai-voice/)
+    expect(voice("position")).not.toMatch(/ai-voice/)
+    expect(voice("volume")).not.toMatch(/ai-voice/)
+    // 每一列的句尾是出處號碼，第一個是 1
+    expect(brief.querySelector("sup a[data-fn-ref]")!.textContent).toBe("1")
+    // 有欄位的重點取代 3 個重點
+    expect(within(article).queryByRole("list", { name: "重點" })).toBeNull()
+    // 趨勢圖：加權指數與 5 日線、10 日線，圖例寫出每條線；全頁只有這一張加權指數的圖
+    const trend = article.querySelector<HTMLElement>("[data-report-trend]")!
+    expect(within(trend).getByText("加權指數收盤")).toBeInTheDocument()
+    expect(within(trend).getByText("5 日線")).toBeInTheDocument()
+    expect(within(trend).getByText("10 日線")).toBeInTheDocument()
+    expect(within(article).getAllByText("加權指數收盤")).toHaveLength(1)
+    const numbers = within(article).getByRole("list", { name: "數字" })
+    expect(brief.compareDocumentPosition(trend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(trend.compareDocumentPosition(numbers) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("盤前的欄位是隔夜、為什麼、排定、位置、籌碼；「昨日台股全貌」在手機上收著；週報照舊是一點一段的重點", async () => {
+    mount({ reports: "public" })
+    renderApp("/market?tab=reports&kind=premarket")
+    const article = await report()
+    expect([...article.querySelectorAll("[data-report-brief] dt")].map((dt) => dt.textContent)).toEqual(["隔夜", "為什麼", "排定", "位置", "籌碼"])
+    expect(within(article).getByRole("button", { name: /^昨日台股全貌/ })).toHaveAttribute("aria-expanded", "false")
+    cleanup()
+    renderApp("/market?tab=reports&kind=weekly")
+    const weekly = (await screen.findByRole("heading", { level: 2, name: /^市場週報 / }, T)).closest("article")!
+    expect(weekly.querySelector("[data-report-brief]")).toBeNull()
+    expect(weekly.querySelector("[data-report-trend]")).toBeNull()
+    expect(within(weekly).getByRole("list", { name: "重點" }).querySelectorAll("li").length).toBeGreaterThanOrEqual(3)
+  })
+
   it("手機：預設收合的段，標題是按鈕（aria-expanded）；桌面一律展開、沒有收合鈕", async () => {
     mount({ reports: "public" })
     renderApp("/market?tab=reports&kind=close")
@@ -190,6 +234,9 @@ describe("報告頁", () => {
     expect(within(article).queryByText("這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。")).toBeNull()
     // 規則寫的標題不重複上面的名稱與日期
     expect(article.querySelector("[data-report-title]")!.textContent).toMatch(/^美股 11\/11 收盤與今日行事曆$/)
+    // 只有資料的版本：重點只有規則算的幾列，沒有 AI 的字
+    expect([...article.querySelectorAll("[data-report-brief] dt")].map((dt) => dt.textContent)).toEqual(["隔夜", "排定", "位置", "籌碼"])
+    expect(article.querySelector("[data-report-brief] .ai-voice")).toBeNull()
   })
 
   it("更早的報告：一份一列，整列連到那一份；報告頁的分頁列選在「報告」", async () => {
@@ -251,7 +298,8 @@ describe("mock 的報告", () => {
     expect(pub.sections.some((s) => s.key === "sectors")).toBe(false)
     expect(JSON.stringify(pub)).not.toMatch(/"refs"|"validation"/)
     // 每一句都有出處；號碼從 1 開始、和註腳對得起來
-    const cites = new Set(pub.highlights.flatMap((p) => p.sentences.flatMap((s) => s.cites)))
+    const cites = new Set(pub.brief!.flatMap((row) => row.paragraph.sentences.flatMap((s) => s.cites)))
+    expect(cites.size).toBeGreaterThan(0)
     expect([...cites].every((n) => pub.footnotes.some((f) => f.n === n))).toBe(true)
   })
 })

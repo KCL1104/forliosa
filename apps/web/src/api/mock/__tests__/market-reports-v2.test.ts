@@ -23,7 +23,7 @@ const num = (s: string) => Number(s.replace(/[^\d.−-]/g, "").replace("−", "-
 describe("盤前重點", () => {
   const r = buildMockReport("premarket", "2026-11-12")
 
-  it("段落：隔夜要聞、今天市場在看什麼、昨日台股全貌（資料段）、昨日籌碼（手機收合）、今日圖", () => {
+  it("段落：隔夜要聞、今天市場在看什麼、昨日台股全貌（資料段，手機收合）、昨日籌碼（手機收合）、今日圖", () => {
     expect(layout(r)).toEqual([
       ["overnight", ["text", "G6"]],
       ["watch", ["items"]],
@@ -34,7 +34,8 @@ describe("盤前重點", () => {
     const yesterday = r.sections.find((s) => s.key === "yesterday")!
     expect(yesterday.title).toBe("昨日台股全貌（11/11）")
     expect(yesterday.origin).toBe("data")
-    expect(yesterday.collapsed_mobile).toBe(false)
+    // 2026-11-27：前一天的盤後重點已經給過這幾張圖，盤前在手機上先收著
+    expect(yesterday.collapsed_mobile).toBe(true)
     const chips = r.sections.find((s) => s.key === "chips")!
     expect(chips.title).toBe("昨日籌碼（晚間公布）")
     expect(chips.collapsed_mobile).toBe(true)
@@ -201,5 +202,84 @@ describe("A1：新圖的說明不寫評價字", () => {
   it("融資表沒有漲跌幅欄", () => {
     const r = buildMockReport("premarket", "2026-11-12")
     for (const id of ["T10_up", "T10_down"]) expect(tableOf(r, id).columns.map((c) => c.key)).toEqual(["stock", "balance", "change"])
+  })
+})
+
+describe("重點的欄位與趨勢圖（2026-11-27）", () => {
+  const close = buildMockReport("close", "2026-11-11", { tables: true })
+  const pre = buildMockReport("premarket", "2026-11-12")
+  const rows = (r: MarketReport) => (r.brief ?? []).map((row) => [row.key, row.label, row.origin])
+  const text = (r: MarketReport, key: string) => r.brief!.find((row) => row.key === key)!.paragraph.sentences.map((x) => x.text).join("")
+
+  it("盤後：為什麼、誰帶的、位置、量、籌碼；位置與量是規則算的", () => {
+    expect(rows(close)).toEqual([
+      ["why", "為什麼", "ai"], ["drivers", "誰帶的", "ai"], ["position", "位置", "rules"], ["volume", "量", "rules"], ["chips", "籌碼", "ai"],
+    ])
+    expect(text(close, "position")).toMatch(/收在 5 日線(與 10 日線)?之[上下]/)
+    expect(text(close, "volume")).toMatch(/^上市 [\d,]+ 億元，(比前一日[多少] [\d,]+ 億元|和前一日相同)，是 5 日均量的 \d+%。$/)
+    // 點數貢獻是估算，句子裡要標出來
+    expect(text(close, "drivers")).toMatch(/類約 [+−][\d,]+ 點、.+類約 [+−][\d,]+ 點（估算）。$/)
+  })
+
+  it("盤前：隔夜、為什麼、排定、位置、籌碼；位置寫前一個交易日收在哪", () => {
+    expect(rows(pre).map(([, label]) => label)).toEqual(["隔夜", "為什麼", "排定", "位置", "籌碼"])
+    expect(text(pre, "position")).toMatch(/^加權指數 11\/11 收 [\d,.]+ 點（[▲▼][\d.]+%），在 5 日線/)
+  })
+
+  it("資料版只有規則算的幾列：沒有為什麼，盤後也沒有籌碼", () => {
+    const data = buildMockReport("close", "2026-11-11", { ai: false, edition: "data" })
+    expect(rows(data)).toEqual([["drivers", "誰帶的", "rules"], ["position", "位置", "rules"], ["volume", "量", "rules"]])
+    expect(text(data, "volume")).toMatch(/^上市約 [\d,]+ 億元（估算）/)
+    expect(rows(buildMockReport("premarket", "2026-11-12", { ai: false, edition: "data" })).map(([key]) => key)).toEqual(["overnight", "scheduled", "position", "chips"])
+  })
+
+  it("重點的每一句都有出處，號碼從 1 開始、照出現的順序；3 個重點不在頁面上，所以不編號", () => {
+    const cites = close.brief!.flatMap((row) => row.paragraph.sentences.flatMap((x) => x.cites))
+    expect(close.brief!.every((row) => row.paragraph.sentences.every((x) => x.cites.length > 0))).toBe(true)
+    expect(cites[0]).toBe(1)
+    expect(cites.every((n) => close.footnotes.some((f) => f.n === n))).toBe(true)
+    expect(close.highlights.every((p) => p.sentences.every((x) => x.cites.length === 0))).toBe(true)
+  })
+
+  it("趨勢圖：加權指數是一條連續的線，最後一點是數字欄的收盤；5 日線、10 日線是收盤的平均，各自從第 5、10 天開始", () => {
+    const trend = close.trend!
+    expect(trend.series.map((x) => [x.name, x.role ?? null])).toEqual([["加權指數", null], ["5 日線", "average"], ["10 日線", "average"]])
+    const [index, ma5, ma10] = trend.series.map((x) => x.points) as [AiChart["series"][number]["points"], AiChart["series"][number]["points"], AiChart["series"][number]["points"]]
+    expect(index[index.length - 1]!.v).toBe(num(close.numbers.find((n) => n.key === "taiex")!.value))
+    expect(ma5).toHaveLength(index.length - 4)
+    expect(ma10).toHaveLength(index.length - 9)
+    expect(ma5[0]!.t).toBe(index[4]!.t)
+    const mean = (n: number) => index.slice(-n).reduce((a, q) => a + q.v, 0) / n
+    expect(ma5[ma5.length - 1]!.v).toBeCloseTo(mean(5), 1)
+    expect(ma10[ma10.length - 1]!.v).toBeCloseTo(mean(10), 1)
+    // 「位置」那一列和圖是同一份數字
+    const last = index[index.length - 1]!.v
+    const side = (avg: number) => (last >= avg ? "之上" : "之下")
+    expect(text(close, "position")).toContain(side(mean(5)) === side(mean(10)) ? `收在 5 日線與 10 日線${side(mean(5))}` : `收在 5 日線${side(mean(5))}、10 日線${side(mean(10))}`)
+    // 相鄰兩天的漲跌不會亂跳（每天都在 ±2% 以內）
+    for (let i = 1; i < index.length; i++) expect(Math.abs(index[i]!.v / index[i - 1]!.v - 1)).toBeLessThan(0.02)
+  })
+
+  it("加權指數的圖只出現一次：在重點下面，不在「今天發生什麼」；盤前的趨勢圖畫到前一個交易日", () => {
+    expect(allIds(close)).not.toContain("G1")
+    expect(layout(close).find(([k]) => k === "what_happened")![1]).toEqual(["text"])
+    const points = pre.trend!.series[0]!.points
+    expect(points[points.length - 1]!.t).toBe("2026-11-11")
+    // 資料版的「今天發生什麼」原本只有那張圖：圖移走以後沒有這一段
+    expect(layout(buildMockReport("close", "2026-11-11", { ai: false, edition: "data" })).map(([k]) => k)).not.toContain("what_happened")
+  })
+
+  it("官方加權指數沒進來：沒有趨勢圖、沒有位置那一列；存檔第一天的盤前也沒有圖", () => {
+    const missing = buildMockReport("close", "2026-11-04", { indexMissing: true })
+    expect(missing.trend ?? null).toBeNull()
+    expect(rows(missing).map(([key]) => key)).not.toContain("position")
+    expect(buildMockReport("premarket", "2026-10-26").trend ?? null).toBeNull()
+  })
+
+  it("週報照舊是 3–5 個重點，沒有欄位與趨勢圖", () => {
+    const weekly = buildMockReport("weekly", "2026-11-15")
+    expect(weekly.brief ?? null).toBeNull()
+    expect(weekly.trend ?? null).toBeNull()
+    expect(weekly.highlights.length).toBeGreaterThanOrEqual(3)
   })
 })

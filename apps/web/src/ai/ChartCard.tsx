@@ -31,10 +31,25 @@ const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", 
  * - 我的報酬率：墨色實線；基準：鉛筆灰虛線（和績效頁同一套）。
  * - 幾檔互相比較：分類色 1～5，照使用者說的順序。
  */
-function seriesStyle(chart: AiChart, i: number): { color: string; dash?: string } {
-  if (visibleSeries(chart).length === 1) return { color: "var(--chart-mine)" }
+function seriesStyle(chart: AiChart, i: number): { color: string; dash?: string; average?: boolean } {
+  const shown = visibleSeries(chart)
+  if (shown.length === 1) return { color: "var(--chart-mine)" }
+  if (hasAverages(chart)) {
+    // 指數與它的均線：主線墨色；均線照順序是赭、藍筆、鉛筆灰（和個股走勢圖的均線同一組顏色）
+    if (shown[i]?.role !== "average") return { color: "var(--chart-mine)" }
+    const nth = shown.slice(0, i).filter((s) => s.role === "average").length
+    return { color: AVERAGE_COLORS[nth % AVERAGE_COLORS.length]!, average: true }
+  }
   if (chart.kind === "performance") return i === 0 ? { color: "var(--chart-mine)" } : { color: "var(--chart-bench)", dash: "5 4" }
   return { color: SERIES_COLORS[i % SERIES_COLORS.length]! }
+}
+
+/** 均線的顏色：短的到長的 */
+const AVERAGE_COLORS = ["var(--chart-ochre)", "var(--chart-blue)", "var(--chart-bench)"]
+
+/** 這張圖是一條主線加它的均線（市場報告的趨勢圖）：圖例說得出每條線，所以不放線尾的標籤 */
+function hasAverages(chart: AiChart): boolean {
+  return visibleSeries(chart).some((s) => s.role === "average")
 }
 
 const HEIGHT = 188
@@ -98,7 +113,7 @@ export function ChartCard({ chart: given }: { chart: AiChart }) {
     const step = ticks.length > 1 ? ticks[1]! - ticks[0]! : 1
     const labels = ticks.map((v) => tickLabel(chart, v, step))
     const left = Math.max(...labels.map(textWidth)) + 10
-    const ends = form === "line" && multi ? shown.map(endLabel) : []
+    const ends = form === "line" && multi && !hasAverages(chart) ? shown.map(endLabel) : []
     const right = ends.length ? Math.max(...ends.map(textWidth)) + 14 : 10
     const plotW = Math.max(40, width - left - right)
     const plotH = HEIGHT - TOP - BOTTOM
@@ -315,19 +330,25 @@ export function ChartCard({ chart: given }: { chart: AiChart }) {
                   </g>
                 )
               })
-            : shown.map((s, i) => {
-                const { color, dash } = seriesStyle(chart, i)
-                const d = s.points.map((p, k) => `${k === 0 ? "M" : "L"}${x(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`).join("")
-                const last = lastOf(s)
-                return (
-                  <g key={s.name}>
-                    {s.points.length > 1 && <path d={d} fill="none" stroke={color} strokeWidth={2} strokeDasharray={dash} strokeLinejoin="round" strokeLinecap="round" />}
-                    {/* 類別軸的折線（月份、季別）每一期一個點；日期軸只標最後一點 */}
-                    {chart.x !== "date" && s.points.length <= 24 && s.points.map((p) => <circle key={p.t} cx={x(p.t)} cy={y(p.v)} r={2.5} fill={color} />)}
-                    {last && <circle cx={x(last.t)} cy={y(last.v)} r={4} fill={color} stroke="var(--background)" strokeWidth={2} />}
-                  </g>
-                )
-              })}
+            : // 均線先畫、主線後畫：主線蓋在均線上面
+              [...shown.entries()]
+                .sort(([, a], [, b]) => Number(a.role !== "average") - Number(b.role !== "average"))
+                .map(([i, s]) => {
+                  const { color, dash, average } = seriesStyle(chart, i)
+                  const d = s.points.map((p, k) => `${k === 0 ? "M" : "L"}${x(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`).join("")
+                  const last = lastOf(s)
+                  return (
+                    <g key={s.name} data-series={average ? "average" : undefined}>
+                      {s.points.length > 1 && (
+                        <path d={d} fill="none" stroke={color} strokeWidth={average ? 1.5 : 2} strokeDasharray={dash} strokeLinejoin="round" strokeLinecap="round" />
+                      )}
+                      {/* 類別軸的折線（月份、季別）每一期一個點；日期軸只標最後一點 */}
+                      {chart.x !== "date" && s.points.length <= 24 && s.points.map((p) => <circle key={p.t} cx={x(p.t)} cy={y(p.v)} r={2.5} fill={color} />)}
+                      {/* 均線不標最後一點：圓點只留給主線 */}
+                      {last && !average && <circle cx={x(last.t)} cy={y(last.v)} r={4} fill={color} stroke="var(--background)" strokeWidth={2} />}
+                    </g>
+                  )
+                })}
 
           {model.ends.map((label, i) => {
             const s = shown[i]!

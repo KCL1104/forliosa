@@ -2505,6 +2505,19 @@ export interface ReportSection {
   /** 只在管理員檢視：這一段被拿掉的原因（一般人看不到這一段） */
   dropped?: { reasons: string[] }
 }
+/**
+ * 重點的一列（2026-11-27）：每天同一個位置的欄位，一欄一段。
+ * 盤後：為什麼（why）、誰帶的（drivers）、位置（position）、量（volume）、籌碼（chips）；
+ * 盤前：隔夜（overnight）、為什麼、排定（scheduled）、位置、籌碼。沒有東西可寫的欄位整列不給。
+ */
+export interface ReportBriefRow {
+  key: string
+  /** 伺服器的字（「為什麼」「位置」） */
+  label: string
+  /** ai：模型依資料與報導寫的；rules：伺服器照規則算出來的（均線、成交金額的比較） */
+  origin: "ai" | "rules"
+  paragraph: ReportParagraph
+}
 export interface ReportFootnote {
   n: number
   kind: "data" | "web" | "calendar" | "filing" | "research"
@@ -2582,6 +2595,10 @@ export interface MarketReport {
   title_origin: "ai" | "rules"
   highlights: ReportParagraph[]
   highlights_origin: "ai" | "rules"
+  /** 有欄位名稱的重點（2026-11-27；有它時頁面不放 `highlights`）。舊的版本與週報沒有 */
+  brief?: ReportBriefRow[] | null
+  /** 重點下面的趨勢圖：加權指數的收盤與均線（存檔夠長才有那一條均線）。沒有指數時不給 */
+  trend?: AiChart | null
   numbers: ReportNumberItem[]
   sections: ReportSection[]
   calendar: ReportCalendar | null
